@@ -51,6 +51,12 @@ end
 --- in Python type syntax that's always an argument boundary — otherwise any
 --- whitespace. Only breaks in the back half of the line; a hard cut wastes
 --- less vertical space than honoring a lone early break point.
+---
+--- NOTE: if ", " stops being a good boundary (e.g. annotations containing
+--- Literal["a, b"] strings, or future non-Python languages), switch to real
+--- syntax-aware breaks: vim.treesitter.get_string_parser(text, lang), then
+--- break at the subscript/argument node boundary nearest the limit. Same
+--- results for well-behaved annotations, but immune to commas inside strings.
 ---@param text string annotation text (assumed single-width chars)
 ---@param limit integer display cells available on this line
 ---@return integer
