@@ -94,6 +94,16 @@ function M.walk(roots, fn)
   end
 end
 
+--- Parent of a node, resolved through its dotted path id (Python identifiers
+--- cannot contain dots, so splitting on "." is unambiguous).
+---@param roots typescope.Node[]
+---@param id string
+---@return typescope.Node?
+function M.parent(roots, id)
+  local parent_id = id:match("^(.*)%.[^.]+$")
+  return parent_id and M.find(roots, parent_id) or nil
+end
+
 --- Find a node by id in a forest.
 ---@param roots typescope.Node[]
 ---@param id string

@@ -14,7 +14,11 @@
 ---@field anchor "signature"|"cursor"
 
 ---@class typescope.KeymapConfig
----@field expand string
+---@field expand string toggle node under cursor
+---@field expand_node string expand node under cursor (no-op on leaves)
+---@field collapse_node string collapse node, or jump to + collapse parent
+---@field expand_all string
+---@field collapse_all string
 ---@field toggle_examples string
 ---@field llm_generate string
 ---@field recurse string
@@ -57,6 +61,10 @@ local defaults = {
   highlights = {},
   keymaps = {
     expand = "<CR>",
+    expand_node = "l",
+    collapse_node = "h",
+    expand_all = "L",
+    collapse_all = "H",
     toggle_examples = "e",
     llm_generate = "E",
     recurse = "r",
@@ -124,7 +132,18 @@ local function validate(cfg)
 
   check("highlights", cfg.highlights, "table")
   check("keymaps", cfg.keymaps, "table")
-  for _, key in ipairs({ "expand", "toggle_examples", "llm_generate", "recurse", "close", "help" }) do
+  for _, key in ipairs({
+    "expand",
+    "expand_node",
+    "collapse_node",
+    "expand_all",
+    "collapse_all",
+    "toggle_examples",
+    "llm_generate",
+    "recurse",
+    "close",
+    "help",
+  }) do
     check("keymaps." .. key, cfg.keymaps[key], "string")
   end
 end

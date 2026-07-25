@@ -228,7 +228,7 @@ local function draw()
     lines = result.lines,
     highlights = result.highlights,
     title = not borderless and (" typescope · %s · %s "):format(fixture.name, style_name) or nil,
-    footer = not borderless and " <Tab> fixture · s style · ? keys · q close " or nil,
+    footer = not borderless and " ? help " or nil,
     relative = "editor",
     row = sig_row + (borderless and 2 or 3), -- sig height + border rows
     col = col,
@@ -247,6 +247,10 @@ local function draw()
     width = width,
     max_height = cfg.ui.max_height,
     on_close = close_all,
+    extra_help = {
+      { "<Tab>/<S-Tab>", "cycle fixture (spike)" },
+      { "s", "cycle style (spike)" },
+    },
   })
 
   local function map(lhs, fn)

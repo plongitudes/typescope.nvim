@@ -17,16 +17,21 @@ local M = {}
 ---@field max_height integer
 ---@field on_close fun()
 
-local function help_lines(width)
+---@param width integer
+---@param extra { [1]: string, [2]: string }[]? host-provided rows (e.g. spike harness keys)
+local function help_lines(width, extra)
   local km = config.get().keymaps
   local rows = {
     { km.expand, "expand / collapse" },
+    { km.collapse_node .. " / " .. km.expand_node, "collapse / expand node" },
+    { km.collapse_all .. " / " .. km.expand_all, "collapse / expand all" },
     { km.toggle_examples, "toggle examples" },
     { km.llm_generate, "llm examples (phase 6)" },
     { km.recurse, "recurse deeper (phase 3)" },
     { km.close .. " / <Esc>", "close" },
     { km.help, "toggle this help" },
   }
+  vim.list_extend(rows, extra or {})
   local lines = { string.rep("·", math.max(4, width)) }
   for _, row in ipairs(rows) do
     table.insert(lines, (" %-11s %s"):format(row[1], row[2]))
@@ -47,6 +52,7 @@ function M.attach(args)
     width = args.width,
     max_height = args.max_height,
     show_help = false,
+    extra_help = args.extra_help,
     result = nil, ---@type typescope.RenderResult
   }
 
@@ -55,7 +61,7 @@ function M.attach(args)
     local lines = vim.list_extend({}, st.result.lines)
     local highlights = st.result.highlights
     if st.show_help then
-      local extra = help_lines(st.width)
+      local extra = help_lines(st.width, st.extra_help)
       highlights = vim.list_extend({}, highlights)
       for i, text in ipairs(extra) do
         table.insert(lines, text)
@@ -102,6 +108,48 @@ function M.attach(args)
       node.state.expanded = not node.state.expanded
       refresh(node.id)
     end
+  end)
+  map(km.expand_node, function()
+    local node = node_under_cursor()
+    if node and model.is_expandable(node) and not node.state.expanded then
+      node.state.expanded = true
+      refresh(node.id)
+    end
+  end)
+  map(km.collapse_node, function()
+    local node = node_under_cursor()
+    if not node then
+      return
+    end
+    if model.is_expandable(node) and node.state.expanded then
+      node.state.expanded = false
+      refresh(node.id)
+    else
+      -- on a leaf or already-collapsed node: jump to the parent and fold it
+      -- (neo-tree convention)
+      local parent = model.parent(st.roots, node.id)
+      if parent then
+        parent.state.expanded = false
+        refresh(parent.id)
+      end
+    end
+  end)
+  map(km.expand_all, function()
+    local node = node_under_cursor()
+    model.walk(st.roots, function(n)
+      if model.is_expandable(n) then
+        n.state.expanded = true
+      end
+    end)
+    refresh(node and node.id)
+  end)
+  map(km.collapse_all, function()
+    local node = node_under_cursor()
+    model.walk(st.roots, function(n)
+      n.state.expanded = false
+    end)
+    -- the cursor's node likely vanished; land on its root ancestor
+    refresh(node and node.id:match("^[^.]+"))
   end)
   map(km.toggle_examples, function()
     st.opts.show_examples = not st.opts.show_examples
