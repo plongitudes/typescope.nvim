@@ -226,7 +226,7 @@ local function draw()
     lines = result.lines,
     highlights = result.highlights,
     title = not borderless and (" typescope · %s · %s "):format(fixture.name, style_name) or nil,
-    footer = not borderless and " <Tab> fixture · s style · e examples · b bg · q close " or nil,
+    footer = not borderless and " <Tab> fixture · s style · e examples · q close " or nil,
     relative = "editor",
     row = sig_row + (borderless and 2 or 3), -- sig height + border rows
     col = col,
@@ -258,14 +258,6 @@ local function draw()
   map("e", function()
     state.show_examples = not state.show_examples
     draw()
-  end)
-  map("b", function()
-    vim.o.background = vim.o.background == "dark" and "light" or "dark"
-    -- most themes (gruvbox included) pick their palette at load time, so a bare
-    -- 'background' toggle only shifts derived UI groups — force a reload
-    if vim.g.colors_name then
-      pcall(vim.cmd.colorscheme, vim.g.colors_name) -- our ColorScheme autocmd re-applies TypeScope* groups
-    end
   end)
   map("q", close_all)
   map("<Esc>", close_all)
