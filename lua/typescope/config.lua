@@ -47,7 +47,7 @@ local defaults = {
     timeout_ms = 8000,
   },
   ui = {
-    style = "unicode", -- "unicode" | "ascii" | "minimal" | "rounded"
+    style = "rounded", -- "unicode" | "ascii" | "minimal" | "rounded"
     animations = true,
     max_width = 60,
     max_height = 20,

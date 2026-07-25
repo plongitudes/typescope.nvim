@@ -72,6 +72,13 @@ function M.hash(node)
   return table.concat(parts)
 end
 
+--- A node can be opened if it has children now, or could lazily resolve some.
+---@param node typescope.Node
+---@return boolean
+function M.is_expandable(node)
+  return #node.children > 0 or (not node.state.loaded and node.source ~= nil)
+end
+
 --- Depth-first visit over a list of root nodes.
 ---@param roots typescope.Node[]
 ---@param fn fun(node: typescope.Node, depth: integer)

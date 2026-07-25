@@ -47,22 +47,29 @@ end
 --- Returns the byte index (1-based, inclusive) of the last character to keep
 --- on the current line. `limit` is the max number of display cells available.
 ---
---- TODO(user): this is the wrap-point heuristic — currently a hard cut at the
---- limit. A smarter version prefers breaking after ", " or an opening bracket
---- so wrapped generics like dict[str, Callable[[Request, Session], ...]] split
---- at readable points. See the spike output to judge what reads best.
+--- Heuristic (Tony's call): a comma followed by a space is the best break —
+--- in Python type syntax that's always an argument boundary — otherwise any
+--- whitespace. Only breaks in the back half of the line; a hard cut wastes
+--- less vertical space than honoring a lone early break point.
 ---@param text string annotation text (assumed single-width chars)
 ---@param limit integer display cells available on this line
 ---@return integer
 local function find_break_point(text, limit)
-  return limit
+  local floor = math.max(1, math.floor(limit / 2))
+  local best_space
+  for i = limit, floor, -1 do
+    local c = text:sub(i, i)
+    if c == "," and text:sub(i + 1, i + 1) == " " then
+      return i -- keep the comma at end of line; caller strips the leading space
+    end
+    if c == " " and not best_space then
+      best_space = math.max(1, i - 1) -- break before the space, no trailing blank
+    end
+  end
+  return best_space or limit
 end
 
----@param node typescope.Node
----@return boolean
-local function is_expandable(node)
-  return #node.children > 0 or (not node.state.loaded and node.source ~= nil)
-end
+local is_expandable = require("typescope.model").is_expandable
 
 ---@param node typescope.Node
 ---@param opts typescope.RenderOpts

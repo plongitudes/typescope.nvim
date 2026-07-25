@@ -8,6 +8,7 @@ local render = require("typescope.render")
 local styles = require("typescope.styles")
 local float = require("typescope.float")
 local config = require("typescope.config")
+local interact = require("typescope.interact")
 
 local M = {}
 
@@ -183,12 +184,13 @@ local function draw()
   local style_name = styles.names[state.style_idx]
   local cfg = config.get()
 
-  local result = render.render(fixture.roots, {
+  local render_opts = {
     style = styles.get(style_name),
     max_width = cfg.ui.max_width,
     show_examples = state.show_examples,
     example_kind = "heuristic",
-  })
+  }
+  local result = render.render(fixture.roots, render_opts)
 
   local sig_line = fixture.signature
   local border = style_borders[style_name] or cfg.ui.border
@@ -226,7 +228,7 @@ local function draw()
     lines = result.lines,
     highlights = result.highlights,
     title = not borderless and (" typescope · %s · %s "):format(fixture.name, style_name) or nil,
-    footer = not borderless and " <Tab> fixture · s style · e examples · q close " or nil,
+    footer = not borderless and " <Tab> fixture · s style · ? keys · q close " or nil,
     relative = "editor",
     row = sig_row + (borderless and 2 or 3), -- sig height + border rows
     col = col,
@@ -236,6 +238,17 @@ local function draw()
     enter = true,
   })
 
+  -- Tree navigation (expand/collapse, examples, help, close) comes from the
+  -- production interact layer; the spike only adds its harness keys on top.
+  state.ctrl = interact.attach({
+    handle = state.ts,
+    roots = fixture.roots,
+    opts = render_opts,
+    width = width,
+    max_height = cfg.ui.max_height,
+    on_close = close_all,
+  })
+
   local function map(lhs, fn)
     vim.keymap.set("n", lhs, function()
       if state then
@@ -243,24 +256,23 @@ local function draw()
       end
     end, { buffer = state.ts.buf, nowait = true })
   end
-  map("<Tab>", function()
-    state.fixture_idx = state.fixture_idx % #state.fixtures + 1
+  local function switch(delta)
+    -- carry the examples toggle across fixture/style rebuilds
+    state.show_examples = state.ctrl.opts.show_examples
+    state.fixture_idx = (state.fixture_idx + delta - 1) % #state.fixtures + 1
     draw()
+  end
+  map("<Tab>", function()
+    switch(1)
   end)
   map("<S-Tab>", function()
-    state.fixture_idx = (state.fixture_idx - 2) % #state.fixtures + 1
-    draw()
+    switch(-1)
   end)
   map("s", function()
+    state.show_examples = state.ctrl.opts.show_examples
     state.style_idx = state.style_idx % #styles.names + 1
     draw()
   end)
-  map("e", function()
-    state.show_examples = not state.show_examples
-    draw()
-  end)
-  map("q", close_all)
-  map("<Esc>", close_all)
 
   local ts_win = state.ts.win
   vim.api.nvim_create_autocmd("WinClosed", {
@@ -283,9 +295,10 @@ function M.run(args)
   close_all()
   require("typescope.highlights").apply()
 
+  local want = (args and args[1]) or config.get().ui.style
   local style_idx = 1
   for i, name in ipairs(styles.names) do
-    if name == (args and args[1]) then
+    if name == want then
       style_idx = i
     end
   end
