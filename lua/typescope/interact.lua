@@ -16,6 +16,8 @@ local M = {}
 ---@field width integer fixed float width (kept stable during interaction)
 ---@field max_height integer
 ---@field on_close fun()
+---@field on_recurse? fun(node: typescope.Node, done: fun()) lazily resolve a beyond-depth node
+---@field extra_help? { [1]: string, [2]: string }[] host rows for the ? overlay
 
 ---@param width integer
 ---@param extra { [1]: string, [2]: string }[]? host-provided rows (e.g. spike harness keys)
@@ -102,16 +104,40 @@ function M.attach(args)
     vim.keymap.set("n", lhs, fn, { buffer = st.handle.buf, nowait = true })
   end
 
+  -- expanding a node whose children weren't resolved yet (beyond config
+  -- depth) triggers lazy resolution instead of opening an empty branch
+  local function recurse_into(node)
+    if args.on_recurse and node._lazy and not node.state.loading then
+      args.on_recurse(node, function()
+        refresh(node.id)
+      end)
+      return true
+    end
+    return false
+  end
+
   map(km.expand, function()
     local node = node_under_cursor()
-    if node and model.is_expandable(node) then
+    if not node then
+      return
+    end
+    if not node.state.loaded and recurse_into(node) then
+      return
+    end
+    if model.is_expandable(node) then
       node.state.expanded = not node.state.expanded
       refresh(node.id)
     end
   end)
   map(km.expand_node, function()
     local node = node_under_cursor()
-    if node and model.is_expandable(node) and not node.state.expanded then
+    if not node then
+      return
+    end
+    if not node.state.loaded and recurse_into(node) then
+      return
+    end
+    if model.is_expandable(node) and not node.state.expanded then
       node.state.expanded = true
       refresh(node.id)
     end
@@ -163,7 +189,13 @@ function M.attach(args)
     vim.notify("typescope: LLM examples arrive in phase 6", vim.log.levels.INFO)
   end)
   map(km.recurse, function()
-    vim.notify("typescope: recursion into types needs the LSP pipeline (phase 3)", vim.log.levels.INFO)
+    local node = node_under_cursor()
+    if not node then
+      return
+    end
+    if not recurse_into(node) and not args.on_recurse then
+      vim.notify("typescope: recursion needs a live LSP session (not available in the spike)", vim.log.levels.INFO)
+    end
   end)
   map(km.close, args.on_close)
   map("<Esc>", args.on_close)

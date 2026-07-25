@@ -12,7 +12,9 @@ function M.check()
   end
 
   -- python treesitter parser (required for type definition extraction)
-  local has_parser = pcall(vim.treesitter.language.add, "python")
+  -- language.add errors on 0.10 but returns false on 0.11+ — check both
+  local ok, added = pcall(vim.treesitter.language.add, "python")
+  local has_parser = ok and added ~= false
   if has_parser then
     health.ok("TreeSitter python parser installed")
   else

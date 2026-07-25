@@ -55,6 +55,21 @@ function M.new(spec)
   return node
 end
 
+--- Append a constructed child, rewriting its (and its subtree's) ids to be
+--- rooted under the parent so expand-state and cursor-follow stay stable.
+---@param parent typescope.Node
+---@param child typescope.Node
+function M.add_child(parent, child)
+  local function reid(node, prefix)
+    node.id = prefix .. "." .. node.name
+    for _, c in ipairs(node.children) do
+      reid(c, node.id)
+    end
+  end
+  reid(child, parent.id)
+  table.insert(parent.children, child)
+end
+
 --- Canonical type-structure string, used as the example-cache key.
 --- Children are sorted by name so field order changes don't bust the cache.
 ---@param node typescope.Node

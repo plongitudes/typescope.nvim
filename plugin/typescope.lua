@@ -28,3 +28,12 @@ end, {
   end,
   desc = "TypeScope: visualize type structures for the function under the cursor",
 })
+
+-- <Plug> mappings so users can bind without writing lua callbacks:
+--   vim.keymap.set("n", "<leader>ts", "<Plug>(TypeScopeToggle)")
+vim.keymap.set("n", "<Plug>(TypeScopeToggle)", function()
+  require("typescope").toggle()
+end, { desc = "TypeScope: toggle float" })
+vim.keymap.set("n", "<Plug>(TypeScopeOpen)", function()
+  require("typescope").open()
+end, { desc = "TypeScope: open float (again to focus)" })
