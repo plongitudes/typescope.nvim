@@ -159,6 +159,16 @@ end
 ---@field fixtures table[]
 local state = nil
 
+-- Each style is showcased as a full visual package: tree chrome + a matching
+-- float border. In the real config ui.style and ui.border stay independent;
+-- this pairing exists only so the spike presents coherent identities.
+local style_borders = {
+  unicode = "single",
+  rounded = "rounded",
+  ascii = { "+", "-", "+", "|", "+", "-", "+", "|" },
+  minimal = "none",
+}
+
 local function close_all()
   if not state then
     return
@@ -181,6 +191,9 @@ local function draw()
   })
 
   local sig_line = fixture.signature
+  local border = style_borders[style_name] or cfg.ui.border
+  -- nvim rejects title/footer on borderless floats
+  local borderless = border == "none"
   local width = math.min(cfg.ui.max_width, math.max(result.width, #sig_line, 40))
   local height = math.min(cfg.ui.max_height, #result.lines)
   local col = math.max(0, math.floor((vim.o.columns - width) / 2))
@@ -199,27 +212,27 @@ local function draw()
   state.sig = float.open({
     lines = { sig_line },
     highlights = { { line = 0, col_start = 0, col_end = paren - 1, group = "@function" } },
-    title = " signature (mock) ",
+    title = not borderless and " signature (mock) " or nil,
     relative = "editor",
     row = sig_row,
     col = col,
     width = width,
     height = 1,
-    border = cfg.ui.border,
+    border = border,
     focusable = false,
   })
 
   state.ts = float.open({
     lines = result.lines,
     highlights = result.highlights,
-    title = (" typescope · %s · %s "):format(fixture.name, style_name),
-    footer = " <Tab> fixture · s style · e examples · b bg · q close ",
+    title = not borderless and (" typescope · %s · %s "):format(fixture.name, style_name) or nil,
+    footer = not borderless and " <Tab> fixture · s style · e examples · b bg · q close " or nil,
     relative = "editor",
-    row = sig_row + 3, -- sig height 1 + its two border rows
+    row = sig_row + (borderless and 2 or 3), -- sig height + border rows
     col = col,
     width = width,
     height = height,
-    border = cfg.ui.border,
+    border = border,
     enter = true,
   })
 
@@ -248,6 +261,11 @@ local function draw()
   end)
   map("b", function()
     vim.o.background = vim.o.background == "dark" and "light" or "dark"
+    -- most themes (gruvbox included) pick their palette at load time, so a bare
+    -- 'background' toggle only shifts derived UI groups — force a reload
+    if vim.g.colors_name then
+      pcall(vim.cmd.colorscheme, vim.g.colors_name) -- our ColorScheme autocmd re-applies TypeScope* groups
+    end
   end)
   map("q", close_all)
   map("<Esc>", close_all)
