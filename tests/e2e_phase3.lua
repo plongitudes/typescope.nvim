@@ -232,4 +232,33 @@ do
   end
 end
 
+-- active_param: name-based, immune to `*` separator entries (uvicorn case)
+do
+  local lspu = require("typescope.lsp")
+  local star_sig = {
+    signatures = {
+      {
+        label = 'run(app, *, host: str = "0.0.0.0", port: int = 8000)',
+        parameters = {
+          { label = "app" },
+          { label = "*" },
+          { label = 'host: str = "0.0.0.0"' },
+          { label = "port: int = 8000" },
+        },
+        activeParameter = 2,
+      },
+    },
+    activeSignature = 0,
+  }
+  check("active param after * resolves to host, not port", lspu.active_param(star_sig) == "host")
+  star_sig.signatures[1].activeParameter = 1
+  check("bare * separator yields nil", lspu.active_param(star_sig) == nil)
+  local offset_sig = {
+    signatures = {
+      { label = "f(count: int)", parameters = { { label = { 2, 12 } } }, activeParameter = 0 },
+    },
+  }
+  check("offset-form labels resolve", lspu.active_param(offset_sig) == "count")
+end
+
 print(failures == 0 and "ALL PASS" or (failures .. " FAILURES"))

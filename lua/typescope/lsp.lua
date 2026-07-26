@@ -211,18 +211,33 @@ function M.hover_markdown(client, bufnr, win, token)
   return #lines > 0 and lines or nil
 end
 
---- Index (0-based) of the active parameter, or nil.
+--- NAME of the active parameter, or nil. Matching by name rather than index
+--- because servers count bare `*` / `/` separators as parameter entries while
+--- TypeScope's tree doesn't — positional mapping is off-by-one after a `*`.
 ---@param result table? signatureHelp result
----@return integer?
+---@return string?
 function M.active_param(result)
   if not result then
     return nil
   end
   local sig = result.signatures[(result.activeSignature or 0) + 1]
-  if not sig then
+  if not sig or not sig.parameters then
     return nil
   end
-  return sig.activeParameter or result.activeParameter
+  local idx = sig.activeParameter or result.activeParameter
+  local param = idx and sig.parameters[idx + 1]
+  if not param then
+    return nil
+  end
+  local label = param.label
+  if type(label) == "table" then
+    -- [start, end) utf-16 offsets into the signature label
+    local sub_start = M.to_byte(sig.label, label[1])
+    local sub_end = M.to_byte(sig.label, label[2])
+    label = sig.label:sub(sub_start + 1, sub_end)
+  end
+  -- leading identifier, stars of *args/**kw stripped; bare */\ separators yield nil
+  return label:match("^%s*%*?%*?([%w_]+)")
 end
 
 --- Load (without displaying) the buffer for a uri. We only ever parse these

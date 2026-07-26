@@ -75,10 +75,16 @@ local function show(srcbuf, roots, token, client, sig_result, hover_lines)
   local lsp = require("typescope.lsp")
   require("typescope.highlights").apply()
 
-  -- mark the active parameter (cursor inside the call's argument list)
-  local active = lsp.active_param(sig_result)
-  if active and roots[active + 1] and roots[active + 1].kind == "param" then
-    roots[active + 1].active = true
+  -- mark the active parameter (cursor inside the call's argument list),
+  -- matched by name — see lsp.active_param for why not by index
+  local active_name = lsp.active_param(sig_result)
+  if active_name then
+    for _, root in ipairs(roots) do
+      if root.kind == "param" and root.name == active_name then
+        root.active = true
+        break
+      end
+    end
   end
 
   local render_opts = {
