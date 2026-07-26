@@ -92,7 +92,7 @@ local function show(srcbuf, roots, token, client, sig_result, hover_lines)
     style = styles.get(cfg.ui.style),
     max_width = max_width,
     align = cfg.ui.align,
-    show_examples = cfg.show_examples,
+    show_examples = cfg.show_examples and cfg.example_mode ~= "none",
     example_kind = cfg.example_mode == "llm" and "llm" or "heuristic",
     lang = vim.bo[srcbuf].filetype,
   }

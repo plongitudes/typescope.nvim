@@ -233,6 +233,7 @@ function M.function_scope(client, bufnr, win, token)
   if #roots == 0 then
     return nil, ("%s has no parameters or return annotation"):format(info.name)
   end
+  require("typescope.examples").annotate(roots)
   return roots
 end
 
@@ -259,6 +260,7 @@ function M.recurse(client, node, token, cb)
     node.state.loaded = true
     node._lazy = nil
     node.state.expanded = #node.children > 0
+    require("typescope.examples").annotate({ node })
     cb()
   end)
 end

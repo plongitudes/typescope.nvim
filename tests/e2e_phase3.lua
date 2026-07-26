@@ -60,6 +60,7 @@ if lines then
   check("union annotation intact", all:find("int | None", 1, true) ~= nil)
   check("param timeout with default", all:find("timeout") and all:find("30%.0"))
   check("returns Response present, collapsed", all:find("returns") and not all:find("status"))
+  check("heuristic examples rendered (host -> localhost)", all:find("localhost") ~= nil)
 
   -- expand retry (depth 2 resolved its fields inline)
   local _, w = float_lines()
