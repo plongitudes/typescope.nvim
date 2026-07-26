@@ -137,4 +137,37 @@ function M.close(handle)
   end
 end
 
+--- Open the anchor float from markdown lines (signatureHelp or hover
+--- content). Built with stable utils (open_floating_preview) instead of the
+--- deprecated builtin handlers — same rendered content, and we get the winid
+--- and own the lifecycle (close_events = {}).
+---@param lines string[] markdown lines
+---@param opts { border: string|string[], max_width: integer, max_height?: integer }
+---@return typescope.FloatHandle?
+function M.open_markdown(lines, opts)
+  local ok, buf, win = pcall(vim.lsp.util.open_floating_preview, lines, "markdown", {
+    border = opts.border,
+    max_width = opts.max_width,
+    max_height = opts.max_height or 8, -- anchor stays compact; docstrings can be long
+    focusable = false,
+    close_events = {},
+  })
+  if not ok or not win then
+    return nil
+  end
+  return { buf = buf, win = win, ns = ns }
+end
+
+--- Editor-grid row/col where an anchored float should open to sit directly
+--- below `win` (border rows accounted for), left edges aligned.
+---@param win integer
+---@return integer row, integer col, integer width
+function M.below(win)
+  local pos = vim.api.nvim_win_get_position(win)
+  local height = vim.api.nvim_win_get_height(win)
+  local cfg = vim.api.nvim_win_get_config(win)
+  local border_rows = (cfg.border and cfg.border ~= "none") and 2 or 0
+  return pos[1] + height + border_rows, pos[2], vim.api.nvim_win_get_width(win)
+end
+
 return M

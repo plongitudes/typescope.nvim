@@ -56,6 +56,32 @@ function M.cmd(fixture_dir)
     return find_by_patterns(word, { "^%s*class%s+WORD%f[%W]", "^%s*def%s+WORD%f[%W]" })
   end
 
+  -- naive signatureHelp: find the word's single-line def, split its params
+  local function signature_for(word)
+    local loc = find_declaration(word)
+    if not loc then
+      return nil
+    end
+    local line = vim.fn.readfile(vim.uri_to_fname(loc.uri))[loc.range.start.line + 1] or ""
+    local inner = line:match("%((.*)%)")
+    if not inner then
+      return nil
+    end
+    local params = {}
+    for piece in vim.gsplit(inner, ",%s*") do
+      if piece ~= "" and piece ~= "self" then
+        table.insert(params, { label = piece })
+      end
+    end
+    return {
+      signatures = {
+        { label = line:gsub("^%s*def%s*", ""):gsub(":%s*$", ""), parameters = params },
+      },
+      activeSignature = 0,
+      activeParameter = 0,
+    }
+  end
+
   return function(dispatchers)
     local closing = false
     local srv = {}
@@ -66,6 +92,8 @@ function M.cmd(fixture_dir)
           capabilities = {
             definitionProvider = true,
             declarationProvider = true,
+            signatureHelpProvider = { triggerCharacters = { "(", "," } },
+            hoverProvider = true,
             positionEncoding = "utf-16",
           },
         })
@@ -76,6 +104,16 @@ function M.cmd(fixture_dir)
         local word = word_at(fname, params.position.line, params.position.character)
         local finder = method == "textDocument/definition" and find_definition or find_declaration
         callback(nil, word and finder(word) or nil)
+      elseif method == "textDocument/signatureHelp" then
+        local fname = vim.uri_to_fname(params.textDocument.uri)
+        local word = word_at(fname, params.position.line, params.position.character)
+        callback(nil, word and signature_for(word) or nil)
+      elseif method == "textDocument/hover" then
+        local fname = vim.uri_to_fname(params.textDocument.uri)
+        local word = word_at(fname, params.position.line, params.position.character)
+        callback(nil, word and {
+          contents = { kind = "markdown", value = "mock hover for `" .. word .. "`" },
+        } or nil)
       else
         callback(nil, nil)
       end

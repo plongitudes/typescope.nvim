@@ -8,7 +8,7 @@ if vim.fn.has("nvim-0.10") ~= 1 then
   return
 end
 
-local subcommands = { "open", "close", "toggle", "spike" }
+local subcommands = { "open", "close", "toggle", "hover", "spike" }
 
 vim.api.nvim_create_user_command("TypeScope", function(opts)
   local sub = opts.fargs[1] or "toggle"
@@ -37,3 +37,6 @@ end, { desc = "TypeScope: toggle float" })
 vim.keymap.set("n", "<Plug>(TypeScopeOpen)", function()
   require("typescope").open()
 end, { desc = "TypeScope: open float (again to focus)" })
+vim.keymap.set("n", "<Plug>(TypeScopeHover)", function()
+  require("typescope").hover()
+end, { desc = "TypeScope: structure for functions, builtin hover otherwise (K replacement)" })

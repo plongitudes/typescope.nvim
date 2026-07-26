@@ -12,6 +12,7 @@
 ---@field max_height integer
 ---@field border string|string[] any nvim float border value
 ---@field anchor "signature"|"cursor"
+---@field hint boolean virtual-text "▸ typescope" marker on resolved call lines
 
 ---@class typescope.KeymapConfig
 ---@field expand string toggle node under cursor
@@ -57,6 +58,7 @@ local defaults = {
     max_height = 20,
     border = "rounded",
     anchor = "signature", -- "signature" | "cursor"
+    hint = true,
   },
   highlights = {},
   keymaps = {
@@ -129,6 +131,7 @@ local function validate(cfg)
     error("typescope.setup: `ui.border` must be a string or table (any nvim float border value)", 0)
   end
   check("ui.anchor", cfg.ui.anchor, { "signature", "cursor" })
+  check("ui.hint", cfg.ui.hint, "boolean")
 
   check("highlights", cfg.highlights, "table")
   check("keymaps", cfg.keymaps, "table")

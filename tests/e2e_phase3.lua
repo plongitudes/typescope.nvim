@@ -132,4 +132,82 @@ if lines5 then
 end
 require("typescope").close()
 
+-- phase 4: signature anchoring, active param, hint extmark
+local function all_floats()
+  local out = {}
+  for _, w in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_get_config(w).relative ~= "" then
+      table.insert(out, w)
+    end
+  end
+  return out
+end
+
+for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+  if l:find("handle = create_server") then
+    vim.api.nvim_win_set_cursor(0, { i, 12 })
+  end
+end
+require("typescope").open()
+vim.wait(2000, function()
+  return #all_floats() >= 2
+end)
+local floats = all_floats()
+check("two floats open (signature + typescope)", #floats == 2)
+if #floats == 2 then
+  local _, ts_win = float_lines()
+  local sig_win = floats[1] == ts_win and floats[2] or floats[1]
+  local sig_pos = vim.api.nvim_win_get_position(sig_win)
+  local ts_pos = vim.api.nvim_win_get_position(ts_win)
+  check("typescope anchored below signature", ts_pos[1] > sig_pos[1] and ts_pos[2] == sig_pos[2])
+  check(
+    "typescope at least as wide as signature",
+    vim.api.nvim_win_get_width(ts_win) >= vim.api.nvim_win_get_width(sig_win)
+  )
+
+  -- active param (mock always reports 0 → config) renders TypeScopeActive
+  local ts_buf = vim.api.nvim_win_get_buf(ts_win)
+  local ns = vim.api.nvim_create_namespace("typescope")
+  local has_active = false
+  for _, m in ipairs(vim.api.nvim_buf_get_extmarks(ts_buf, ns, 0, -1, { details = true })) do
+    if m[4].hl_group == "TypeScopeActive" then
+      has_active = true
+    end
+  end
+  check("active parameter highlighted", has_active)
+
+  -- hint extmark on this call line (earlier opens hinted their own lines)
+  local hint_ns = vim.api.nvim_create_namespace("typescope_hint")
+  local row = vim.api.nvim_win_get_cursor(0)[1] - 1
+  local hints = vim.api.nvim_buf_get_extmarks(bufnr, hint_ns, { row, 0 }, { row, -1 }, {})
+  check("hint extmark placed on call line", #hints == 1)
+
+  require("typescope").close()
+  check("both floats closed", #all_floats() == 0)
+end
+
+-- hover() takeover: function symbol → typescope; non-function → plain hover
+for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+  if l:find("handle = create_server") then
+    vim.api.nvim_win_set_cursor(0, { i, 12 })
+  end
+end
+require("typescope").hover()
+vim.wait(2000, function()
+  return float_lines() ~= nil
+end)
+check("hover() on function opens typescope", float_lines() ~= nil)
+require("typescope").close()
+
+vim.api.nvim_win_set_cursor(0, { 1, 6 }) -- 'dataclasses' in the import line
+require("typescope").hover()
+vim.wait(1000, function()
+  return #all_floats() > 0
+end)
+local plain_hover = #all_floats() > 0 and float_lines() == nil
+check("hover() on non-function falls back to plain hover", plain_hover)
+for _, w in ipairs(all_floats()) do
+  pcall(vim.api.nvim_win_close, w, true)
+end
+
 print(failures == 0 and "ALL PASS" or (failures .. " FAILURES"))

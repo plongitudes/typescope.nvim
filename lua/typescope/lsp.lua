@@ -157,6 +157,74 @@ function M.definition(client, bufnr, row, col, token)
   return M.locate(client, bufnr, row, col, token, "textDocument/definition")
 end
 
+--- textDocument/signatureHelp at the window's cursor. Used for the anchor
+--- float content and the activeParameter index.
+---@param client vim.lsp.Client
+---@param bufnr integer
+---@param win integer
+---@param token typescope.CancelToken
+---@return table? signatureHelp result
+function M.signature_help(client, bufnr, win, token)
+  local pos = vim.api.nvim_win_get_cursor(win)
+  local params = {
+    textDocument = { uri = vim.uri_from_bufnr(bufnr) },
+    position = { line = pos[1] - 1, character = M.to_utf16(get_line(bufnr, pos[1] - 1), pos[2]) },
+  }
+  local result = M.request(client, "textDocument/signatureHelp", params, token)
+  if result and result.signatures and #result.signatures > 0 then
+    return result
+  end
+  return nil
+end
+
+--- Signature-help result rendered to markdown lines for the anchor float.
+---@param result table signatureHelp result
+---@param ft string
+---@return string[]?
+function M.signature_markdown(result, ft)
+  local lines = vim.lsp.util.convert_signature_help_to_markdown_lines(result, ft, nil)
+  return lines and #lines > 0 and lines or nil
+end
+
+--- Hover contents as markdown lines — the anchor fallback when signatureHelp
+--- is empty (servers only answer it with the cursor inside the call parens;
+--- hover answers anywhere on the symbol).
+---@param client vim.lsp.Client
+---@param bufnr integer
+---@param win integer
+---@param token typescope.CancelToken
+---@return string[]?
+function M.hover_markdown(client, bufnr, win, token)
+  local pos = vim.api.nvim_win_get_cursor(win)
+  local params = {
+    textDocument = { uri = vim.uri_from_bufnr(bufnr) },
+    position = { line = pos[1] - 1, character = M.to_utf16(get_line(bufnr, pos[1] - 1), pos[2]) },
+  }
+  local result = M.request(client, "textDocument/hover", params, token)
+  if not result or not result.contents then
+    return nil
+  end
+  local lines = vim.lsp.util.convert_input_to_markdown_lines(result.contents)
+  while lines[#lines] == "" do
+    table.remove(lines)
+  end
+  return #lines > 0 and lines or nil
+end
+
+--- Index (0-based) of the active parameter, or nil.
+---@param result table? signatureHelp result
+---@return integer?
+function M.active_param(result)
+  if not result then
+    return nil
+  end
+  local sig = result.signatures[(result.activeSignature or 0) + 1]
+  if not sig then
+    return nil
+  end
+  return sig.activeParameter or result.activeParameter
+end
+
 --- Load (without displaying) the buffer for a uri. We only ever parse these
 --- buffers, so a stale/foreign swapfile always resolves to open-readonly
 --- instead of throwing E325 (which aborts the whole pipeline).
