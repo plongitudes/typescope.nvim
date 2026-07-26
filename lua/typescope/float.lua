@@ -17,14 +17,14 @@ local SKIP_CAPTURES = { spell = true, nospell = true, conceal = true, none = tru
 ---@param col integer byte offset of the snippet in the line
 ---@param snippet string
 ---@param lang string
-local function inject_highlights(buf, line, col, snippet, lang)
+---@param query vim.treesitter.Query
+local function inject_highlights(buf, line, col, snippet, lang, query)
   local ok, parser = pcall(vim.treesitter.get_string_parser, snippet, lang)
   if not ok or not parser then
     return
   end
   local tree = parser:parse()[1]
-  local query = tree and vim.treesitter.query.get(lang, "highlights")
-  if not query then
+  if not tree then
     return
   end
   for id, node in query:iter_captures(tree:root(), snippet) do
@@ -52,16 +52,35 @@ local function set_content(buf, lines, highlights, injections, lang)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.bo[buf].modifiable = false
   vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
-  for _, hl in ipairs(highlights) do
-    vim.api.nvim_buf_set_extmark(buf, ns, hl.line, hl.col_start, {
-      end_col = hl.col_end,
-      hl_group = hl.group,
-      priority = 100,
-    })
-  end
-  if lang then
+
+  local ok, query = pcall(vim.treesitter.query.get, lang or "", "highlights")
+  query = ok and query or nil
+
+  -- when real syntax highlighting will cover a span in "replace" mode, its
+  -- base block mark is dropped entirely — otherwise attributes (bold/italic)
+  -- from the semantic group bleed through under the syntax colors and the
+  -- float stops matching normal code rendering
+  local replaced = {}
+  if query then
     for _, inj in ipairs(injections or {}) do
-      inject_highlights(buf, inj.line, inj.col_start, inj.text, lang)
+      if inj.mode ~= "overlay" then
+        replaced[("%d:%d:%d"):format(inj.line, inj.col_start, inj.col_start + #inj.text)] = true
+      end
+    end
+  end
+
+  for _, hl in ipairs(highlights) do
+    if not replaced[("%d:%d:%d"):format(hl.line, hl.col_start, hl.col_end)] then
+      vim.api.nvim_buf_set_extmark(buf, ns, hl.line, hl.col_start, {
+        end_col = hl.col_end,
+        hl_group = hl.group,
+        priority = 100,
+      })
+    end
+  end
+  if query and lang then
+    for _, inj in ipairs(injections or {}) do
+      inject_highlights(buf, inj.line, inj.col_start, inj.text, lang, query)
     end
   end
 end

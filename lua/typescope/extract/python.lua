@@ -110,8 +110,93 @@ function M.function_info(src, row, col)
   return info
 end
 
---- Analyze an annotation node: display text + named user types worth chasing.
---- Positions are where to fire textDocument/definition.
+-- typing.X aliases that have modern lowercase builtin forms
+local TYPING_LOWER = {
+  List = "list",
+  Dict = "dict",
+  Tuple = "tuple",
+  Set = "set",
+  FrozenSet = "frozenset",
+  Type = "type",
+  Deque = "deque",
+  DefaultDict = "defaultdict",
+}
+
+--- Recursive printer producing the modern normalized form of an annotation:
+--- typing.Optional[X] → X | None, typing.Union[A, B] → A | B, List → list,
+--- "ForwardRef" → ForwardRef, typing.* prefix stripped. Unknown node kinds
+--- fall back to their cleaned source text.
+---@param node TSNode
+---@param src integer|string
+---@return string
+local function normalize(node, src)
+  local t = node:type()
+  if t == "type" then
+    local inner = node:named_child(0)
+    return inner and normalize(inner, src) or clean(text(node, src))
+  end
+  if t == "identifier" then
+    local name = text(node, src)
+    return TYPING_LOWER[name] or name
+  end
+  if t == "attribute" then
+    local obj, attr = field1(node, "object"), field1(node, "attribute")
+    if obj and attr and text(obj, src) == "typing" then
+      return normalize(attr, src)
+    end
+    return text(node, src)
+  end
+  if t == "string" then
+    return (text(node, src):gsub("^[\"']", ""):gsub("[\"']$", "")) -- forward ref
+  end
+  if t == "none" then
+    return "None"
+  end
+  if t == "ellipsis" then
+    return "..."
+  end
+  if t == "binary_operator" then
+    local left, right = field1(node, "left"), field1(node, "right")
+    if left and right then
+      return normalize(left, src) .. " | " .. normalize(right, src)
+    end
+  end
+  if t == "generic_type" or t == "subscript" then
+    local head_node, arg_nodes
+    if t == "generic_type" then
+      head_node = node:named_child(0)
+      arg_nodes = {}
+      local params = node:named_child(1)
+      if params then
+        for i = 0, params:named_child_count() - 1 do
+          table.insert(arg_nodes, params:named_child(i))
+        end
+      end
+    else
+      head_node = field1(node, "value")
+      arg_nodes = node:field("subscript")
+    end
+    if head_node then
+      local head = normalize(head_node, src)
+      local args = {}
+      for _, a in ipairs(arg_nodes) do
+        table.insert(args, normalize(a, src))
+      end
+      if head == "Optional" then
+        return (args[1] or "?") .. " | None"
+      end
+      if head == "Union" then
+        return table.concat(args, " | ")
+      end
+      return head .. "[" .. table.concat(args, ", ") .. "]"
+    end
+  end
+  return clean(text(node, src))
+end
+
+--- Analyze an annotation node: display text (normalized to modern syntax) +
+--- named user types worth chasing. Positions are where to fire
+--- textDocument/definition.
 ---@param src integer|string
 ---@param type_node TSNode
 ---@return { display: string, refs: { name: string, row: integer, col: integer }[] }
@@ -149,7 +234,8 @@ function M.annotation(src, type_node)
     end
   end
   scan(type_node)
-  return { display = clean(text(type_node, src)), refs = refs }
+  local ok, display = pcall(normalize, type_node, src)
+  return { display = ok and display or clean(text(type_node, src)), refs = refs }
 end
 
 ---@param cls TSNode class_definition

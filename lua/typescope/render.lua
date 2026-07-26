@@ -8,6 +8,7 @@
 ---@field line integer 0-indexed
 ---@field col_start integer byte offset
 ---@field text string source snippet to highlight with the language's TS parser
+---@field mode "replace"|"overlay" replace: syntax colors supplant the base block group (so bold/italic from semantic groups don't bleed through); overlay: both apply (examples keep their dim styling)
 
 ---@class typescope.RenderResult
 ---@field lines string[]
@@ -38,7 +39,7 @@ end
 
 ---@param text string
 ---@param group? string base highlight group
----@param inject? boolean span is a source snippet; overlay real TS highlights
+---@param inject? "replace"|"overlay" span is a source snippet for real TS highlighting
 function Line:add(text, group, inject)
   if text == "" then
     return self
@@ -47,7 +48,7 @@ function Line:add(text, group, inject)
     table.insert(self.hls, { col_start = #self.text, col_end = #self.text + #text, group = group })
   end
   if inject then
-    table.insert(self.inj, { col_start = #self.text, text = text })
+    table.insert(self.inj, { col_start = #self.text, text = text, mode = inject })
   end
   self.text = self.text .. text
   self.width = self.width + strwidth(text)
@@ -120,7 +121,10 @@ function M.render(roots, opts)
       })
     end
     for _, inj in ipairs(line.inj) do
-      table.insert(result.ts_injections, { line = lnum - 1, col_start = inj.col_start, text = inj.text })
+      table.insert(
+        result.ts_injections,
+        { line = lnum - 1, col_start = inj.col_start, text = inj.text, mode = inj.mode }
+      )
     end
     result.width = math.max(result.width, line.width)
   end
@@ -146,11 +150,11 @@ function M.render(roots, opts)
       -- injection only survives on unsplit spans: a wrapped fragment like
       -- "dict[str," is not parseable source, so continuations keep the base
       -- group color only
-      local inject = seg[3] and true or false
+      local inject = seg[3]
       while text ~= "" do
         local avail = opts.max_width - line.width
         if strwidth(text) <= avail then
-          line:add(text, group, inject and text == seg[1])
+          line:add(text, group, text == seg[1] and inject or nil)
           text = ""
         elseif avail < 8 and line.width > cont_pad then
           -- too little room to start; push the whole segment down a line
@@ -200,7 +204,7 @@ function M.render(roots, opts)
     local type_text = node.type.display or node.type.raw or "?"
     -- method "signatures" like (path: str) -> bytes aren't parseable
     -- expressions, so they keep block coloring
-    local injectable = node.kind ~= "method"
+    local injectable = node.kind ~= "method" and "replace" or nil
     table.insert(segments, { type_text, "TypeScopeType", injectable })
     if node.type.category == "unresolved" then
       table.insert(segments, { " " .. style.unresolved, "TypeScopeUnresolved" })
@@ -210,12 +214,14 @@ function M.render(roots, opts)
     end
     if node.default then
       table.insert(segments, { " = ", "TypeScopeChrome" })
-      table.insert(segments, { node.default, "TypeScopeDefault", true })
+      table.insert(segments, { node.default, "TypeScopeDefault", "replace" })
     end
     local example = example_for(node, opts)
     if example then
       table.insert(segments, { "  ", nil })
-      table.insert(segments, { example, "TypeScopeExample", true })
+      -- overlay: examples are hypothetical values, they keep their dim
+      -- TypeScopeExample styling underneath the syntax colors
+      table.insert(segments, { example, "TypeScopeExample", "overlay" })
     end
     if is_expandable(node) and not node.state.expanded and depth == 0 then
       table.insert(segments, { "  (<CR> to expand)", "TypeScopeHint" })
@@ -248,8 +254,21 @@ function M.render(roots, opts)
 
   -- no spacer lines between top-level entries: the expander markers carry
   -- the visual grouping (Tony's call, 2026-07-26 — revisit if it feels dense)
+  --
+  -- roots share a name column so annotations align, but only names up to a
+  -- cap participate — one ws_per_message_deflate must not drag every
+  -- annotation to column 30 and force wraps; outliers sit ragged instead
+  local cap = 16
+  local root_name_col = 0
   for _, root in ipairs(roots) do
-    root._name_col = strwidth(root.name)
+    local w = strwidth(root.name)
+    if w <= cap then
+      root_name_col = math.max(root_name_col, w)
+    end
+  end
+  for _, root in ipairs(roots) do
+    local w = strwidth(root.name)
+    root._name_col = w <= cap and root_name_col or w
     render_node(root, string.rep(" ", strwidth(style.expanded)), "", 0)
   end
 

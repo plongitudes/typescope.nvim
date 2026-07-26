@@ -210,4 +210,26 @@ for _, w in ipairs(all_floats()) do
   pcall(vim.api.nvim_win_close, w, true)
 end
 
+-- annotation normalization: old typing syntax → modern display
+do
+  local py = require("typescope.extract.python")
+  local src = 'def f(a: typing.Optional[str], b: typing.Union["X", typing.Callable, str],'
+    .. " c: typing.List[int], d: Optional[Union[int, str]], e: typing.Type[asyncio.Protocol]) -> None: ..."
+  local info = py.function_info(src, 0, 4)
+  local want = {
+    a = "str | None",
+    b = "X | Callable | str",
+    c = "list[int]",
+    d = "int | str | None",
+    e = "type[asyncio.Protocol]",
+  }
+  for _, p in ipairs(info.params) do
+    local got = py.annotation(src, p.type_node).display
+    check(("normalize %s -> %s"):format(p.name, want[p.name]), got == want[p.name])
+    if got ~= want[p.name] then
+      print(("  got: %q"):format(got))
+    end
+  end
+end
+
 print(failures == 0 and "ALL PASS" or (failures .. " FAILURES"))
