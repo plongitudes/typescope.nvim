@@ -25,6 +25,15 @@
 
 local M = {}
 
+-- Rewrite a subtree's ids to be rooted under `prefix` — ids are dotted paths
+-- and every structural attach must keep the whole subtree consistent.
+local function reid(node, prefix)
+  node.id = prefix .. "." .. node.name
+  for _, child in ipairs(node.children) do
+    reid(child, node.id)
+  end
+end
+
 --- Build a Node from a sparse spec, filling structural defaults.
 ---@param spec table
 ---@return typescope.Node
@@ -49,7 +58,7 @@ function M.new(spec)
   }
   for _, child_spec in ipairs(spec.children or {}) do
     local child = child_spec.state and child_spec or M.new(child_spec)
-    child.id = node.id .. "." .. child.name
+    reid(child, node.id) -- grandchildren too, not just the direct child
     table.insert(node.children, child)
   end
   return node
@@ -60,12 +69,6 @@ end
 ---@param parent typescope.Node
 ---@param child typescope.Node
 function M.add_child(parent, child)
-  local function reid(node, prefix)
-    node.id = prefix .. "." .. node.name
-    for _, c in ipairs(node.children) do
-      reid(c, node.id)
-    end
-  end
   reid(child, parent.id)
   table.insert(parent.children, child)
 end

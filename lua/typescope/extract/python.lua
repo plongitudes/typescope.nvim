@@ -298,6 +298,9 @@ local function unwrap_default(right, src, category)
               return clean(text(field1(arg, "value"), src))
             end
           elseif i == 0 then
+            if arg:type() == "ellipsis" then
+              return nil -- Field(...): the required-field sentinel, not a default
+            end
             return clean(text(arg, src))
           end
         end
