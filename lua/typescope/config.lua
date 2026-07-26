@@ -8,7 +8,8 @@
 ---@class typescope.UiConfig
 ---@field style "unicode"|"ascii"|"minimal"|"rounded"
 ---@field animations boolean
----@field max_width integer
+---@field align "left"|"right" name column alignment
+---@field max_width number >1: absolute columns; <=1: fraction of editor width
 ---@field max_height integer
 ---@field border string|string[] any nvim float border value
 ---@field anchor "signature"|"cursor"
@@ -54,7 +55,8 @@ local defaults = {
   ui = {
     style = "rounded", -- "unicode" | "ascii" | "minimal" | "rounded"
     animations = true,
-    max_width = 60,
+    align = "left", -- "left" | "right" name column alignment
+    max_width = 0.5, -- fraction of editor width; values > 1 are absolute columns
     max_height = 20,
     border = "rounded",
     anchor = "signature", -- "signature" | "cursor"
@@ -125,7 +127,10 @@ local function validate(cfg)
   check("ui", cfg.ui, "table")
   check("ui.style", cfg.ui.style, { "unicode", "ascii", "minimal", "rounded" })
   check("ui.animations", cfg.ui.animations, "boolean")
-  check("ui.max_width", cfg.ui.max_width, "positive_integer")
+  check("ui.align", cfg.ui.align, { "left", "right" })
+  if type(cfg.ui.max_width) ~= "number" or cfg.ui.max_width <= 0 then
+    error("typescope.setup: `ui.max_width` must be a positive number (<=1 = fraction of editor width)", 0)
+  end
   check("ui.max_height", cfg.ui.max_height, "positive_integer")
   if type(cfg.ui.border) ~= "string" and type(cfg.ui.border) ~= "table" then
     error("typescope.setup: `ui.border` must be a string or table (any nvim float border value)", 0)
@@ -168,6 +173,17 @@ function M.get()
     options = M.setup()
   end
   return options
+end
+
+--- ui.max_width resolved to concrete columns (fractions are of the current
+--- editor width, floored at 20).
+---@return integer
+function M.resolved_max_width()
+  local mw = M.get().ui.max_width
+  if mw <= 1 then
+    return math.max(20, math.floor(vim.o.columns * mw))
+  end
+  return math.floor(mw)
 end
 
 return M

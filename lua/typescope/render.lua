@@ -19,7 +19,8 @@
 
 ---@class typescope.RenderOpts
 ---@field style typescope.Charset
----@field max_width integer
+---@field max_width integer resolved columns (callers use config.resolved_max_width)
+---@field align? "left"|"right" name column alignment (default left)
 ---@field show_examples boolean
 ---@field example_kind "heuristic"|"llm"
 ---@field lang? string treesitter language for injected snippet highlighting
@@ -179,25 +180,34 @@ function M.render(roots, opts)
     if depth == 0 then
       marker = is_expandable(node) and (node.state.expanded and style.expanded or style.collapsed)
         or style.leaf
-      line:add(marker, "TypeScopeChrome")
-    else
+    elseif is_expandable(node) then
+      marker = node.state.expanded and style.expanded or style.collapsed
+    end
+    if depth > 0 then
       line:add(branch, "TypeScopeChrome")
-      if is_expandable(node) then
-        line:add(node.state.expanded and style.expanded or style.collapsed, "TypeScopeChrome")
-      end
     end
 
+    -- marker + name form one unit, aligned within the sibling group's column:
+    -- left mode pads after the name, right mode pads before the marker
+    local unit_width = strwidth(node.name) + (marker and strwidth(marker) or 0)
+    local pad = math.max(0, (node._unit_col or unit_width) - unit_width)
+    if opts.align == "right" then
+      line:add(string.rep(" ", pad))
+    end
+    if marker then
+      line:add(marker, "TypeScopeChrome")
+    end
     local name_group = node.kind == "return" and "TypeScopeKeyword" or "TypeScopeField"
     if node.active then
       name_group = "TypeScopeActive"
     end
     line:add(node.name, name_group)
+    if opts.align ~= "right" then
+      line:add(string.rep(" ", pad))
+    end
+    line:add("  ")
 
-    -- align annotations within this sibling group
-    local pad = (node._name_col or #node.name) - strwidth(node.name)
-    line:add(string.rep(" ", pad + 2))
-
-    local cont_prefix = depth == 0 and string.rep(" ", strwidth(marker or "")) or bars
+    local cont_prefix = depth == 0 and "" or bars
     local cont_pad = line.width - strwidth(cont_prefix)
 
     local segments = {}
@@ -231,17 +241,17 @@ function M.render(roots, opts)
 
     if node.state.expanded then
       local kids = node.children
-      local name_col = 0
+      local unit_col = 0
       for _, child in ipairs(kids) do
         local w = strwidth(child.name)
         if is_expandable(child) then
           w = w + strwidth(style.expanded)
         end
-        name_col = math.max(name_col, w)
+        unit_col = math.max(unit_col, w)
       end
       for i, child in ipairs(kids) do
         local last = i == #kids
-        child._name_col = is_expandable(child) and (name_col - strwidth(style.expanded)) or name_col
+        child._unit_col = unit_col
         render_node(
           child,
           bars .. (last and string.rep(" ", strwidth(style.vert)) or style.vert),
@@ -255,21 +265,24 @@ function M.render(roots, opts)
   -- no spacer lines between top-level entries: the expander markers carry
   -- the visual grouping (Tony's call, 2026-07-26 — revisit if it feels dense)
   --
-  -- roots share a name column so annotations align, but only names up to a
-  -- cap participate — one ws_per_message_deflate must not drag every
-  -- annotation to column 30 and force wraps; outliers sit ragged instead
-  local cap = 16
-  local root_name_col = 0
+  -- roots share a name column so annotations align. Left mode caps
+  -- participation at 16 cells — one ws_per_message_deflate must not drag
+  -- every annotation to column 30 and force wraps; outliers sit ragged.
+  -- Right mode is uncapped: padding lands before the name, so long names
+  -- cost nothing extra (Tony's full-width request).
+  local cap = opts.align == "right" and math.huge or 16
+  local marker_w = strwidth(style.expanded)
+  local root_col = 0
   for _, root in ipairs(roots) do
     local w = strwidth(root.name)
     if w <= cap then
-      root_name_col = math.max(root_name_col, w)
+      root_col = math.max(root_col, w + marker_w)
     end
   end
   for _, root in ipairs(roots) do
     local w = strwidth(root.name)
-    root._name_col = w <= cap and root_name_col or w
-    render_node(root, string.rep(" ", strwidth(style.expanded)), "", 0)
+    root._unit_col = w <= cap and root_col or (w + marker_w)
+    render_node(root, string.rep(" ", marker_w), "", 0)
   end
 
   return result

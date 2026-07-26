@@ -184,9 +184,11 @@ local function draw()
   local style_name = styles.names[state.style_idx]
   local cfg = config.get()
 
+  local max_width = config.resolved_max_width()
   local render_opts = {
     style = styles.get(style_name),
-    max_width = cfg.ui.max_width,
+    max_width = max_width,
+    align = cfg.ui.align,
     show_examples = state.show_examples,
     example_kind = "heuristic",
     lang = "python",
@@ -197,7 +199,7 @@ local function draw()
   local border = style_borders[style_name] or cfg.ui.border
   -- nvim rejects title/footer on borderless floats
   local borderless = border == "none"
-  local width = math.min(cfg.ui.max_width, math.max(result.width, #sig_line, 40))
+  local width = math.min(max_width, math.max(result.width, #sig_line, 40))
   local height = math.min(cfg.ui.max_height, #result.lines)
   local col = math.max(0, math.floor((vim.o.columns - width) / 2))
   local sig_row = 2

@@ -87,15 +87,17 @@ local function show(srcbuf, roots, token, client, sig_result, hover_lines)
     end
   end
 
+  local max_width = require("typescope.config").resolved_max_width()
   local render_opts = {
     style = styles.get(cfg.ui.style),
-    max_width = cfg.ui.max_width,
+    max_width = max_width,
+    align = cfg.ui.align,
     show_examples = cfg.show_examples,
     example_kind = cfg.example_mode == "llm" and "llm" or "heuristic",
     lang = vim.bo[srcbuf].filetype,
   }
   local result = render.render(roots, render_opts)
-  local width = math.min(cfg.ui.max_width, math.max(result.width, 30))
+  local width = math.min(max_width, math.max(result.width, 30))
   local height = math.min(cfg.ui.max_height, #result.lines)
 
   -- anchor: below the signature/hover float when configured and available,
@@ -105,7 +107,7 @@ local function show(srcbuf, roots, token, client, sig_result, hover_lines)
   if cfg.ui.anchor == "signature" then
     local md = sig_result and lsp.signature_markdown(sig_result, vim.bo[srcbuf].filetype) or hover_lines
     if md then
-      sig_handle = float.open_markdown(md, { border = cfg.ui.border, max_width = cfg.ui.max_width })
+      sig_handle = float.open_markdown(md, { border = cfg.ui.border, max_width = max_width })
     end
     if sig_handle then
       local row, col, sig_width = float.below(sig_handle.win)
