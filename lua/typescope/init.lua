@@ -46,6 +46,7 @@ local function show(srcbuf, roots, token, client)
     max_width = cfg.ui.max_width,
     show_examples = cfg.show_examples,
     example_kind = cfg.example_mode == "llm" and "llm" or "heuristic",
+    lang = vim.bo[srcbuf].filetype,
   }
   local result = render.render(roots, render_opts)
   local width = math.min(cfg.ui.max_width, math.max(result.width, 30))
@@ -55,6 +56,8 @@ local function show(srcbuf, roots, token, client)
   local handle = float.open({
     lines = result.lines,
     highlights = result.highlights,
+    ts_injections = result.ts_injections,
+    lang = render_opts.lang,
     title = " typescope ",
     footer = " ? help ",
     relative = "cursor",

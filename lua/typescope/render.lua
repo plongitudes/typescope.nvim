@@ -4,9 +4,15 @@
 ---@field col_end integer byte offset
 ---@field group string
 
+---@class typescope.Injection
+---@field line integer 0-indexed
+---@field col_start integer byte offset
+---@field text string source snippet to highlight with the language's TS parser
+
 ---@class typescope.RenderResult
 ---@field lines string[]
 ---@field highlights typescope.Highlight[]
+---@field ts_injections typescope.Injection[] annotation/default/example spans for real syntax highlighting
 ---@field line_to_node table<integer, string> 1-indexed line -> node id (continuation lines included)
 ---@field width integer display width of the widest line
 
@@ -15,6 +21,7 @@
 ---@field max_width integer
 ---@field show_examples boolean
 ---@field example_kind "heuristic"|"llm"
+---@field lang? string treesitter language for injected snippet highlighting
 
 local M = {}
 
@@ -26,17 +33,21 @@ local Line = {}
 Line.__index = Line
 
 local function new_line()
-  return setmetatable({ text = "", width = 0, hls = {} }, Line)
+  return setmetatable({ text = "", width = 0, hls = {}, inj = {} }, Line)
 end
 
 ---@param text string
----@param group? string
-function Line:add(text, group)
+---@param group? string base highlight group
+---@param inject? boolean span is a source snippet; overlay real TS highlights
+function Line:add(text, group, inject)
   if text == "" then
     return self
   end
   if group then
     table.insert(self.hls, { col_start = #self.text, col_end = #self.text + #text, group = group })
+  end
+  if inject then
+    table.insert(self.inj, { col_start = #self.text, text = text })
   end
   self.text = self.text .. text
   self.width = self.width + strwidth(text)
@@ -94,7 +105,7 @@ end
 ---@return typescope.RenderResult
 function M.render(roots, opts)
   local style = opts.style
-  local result = { lines = {}, highlights = {}, line_to_node = {}, width = 0 }
+  local result = { lines = {}, highlights = {}, ts_injections = {}, line_to_node = {}, width = 0 }
 
   local function emit(line, node_id)
     table.insert(result.lines, line.text)
@@ -107,6 +118,9 @@ function M.render(roots, opts)
         col_end = hl.col_end,
         group = hl.group,
       })
+    end
+    for _, inj in ipairs(line.inj) do
+      table.insert(result.ts_injections, { line = lnum - 1, col_start = inj.col_start, text = inj.text })
     end
     result.width = math.max(result.width, line.width)
   end
@@ -129,10 +143,14 @@ function M.render(roots, opts)
 
     for _, seg in ipairs(segments) do
       local text, group = seg[1], seg[2]
+      -- injection only survives on unsplit spans: a wrapped fragment like
+      -- "dict[str," is not parseable source, so continuations keep the base
+      -- group color only
+      local inject = seg[3] and true or false
       while text ~= "" do
         local avail = opts.max_width - line.width
         if strwidth(text) <= avail then
-          line:add(text, group)
+          line:add(text, group, inject and text == seg[1])
           text = ""
         elseif avail < 8 and line.width > cont_pad then
           -- too little room to start; push the whole segment down a line
@@ -180,7 +198,10 @@ function M.render(roots, opts)
 
     local segments = {}
     local type_text = node.type.display or node.type.raw or "?"
-    table.insert(segments, { type_text, "TypeScopeType" })
+    -- method "signatures" like (path: str) -> bytes aren't parseable
+    -- expressions, so they keep block coloring
+    local injectable = node.kind ~= "method"
+    table.insert(segments, { type_text, "TypeScopeType", injectable })
     if node.type.category == "unresolved" then
       table.insert(segments, { " " .. style.unresolved, "TypeScopeUnresolved" })
     end
@@ -189,11 +210,12 @@ function M.render(roots, opts)
     end
     if node.default then
       table.insert(segments, { " = ", "TypeScopeChrome" })
-      table.insert(segments, { node.default, "TypeScopeDefault" })
+      table.insert(segments, { node.default, "TypeScopeDefault", true })
     end
     local example = example_for(node, opts)
     if example then
-      table.insert(segments, { "  " .. example, "TypeScopeExample" })
+      table.insert(segments, { "  ", nil })
+      table.insert(segments, { example, "TypeScopeExample", true })
     end
     if is_expandable(node) and not node.state.expanded and depth == 0 then
       table.insert(segments, { "  (<CR> to expand)", "TypeScopeHint" })

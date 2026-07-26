@@ -7,10 +7,47 @@ local M = {}
 
 local ns = vim.api.nvim_create_namespace("typescope")
 
+local SKIP_CAPTURES = { spell = true, nospell = true, conceal = true, none = true }
+
+--- Overlay real syntax highlighting on a source snippet embedded in a float
+--- line: parse it with the language's TS parser and emit one extmark per
+--- capture, above the base block color (which remains the fallback).
+---@param buf integer
+---@param line integer 0-indexed
+---@param col integer byte offset of the snippet in the line
+---@param snippet string
+---@param lang string
+local function inject_highlights(buf, line, col, snippet, lang)
+  local ok, parser = pcall(vim.treesitter.get_string_parser, snippet, lang)
+  if not ok or not parser then
+    return
+  end
+  local tree = parser:parse()[1]
+  local query = tree and vim.treesitter.query.get(lang, "highlights")
+  if not query then
+    return
+  end
+  for id, node in query:iter_captures(tree:root(), snippet) do
+    local name = query.captures[id]
+    if not SKIP_CAPTURES[name] and not name:match("^_") then
+      local srow, scol, erow, ecol = node:range()
+      if srow == 0 and erow == 0 then -- snippets are single-line
+        vim.api.nvim_buf_set_extmark(buf, ns, line, col + scol, {
+          end_col = col + ecol,
+          hl_group = "@" .. name,
+          priority = 110,
+        })
+      end
+    end
+  end
+end
+
 ---@param buf integer
 ---@param lines string[]
 ---@param highlights typescope.Highlight[]
-local function set_content(buf, lines, highlights)
+---@param injections? typescope.Injection[]
+---@param lang? string
+local function set_content(buf, lines, highlights, injections, lang)
   vim.bo[buf].modifiable = true
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.bo[buf].modifiable = false
@@ -19,13 +56,21 @@ local function set_content(buf, lines, highlights)
     vim.api.nvim_buf_set_extmark(buf, ns, hl.line, hl.col_start, {
       end_col = hl.col_end,
       hl_group = hl.group,
+      priority = 100,
     })
+  end
+  if lang then
+    for _, inj in ipairs(injections or {}) do
+      inject_highlights(buf, inj.line, inj.col_start, inj.text, lang)
+    end
   end
 end
 
 ---@class typescope.FloatOpts
 ---@field lines string[]
 ---@field highlights typescope.Highlight[]
+---@field ts_injections? typescope.Injection[]
+---@field lang? string treesitter language for injected snippet highlighting
 ---@field title? string
 ---@field footer? string
 ---@field row integer
@@ -43,7 +88,7 @@ function M.open(opts)
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].bufhidden = "wipe"
   vim.bo[buf].filetype = "typescope"
-  set_content(buf, opts.lines, opts.highlights)
+  set_content(buf, opts.lines, opts.highlights, opts.ts_injections, opts.lang)
 
   local win = vim.api.nvim_open_win(buf, opts.enter or false, {
     relative = opts.relative,
@@ -67,9 +112,9 @@ end
 --- Swap content and resize in one synchronous block — no scheduling between
 --- buffer and window updates, so expand/collapse never shows a partial frame.
 ---@param handle typescope.FloatHandle
----@param opts { lines: string[], highlights: typescope.Highlight[], width?: integer, height?: integer, title?: string }
+---@param opts { lines: string[], highlights: typescope.Highlight[], ts_injections?: typescope.Injection[], lang?: string, width?: integer, height?: integer, title?: string }
 function M.update(handle, opts)
-  set_content(handle.buf, opts.lines, opts.highlights)
+  set_content(handle.buf, opts.lines, opts.highlights, opts.ts_injections, opts.lang)
   local cfg = {}
   if opts.width then
     cfg.width = math.max(1, opts.width)

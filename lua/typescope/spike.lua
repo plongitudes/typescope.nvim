@@ -189,6 +189,7 @@ local function draw()
     max_width = cfg.ui.max_width,
     show_examples = state.show_examples,
     example_kind = "heuristic",
+    lang = "python",
   }
   local result = render.render(fixture.roots, render_opts)
 
@@ -227,6 +228,8 @@ local function draw()
   state.ts = float.open({
     lines = result.lines,
     highlights = result.highlights,
+    ts_injections = result.ts_injections,
+    lang = render_opts.lang,
     title = not borderless and (" typescope · %s · %s "):format(fixture.name, style_name) or nil,
     footer = not borderless and " ? help " or nil,
     relative = "editor",

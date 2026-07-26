@@ -157,13 +157,23 @@ function M.definition(client, bufnr, row, col, token)
   return M.locate(client, bufnr, row, col, token, "textDocument/definition")
 end
 
---- Load (without displaying) the buffer for a uri.
+--- Load (without displaying) the buffer for a uri. We only ever parse these
+--- buffers, so a stale/foreign swapfile always resolves to open-readonly
+--- instead of throwing E325 (which aborts the whole pipeline).
 ---@param uri string
 ---@return integer bufnr
 function M.load_buf(uri)
   local bufnr = vim.uri_to_bufnr(uri)
   if not vim.api.nvim_buf_is_loaded(bufnr) then
-    vim.fn.bufload(bufnr)
+    local group = vim.api.nvim_create_augroup("TypeScopeSwapExists", { clear = true })
+    vim.api.nvim_create_autocmd("SwapExists", {
+      group = group,
+      callback = function()
+        vim.v.swapchoice = "o"
+      end,
+    })
+    pcall(vim.fn.bufload, bufnr)
+    vim.api.nvim_del_augroup_by_id(group)
   end
   return bufnr
 end

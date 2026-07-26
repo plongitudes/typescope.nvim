@@ -78,6 +78,8 @@ function M.attach(args)
     float.update(st.handle, {
       lines = lines,
       highlights = highlights,
+      ts_injections = st.result.ts_injections,
+      lang = st.opts.lang,
       height = math.min(st.max_height, #lines),
     })
     if focus_id then
