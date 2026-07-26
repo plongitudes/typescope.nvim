@@ -246,10 +246,9 @@ function M.render(roots, opts)
     end
   end
 
-  for i, root in ipairs(roots) do
-    if i > 1 then
-      emit(new_line(), nil) -- blank spacer between top-level entries
-    end
+  -- no spacer lines between top-level entries: the expander markers carry
+  -- the visual grouping (Tony's call, 2026-07-26 — revisit if it feels dense)
+  for _, root in ipairs(roots) do
     root._name_col = strwidth(root.name)
     render_node(root, string.rep(" ", strwidth(style.expanded)), "", 0)
   end
