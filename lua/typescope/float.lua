@@ -157,23 +157,50 @@ function M.close(handle)
 end
 
 --- Open the anchor float from markdown lines (signatureHelp or hover
---- content). Built with stable utils (open_floating_preview) instead of the
---- deprecated builtin handlers — same rendered content, and we get the winid
---- and own the lifecycle (close_events = {}).
+--- content), rendered with core treesitter markdown highlighting + conceal —
+--- the same mechanism builtin hover uses. Deliberately NOT
+--- vim.lsp.util.open_floating_preview: that helper hardcodes a BufLeave
+--- autocmd (independent of close_events) which closes the preview as soon as
+--- any third buffer is entered — i.e. the moment the user focuses the
+--- TypeScope float. We own this window's lifecycle completely.
 ---@param lines string[] markdown lines
 ---@param opts { border: string|string[], max_width: integer, max_height?: integer }
 ---@return typescope.FloatHandle?
 function M.open_markdown(lines, opts)
-  local ok, buf, win = pcall(vim.lsp.util.open_floating_preview, lines, "markdown", {
-    border = opts.border,
-    max_width = opts.max_width,
-    max_height = opts.max_height or 8, -- anchor stays compact; docstrings can be long
-    focusable = false,
-    close_events = {},
-  })
-  if not ok or not win then
-    return nil
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf].bufhidden = "wipe"
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].modifiable = false
+
+  local width = 0
+  for _, l in ipairs(lines) do
+    width = math.max(width, vim.api.nvim_strwidth(l))
   end
+  width = math.max(1, math.min(width, opts.max_width))
+  -- height accounts for soft-wrapped long lines (docstrings)
+  local height = 0
+  for _, l in ipairs(lines) do
+    height = height + math.max(1, math.ceil(vim.api.nvim_strwidth(l) / width))
+  end
+  height = math.max(1, math.min(height, opts.max_height or 8))
+
+  local win = vim.api.nvim_open_win(buf, false, {
+    relative = "cursor",
+    row = 1,
+    col = 0,
+    width = width,
+    height = height,
+    style = "minimal",
+    border = opts.border,
+    focusable = false,
+    zindex = 49, -- just under the TypeScope float
+  })
+  vim.wo[win].wrap = true
+  vim.wo[win].linebreak = true
+  vim.wo[win].conceallevel = 3
+  vim.wo[win].concealcursor = "n"
+  pcall(vim.treesitter.start, buf, "markdown")
+
   return { buf = buf, win = win, ns = ns }
 end
 
