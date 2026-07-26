@@ -20,9 +20,15 @@ local function loc_key(loc)
   return loc.uri .. "#" .. loc.range.start.line
 end
 
--- Stub files are terminal: recursing into typeshed turns `str` into 80 rows.
+-- Terminal library boundary: never recurse into typeshed stubs or the
+-- runtime stdlib (definition is a runtime question, so TextIO lands in
+-- typing.py — stdlib but not "typeshed"). site-packages stays recursable:
+-- that's where user-facing models (pydantic etc.) live.
 local function is_typeshed(uri)
-  return uri:find("typeshed", 1, true) ~= nil
+  if uri:find("typeshed", 1, true) then
+    return true
+  end
+  return uri:find("/lib/python[%d%.]+/") ~= nil and not uri:find("site-packages", 1, true)
 end
 
 --- Resolve a location to a classified type, hopping one aliased/`TYPE_CHECKING`
@@ -114,7 +120,12 @@ local function attach_type(ctx, node, src_buf, refs, depth, ancestry)
               uri = vim.uri_from_bufnr(tbuf),
               range = { start = { line = ann.refs[1].row, character = 0 } },
             }
-            child._lazy = { uri = vim.uri_from_bufnr(tbuf), refs = ann.refs, ancestry = sub_ancestry }
+            child._lazy = {
+              uri = vim.uri_from_bufnr(tbuf),
+              refs = ann.refs,
+              ancestry = sub_ancestry,
+              impl = ctx.impl, -- carry the language impl; never re-guess from a hardcoded name
+            }
           end
         end
         model.add_child(target, child)
@@ -129,7 +140,7 @@ local function attach_type(ctx, node, src_buf, refs, depth, ancestry)
           })
         )
       end
-      if not single then
+      if not single and #target.children > 0 then
         model.add_child(node, target)
       end
     end
@@ -143,9 +154,10 @@ end
 ---@param token typescope.CancelToken
 ---@return typescope.Node[]? roots, string? err
 function M.function_scope(client, bufnr, win, token)
-  local impl = extract.get("python")
+  local ft = vim.bo[bufnr].filetype
+  local impl = extract.get(ft)
   if not impl then
-    return nil, "no extractor for this language"
+    return nil, ("no extractor for filetype %q"):format(ft)
   end
   local ctx = { client = client, token = token, impl = impl }
 
@@ -161,6 +173,21 @@ function M.function_scope(client, bufnr, win, token)
   local fbuf = lsp.load_buf(loc.uri)
   local frow, fcol = lsp.range_start(fbuf, loc.range)
   local info = impl.function_info(fbuf, frow, fcol)
+  if not info then
+    -- Definition is a *runtime* question and may land on an alias assignment
+    -- (stdlib getpass = unix_getpass). Declaration asks the static universe:
+    -- for basedpyright that's the typeshed stub, whose annotated `def` parses
+    -- through the exact same path.
+    local decl = lsp.locate(client, bufnr, pos[1] - 1, pos[2], token, "textDocument/declaration")
+    if async.stale(token) then
+      return nil, "stale"
+    end
+    if decl and loc_key(decl) ~= loc_key(loc) then
+      fbuf = lsp.load_buf(decl.uri)
+      frow, fcol = lsp.range_start(fbuf, decl.range)
+      info = impl.function_info(fbuf, frow, fcol)
+    end
+  end
   if not info then
     return nil, "symbol does not resolve to a function definition"
   end
@@ -222,8 +249,7 @@ function M.recurse(client, node, token, cb)
   end
   node.state.loading = true
   async.run(function()
-    local impl = extract.get("python")
-    local ctx = { client = client, token = token, impl = impl }
+    local ctx = { client = client, token = token, impl = lazy.impl }
     local bufnr = lsp.load_buf(lazy.uri)
     attach_type(ctx, node, bufnr, lazy.refs, 1, lazy.ancestry or {})
     node.state.loading = false

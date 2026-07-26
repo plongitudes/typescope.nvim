@@ -135,19 +135,26 @@ function M.first_location(result)
   return { uri = loc.uri, range = loc.range }
 end
 
---- textDocument/definition at a 0-based (row, byte-col) in bufnr.
+--- Location request (definition/declaration/typeDefinition) at a 0-based
+--- (row, byte-col) in bufnr.
 ---@param client vim.lsp.Client
 ---@param bufnr integer
 ---@param row integer
 ---@param col integer byte column
 ---@param token typescope.CancelToken
+---@param method? string defaults to textDocument/definition
 ---@return { uri: string, range: table }?
-function M.definition(client, bufnr, row, col, token)
+function M.locate(client, bufnr, row, col, token, method)
   local params = {
     textDocument = { uri = vim.uri_from_bufnr(bufnr) },
     position = { line = row, character = M.to_utf16(get_line(bufnr, row), col) },
   }
-  return M.first_location(M.request(client, "textDocument/definition", params, token))
+  return M.first_location(M.request(client, method or "textDocument/definition", params, token))
+end
+
+--- textDocument/definition shorthand (the pipeline's workhorse).
+function M.definition(client, bufnr, row, col, token)
+  return M.locate(client, bufnr, row, col, token, "textDocument/definition")
 end
 
 --- Load (without displaying) the buffer for a uri.

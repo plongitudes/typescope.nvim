@@ -35,3 +35,4 @@ def update_user(record: UserRecord) -> None:
 
 handle = create_server(None, 1.0)
 result = update_user(None)
+secret = ask("token: ")

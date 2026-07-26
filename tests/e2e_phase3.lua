@@ -111,4 +111,25 @@ if lines4 then
 end
 require("typescope").close()
 
+-- declaration fallback: `ask` resolves (definition) to a module alias
+-- assignment, then (declaration) to the annotated def — the getpass case
+for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+  if l:find("secret = ask") then
+    vim.api.nvim_win_set_cursor(0, { i, 10 })
+  end
+end
+require("typescope").open()
+vim.wait(2000, function()
+  return float_lines() ~= nil
+end)
+local lines5 = float_lines()
+check("alias float opened via declaration fallback", lines5 ~= nil)
+if lines5 then
+  local all5 = table.concat(lines5, "\n")
+  check("stub params rendered", all5:find("prompt") and all5:find("echo"))
+  check("stub annotations rendered", all5:find("str") and all5:find("bool"))
+  check("stub return type rendered", all5:find("returns") ~= nil)
+end
+require("typescope").close()
+
 print(failures == 0 and "ALL PASS" or (failures .. " FAILURES"))

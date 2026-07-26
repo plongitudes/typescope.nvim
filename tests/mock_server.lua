@@ -26,10 +26,11 @@ function M.cmd(fixture_dir)
     end
   end
 
-  local function find_definition(word)
-    for _, file in ipairs(files) do
-      for lnum, line in ipairs(vim.fn.readfile(file)) do
-        for _, pat in ipairs({ "^%s*class%s+(" .. word .. ")%f[%W]", "^%s*def%s+(" .. word .. ")%f[%W]" }) do
+  local function find_by_patterns(word, patterns)
+    for _, pat_tpl in ipairs(patterns) do
+      local pat = pat_tpl:gsub("WORD", word)
+      for _, file in ipairs(files) do
+        for lnum, line in ipairs(vim.fn.readfile(file)) do
           if line:match(pat) then
             local col = line:find(word, 1, true) - 1
             return {
@@ -45,6 +46,16 @@ function M.cmd(fixture_dir)
     end
   end
 
+  -- definition mimics basedpyright's runtime-literal answer: a module-level
+  -- alias assignment wins over the def it aliases. declaration is the static
+  -- answer: class/def sites only (the "stub" universe).
+  local function find_definition(word)
+    return find_by_patterns(word, { "^WORD%s*=", "^%s*class%s+WORD%f[%W]", "^%s*def%s+WORD%f[%W]" })
+  end
+  local function find_declaration(word)
+    return find_by_patterns(word, { "^%s*class%s+WORD%f[%W]", "^%s*def%s+WORD%f[%W]" })
+  end
+
   return function(dispatchers)
     local closing = false
     local srv = {}
@@ -52,14 +63,19 @@ function M.cmd(fixture_dir)
     function srv.request(method, params, callback)
       if method == "initialize" then
         callback(nil, {
-          capabilities = { definitionProvider = true, positionEncoding = "utf-16" },
+          capabilities = {
+            definitionProvider = true,
+            declarationProvider = true,
+            positionEncoding = "utf-16",
+          },
         })
       elseif method == "shutdown" then
         callback(nil, nil)
-      elseif method == "textDocument/definition" then
+      elseif method == "textDocument/definition" or method == "textDocument/declaration" then
         local fname = vim.uri_to_fname(params.textDocument.uri)
         local word = word_at(fname, params.position.line, params.position.character)
-        callback(nil, word and find_definition(word) or nil)
+        local finder = method == "textDocument/definition" and find_definition or find_declaration
+        callback(nil, word and finder(word) or nil)
       else
         callback(nil, nil)
       end
