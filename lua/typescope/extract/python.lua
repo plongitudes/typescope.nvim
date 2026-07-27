@@ -86,16 +86,20 @@ function M.function_info(src, row, col)
     for i = 0, params_node:named_child_count() - 1 do
       local p = params_node:named_child(i)
       local t = p:type()
-      local entry
+      local entry, name_node
       if t == "identifier" then
+        name_node = p
         entry = { name = text(p, src) }
       elseif t == "typed_parameter" then
-        entry = { name = text(p:named_child(0), src), type_node = field1(p, "type") }
+        name_node = p:named_child(0)
+        entry = { name = text(name_node, src), type_node = field1(p, "type") }
       elseif t == "default_parameter" then
-        entry = { name = text(field1(p, "name"), src), default = clean(text(field1(p, "value"), src)) }
+        name_node = field1(p, "name")
+        entry = { name = text(name_node, src), default = clean(text(field1(p, "value"), src)) }
       elseif t == "typed_default_parameter" then
+        name_node = field1(p, "name")
         entry = {
-          name = text(field1(p, "name"), src),
+          name = text(name_node, src),
           type_node = field1(p, "type"),
           default = clean(text(field1(p, "value"), src)),
         }
@@ -103,11 +107,52 @@ function M.function_info(src, row, col)
         entry = { name = text(p, src) }
       end
       if entry and entry.name ~= "self" and entry.name ~= "cls" then
+        if name_node then
+          -- position of the bare name: where hover answers "(parameter) x: T"
+          -- with pyright's inferred type for unannotated params
+          entry.name_row, entry.name_col = name_node:range()
+        end
         table.insert(info.params, entry)
       end
     end
   end
   return info
+end
+
+--- Extract the evaluated type from a pyright hover response for `name`.
+--- Pyright renders hovers like:
+---   (type alias) LoopSetupType: type[Literal['auto', 'none']]
+---   (parameter) count: int
+---   (variable) x: dict[str, int]
+--- Returns the right-hand side, or the whole signature when it has no
+--- name-prefix shape, or nil when the hover holds nothing useful.
+---@param lines string[] hover markdown lines
+---@param name string the symbol that was hovered
+---@return string?
+function M.evaluated_from_hover(lines, name)
+  local code = {}
+  local inside = false
+  for _, l in ipairs(lines) do
+    if l:match("^```") then
+      if inside then
+        break
+      end
+      inside = true
+    elseif inside then
+      table.insert(code, l)
+    end
+  end
+  local sig = vim.trim(table.concat(code, " "))
+  if sig == "" then
+    return nil
+  end
+  if sig:sub(1, 1) == "(" then
+    sig = sig:gsub("^%b()%s*", "")
+  end
+  local last = name:match("[%w_]+$") or name
+  local rest = sig:match("^" .. vim.pesc(last) .. "%s*[:=]%s*(.+)$")
+  local out = clean(rest or sig)
+  return out ~= "" and out or nil
 end
 
 -- typing.X aliases that have modern lowercase builtin forms

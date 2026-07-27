@@ -186,19 +186,17 @@ function M.signature_markdown(result, ft)
   return lines and #lines > 0 and lines or nil
 end
 
---- Hover contents as markdown lines — the anchor fallback when signatureHelp
---- is empty (servers only answer it with the cursor inside the call parens;
---- hover answers anywhere on the symbol).
+--- Hover contents as markdown lines at a 0-based (row, byte-col).
 ---@param client vim.lsp.Client
 ---@param bufnr integer
----@param win integer
+---@param row integer
+---@param col integer byte column
 ---@param token typescope.CancelToken
 ---@return string[]?
-function M.hover_markdown(client, bufnr, win, token)
-  local pos = vim.api.nvim_win_get_cursor(win)
+function M.hover_lines(client, bufnr, row, col, token)
   local params = {
     textDocument = { uri = vim.uri_from_bufnr(bufnr) },
-    position = { line = pos[1] - 1, character = M.to_utf16(get_line(bufnr, pos[1] - 1), pos[2]) },
+    position = { line = row, character = M.to_utf16(get_line(bufnr, row), col) },
   }
   local result = M.request(client, "textDocument/hover", params, token)
   if not result or not result.contents then
@@ -209,6 +207,19 @@ function M.hover_markdown(client, bufnr, win, token)
     table.remove(lines)
   end
   return #lines > 0 and lines or nil
+end
+
+--- Hover at the window's cursor — the anchor fallback when signatureHelp is
+--- empty (servers only answer it with the cursor inside the call parens;
+--- hover answers anywhere on the symbol).
+---@param client vim.lsp.Client
+---@param bufnr integer
+---@param win integer
+---@param token typescope.CancelToken
+---@return string[]?
+function M.hover_markdown(client, bufnr, win, token)
+  local pos = vim.api.nvim_win_get_cursor(win)
+  return M.hover_lines(client, bufnr, pos[1] - 1, pos[2], token)
 end
 
 --- NAME of the active parameter, or nil. Matching by name rather than index

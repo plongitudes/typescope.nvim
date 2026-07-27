@@ -111,9 +111,29 @@ function M.cmd(fixture_dir)
       elseif method == "textDocument/hover" then
         local fname = vim.uri_to_fname(params.textDocument.uri)
         local word = word_at(fname, params.position.line, params.position.character)
-        callback(nil, word and {
-          contents = { kind = "markdown", value = "mock hover for `" .. word .. "`" },
-        } or nil)
+        if word then
+          -- mimic pyright hover shapes: "(type alias) X: rhs" for module-level
+          -- alias assignments, "(parameter) x: int" otherwise
+          local value
+          for _, file in ipairs(files) do
+            for _, line in ipairs(vim.fn.readfile(file)) do
+              local rhs = line:match("^" .. word .. "%s*=%s*(.+)$")
+              if rhs then
+                value = ("(type alias) %s: %s"):format(word, rhs)
+                break
+              end
+            end
+            if value then
+              break
+            end
+          end
+          value = value or ("(parameter) %s: int"):format(word)
+          callback(nil, {
+            contents = { kind = "markdown", value = "```python\n" .. value .. "\n```" },
+          })
+        else
+          callback(nil, nil)
+        end
       else
         callback(nil, nil)
       end

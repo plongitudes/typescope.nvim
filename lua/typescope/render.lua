@@ -218,7 +218,15 @@ function M.render(roots, opts)
     -- method "signatures" like (path: str) -> bytes aren't parseable
     -- expressions, so they keep block coloring
     local injectable = node.kind ~= "method" and "replace" or nil
-    table.insert(segments, { type_text, "TypeScopeType", injectable })
+    -- an unannotated param's declared type is only implicit Any; when we have
+    -- pyright's inferred type, show just that instead of "Any ≈ T"
+    if not (node.evaluated and type_text == "Any") then
+      table.insert(segments, { type_text, "TypeScopeType", injectable })
+    end
+    if node.evaluated then
+      table.insert(segments, { (type_text == "Any" and "" or " ") .. style.evaluated, "TypeScopeEvaluated" })
+      table.insert(segments, { node.evaluated, "TypeScopeEvaluated" })
+    end
     if node.type.category == "unresolved" then
       table.insert(segments, { " " .. style.unresolved, "TypeScopeUnresolved", nil, true })
     end

@@ -10,6 +10,7 @@ local groups = {
   TypeScopeChrome = { link = "NonText" },
   TypeScopeKeyword = { link = "@keyword" },
   TypeScopeBadge = { link = "@attribute" },
+  TypeScopeEvaluated = { link = "Comment" },
   TypeScopeUnresolved = { link = "DiagnosticWarn" },
   TypeScopeHint = { link = "Comment" },
   TypeScopeActive = { link = "LspSignatureActiveParameter" },

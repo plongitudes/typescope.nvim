@@ -220,6 +220,33 @@ for _, w in ipairs(all_floats()) do
   pcall(vim.api.nvim_win_close, w, true)
 end
 
+-- hover-backed evaluated leaves: alias annotations decorate with the
+-- evaluated type; unannotated params show pyright's inference
+for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+  if l:find("configured = configure") then
+    vim.api.nvim_win_set_cursor(0, { i, 14 })
+  end
+end
+require("typescope").open()
+vim.wait(2000, function()
+  return float_lines() ~= nil
+end)
+local lines6 = float_lines()
+check("evaluated-leaf float opened", lines6 ~= nil)
+if lines6 then
+  local all6 = table.concat(lines6, "\n")
+  check("alias leaf keeps declared name", all6:find("LoopMode") ~= nil)
+  check("alias leaf decorated with evaluated type", all6:find("≈", 1, true) ~= nil and all6:find("Literal") ~= nil)
+  local count_ok = false
+  for _, l in ipairs(lines6) do
+    if l:find("count") and l:find("≈ int", 1, true) and not l:find("Any") then
+      count_ok = true
+    end
+  end
+  check("unannotated param shows inferred type, Any suppressed", count_ok)
+end
+require("typescope").close()
+
 -- annotation normalization: old typing syntax → modern display
 do
   local py = require("typescope.extract.python")

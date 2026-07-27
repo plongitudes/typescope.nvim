@@ -18,6 +18,7 @@
 ---@field default? string source text of the default value
 ---@field badge? string e.g. "NotRequired" for TypedDict fields
 ---@field origin? string parent class name for inherited fields (rendered as ↑Parent)
+---@field evaluated? string pyright's evaluated type for leaves structural resolution couldn't crack (rendered as ≈ T)
 ---@field source? { uri: string, range: table } where the type is declared
 ---@field children typescope.Node[]
 ---@field state typescope.NodeState
@@ -47,6 +48,7 @@ function M.new(spec)
     default = spec.default,
     badge = spec.badge,
     origin = spec.origin,
+    evaluated = spec.evaluated,
     source = spec.source,
     children = {},
     state = {

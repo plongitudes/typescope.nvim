@@ -64,6 +64,35 @@ local function type_info(display, refs)
   }
 end
 
+--- Structural resolution came up empty for this node (alias, TypeVar,
+--- unresolvable name): ask the evaluated universe instead. Hovers the refs in
+--- order and keeps the first *informative* answer — a hover that merely
+--- echoes the name back (a class behind the typeshed guard says "(class)
+--- Protocol") decorates nothing, but an alias expansion does.
+---@param ctx typescope.ResolveCtx
+---@param node typescope.Node
+---@param src_buf integer
+---@param refs table[] annotation refs
+local function evaluate_leaf(ctx, node, src_buf, refs)
+  for i = 1, math.min(#refs, 3) do
+    local ref = refs[i]
+    local lines = lsp.hover_lines(ctx.client, src_buf, ref.row, ref.col, ctx.token)
+    if async.stale(ctx.token) then
+      return
+    end
+    local evaluated = lines and ctx.impl.evaluated_from_hover(lines, ref.name)
+    if
+      evaluated
+      and evaluated ~= node.type.display
+      and evaluated ~= ref.name
+      and evaluated ~= ref.name:match("[%w_]+$")
+    then
+      node.evaluated = evaluated
+      return
+    end
+  end
+end
+
 --- Chase each user-type ref in an annotation and attach the results to
 --- `node`. Single ref covering the whole annotation → fields attach directly
 --- (the common `config: ServerConfig` case); otherwise each resolved type
@@ -190,6 +219,11 @@ local function attach_type(ctx, node, src_buf, refs, depth, ancestry)
       end
     end
   end
+  -- every ref failed structurally (alias, TypeVar, unresolvable): decorate
+  -- the leaf with pyright's evaluated view instead of leaving a dead end
+  if #node.children == 0 and #refs > 0 and not node._lazy then
+    evaluate_leaf(ctx, node, src_buf, refs)
+  end
 end
 
 --- Full pipeline for the function under the cursor. Coroutine context only.
@@ -251,6 +285,16 @@ function M.function_scope(client, bufnr, win, token)
       attach_type(ctx, node, fbuf, ann.refs, 1, {})
       if async.stale(token) then
         return nil, "stale"
+      end
+    elseif not p.type_node and p.name_row then
+      -- unannotated param: pyright still infers a type — hover the name
+      local lines = lsp.hover_lines(client, fbuf, p.name_row, p.name_col, token)
+      if async.stale(token) then
+        return nil, "stale"
+      end
+      local evaluated = lines and impl.evaluated_from_hover(lines, p.name)
+      if evaluated and evaluated ~= "Any" then
+        node.evaluated = evaluated
       end
     end
     -- auto-expand policy (v1): params with resolved structure start open,

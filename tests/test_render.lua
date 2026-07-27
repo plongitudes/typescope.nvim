@@ -237,6 +237,32 @@ eq_lines(
   }
 )
 
+-- 8c. evaluated decorations: alias keeps declared name + ≈ suffix; an
+-- unannotated param (implicit Any) shows only the inferred type
+eq_lines(
+  "evaluated decorations",
+  render.render({
+    model.new({
+      name = "mode",
+      kind = "param",
+      type = { display = "LoopMode", category = "generic" },
+      evaluated = "Literal['auto', 'manual']",
+      default = '"auto"',
+    }),
+    model.new({
+      name = "count",
+      kind = "param",
+      type = { display = "Any", category = "builtin" },
+      evaluated = "int",
+      default = "3",
+    }),
+  }, opts({ style = styles.get("rounded"), show_examples = false })).lines,
+  {
+    '· mode   LoopMode ≈ Literal[\'auto\', \'manual\'] = "auto"',
+    '· count  ≈ int = 3',
+  }
+)
+
 -- 8. inherited fields render with the origin tag
 eq_lines(
   "origin tag on inherited fields",

@@ -230,4 +230,29 @@ local ucls = py.type_at(unmarked, 0, 7)
 check("unmarked subclass: Field(...) sentinel yields no default", ucls.fields[1].default == nil)
 check("unmarked subclass: Field positional default unwrapped", ucls.fields[2].default == '"anon"')
 
+---------------------------------------------------------------- hover parsing
+local function hov(value)
+  return { "```python", value, "```" }
+end
+local hover_cases = {
+  { hov("(type alias) LoopSetupType: type[Literal['auto', 'none']]"), "LoopSetupType", "type[Literal['auto', 'none']]" },
+  { hov("(parameter) count: int"), "count", "int" },
+  { hov("(variable) x: dict[str, int]"), "x", "dict[str, int]" },
+  { hov("(type variable) T"), "T", "T" },
+  { hov("(class) Widget"), "Widget", "Widget" },
+  { hov("(type alias) M: str"), "pkg.M", "str" }, -- dotted ref matches on final name
+}
+for _, case in ipairs(hover_cases) do
+  local got = py.evaluated_from_hover(case[1], case[2])
+  check(("hover parse %s -> %s"):format(case[2], case[3]), got == case[3], got)
+end
+check("empty hover yields nil", py.evaluated_from_hover({ "```python", "```" }, "x") == nil)
+
+-- name positions recorded for unannotated params
+local pos_info = py.function_info("def f(plain, typed: int): ...", 0, 4)
+check(
+  "param name positions recorded",
+  pos_info.params[1].name_row == 0 and pos_info.params[1].name_col == 6 and pos_info.params[2].name_col == 13
+)
+
 print(failures == 0 and "EXTRACT ALL PASS" or ("EXTRACT " .. failures .. " FAILURES"))
