@@ -61,6 +61,15 @@ if lines then
   check("param timeout with default", all:find("timeout") and all:find("30%.0"))
   check("returns Response present, collapsed", all:find("returns") and not all:find("status"))
   check("heuristic examples rendered (host -> localhost)", all:find("localhost") ~= nil)
+  check("inherited field with origin tag", all:find("env") ~= nil and all:find("↑BaseConfig", 1, true) ~= nil)
+  local _, override_count = all:gsub("verbose", "")
+  local verbose_badged = false
+  for _, l in ipairs(lines) do
+    if l:find("verbose") and l:find("↑", 1, true) then
+      verbose_badged = true
+    end
+  end
+  check("child override wins (verbose appears once, unbadged)", override_count == 1 and not verbose_badged)
 
   -- expand retry (depth 2 resolved its fields inline)
   local _, w = float_lines()

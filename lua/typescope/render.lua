@@ -152,13 +152,16 @@ function M.render(roots, opts)
       -- "dict[str," is not parseable source, so continuations keep the base
       -- group color only
       local inject = seg[3]
+      -- atomic segments (badges, origin tags, indicators) never split
+      -- mid-word — they jump whole to the next line instead
+      local atomic = seg[4]
       while text ~= "" do
         local avail = opts.max_width - line.width
         if strwidth(text) <= avail then
           line:add(text, group, text == seg[1] and inject or nil)
           text = ""
-        elseif avail < 8 and line.width > cont_pad then
-          -- too little room to start; push the whole segment down a line
+        elseif (atomic or avail < 8) and line.width > cont_pad then
+          -- push the whole segment down a line
           line = continuation()
         else
           local cut = math.max(1, find_break_point(text, avail))
@@ -217,10 +220,13 @@ function M.render(roots, opts)
     local injectable = node.kind ~= "method" and "replace" or nil
     table.insert(segments, { type_text, "TypeScopeType", injectable })
     if node.type.category == "unresolved" then
-      table.insert(segments, { " " .. style.unresolved, "TypeScopeUnresolved" })
+      table.insert(segments, { " " .. style.unresolved, "TypeScopeUnresolved", nil, true })
     end
     if node.badge then
-      table.insert(segments, { " " .. node.badge, "TypeScopeBadge" })
+      table.insert(segments, { " " .. node.badge, "TypeScopeBadge", nil, true })
+    end
+    if node.origin then
+      table.insert(segments, { " " .. style.inherit .. node.origin, "TypeScopeHint", nil, true })
     end
     if node.default then
       table.insert(segments, { " = ", "TypeScopeChrome" })

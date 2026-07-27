@@ -98,18 +98,63 @@ local function attach_type(ctx, node, src_buf, refs, depth, ancestry)
         })
       end
       local sub_ancestry = vim.tbl_extend("force", {}, ancestry, { [loc_key(realloc)] = true })
+
+      -- own fields first, then inherited ones (child overrides win), each
+      -- inherited entry tagged with its origin class (Tony's call: origin
+      -- badge presentation, 2026-07-27)
+      local entries = {}
+      local seen_names = {}
       for _, f in ipairs(cls.fields) do
-        local ann = f.type_node and ctx.impl.annotation(tbuf, f.type_node)
+        seen_names[f.name] = true
+        table.insert(entries, { f = f, buf = tbuf })
+      end
+      local function walk_bases(c, cbuf, base_ancestry, level)
+        if level > 3 then
+          return -- inheritance chains deeper than this are their own problem
+        end
+        for _, base in ipairs(c.bases or {}) do
+          if async.stale(ctx.token) then
+            return
+          end
+          local bloc = lsp.definition(ctx.client, cbuf, base.row, base.col, ctx.token)
+          if bloc and not base_ancestry[loc_key(bloc)] then
+            local bcls, bbuf, brealloc = class_at_location(ctx, bloc, 0)
+            if bcls then
+              -- UserCreate(UserBase) classifies as plain "class" — only the
+              -- parent names BaseModel. Adopt the parent's construct category.
+              if cls.category == "class" and bcls.category ~= "class" then
+                cls.category = bcls.category
+                target.type.category = bcls.category
+              end
+              local next_ancestry =
+                vim.tbl_extend("force", {}, base_ancestry, { [loc_key(brealloc)] = true })
+              for _, f in ipairs(bcls.fields) do
+                if not seen_names[f.name] then
+                  seen_names[f.name] = true
+                  table.insert(entries, { f = f, buf = bbuf, origin = bcls.class_name })
+                end
+              end
+              walk_bases(bcls, bbuf, next_ancestry, level + 1)
+            end
+          end
+        end
+      end
+      walk_bases(cls, tbuf, sub_ancestry, 1)
+
+      for _, entry in ipairs(entries) do
+        local f, fbuf = entry.f, entry.buf
+        local ann = f.type_node and ctx.impl.annotation(fbuf, f.type_node)
         local child = model.new({
           name = f.name,
           kind = "field",
           type = ann and type_info(ann.display, ann.refs) or nil,
           default = f.default,
           badge = f.badge,
+          origin = entry.origin,
         })
         if ann and #ann.refs > 0 then
           if depth < cfg.depth then
-            attach_type(ctx, child, tbuf, ann.refs, depth + 1, sub_ancestry)
+            attach_type(ctx, child, fbuf, ann.refs, depth + 1, sub_ancestry)
             if async.stale(ctx.token) then
               return
             end
@@ -117,11 +162,11 @@ local function attach_type(ctx, node, src_buf, refs, depth, ancestry)
             -- beyond depth: leave a lazy hook for `r` / expand
             child.state.loaded = false
             child.source = {
-              uri = vim.uri_from_bufnr(tbuf),
+              uri = vim.uri_from_bufnr(fbuf),
               range = { start = { line = ann.refs[1].row, character = 0 } },
             }
             child._lazy = {
-              uri = vim.uri_from_bufnr(tbuf),
+              uri = vim.uri_from_bufnr(fbuf),
               refs = ann.refs,
               ancestry = sub_ancestry,
               impl = ctx.impl, -- carry the language impl; never re-guess from a hardcoded name

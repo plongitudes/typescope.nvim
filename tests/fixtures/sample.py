@@ -11,12 +11,19 @@ class RetryPolicy:
 
 
 @dataclass
-class ServerConfig:
+class BaseConfig:
+    env: str = "dev"
+    verbose: bool = False
+
+
+@dataclass
+class ServerConfig(BaseConfig):
     host: str
     port: int
     debug: bool = False
     retry: RetryPolicy = None
     timeout_ms: int | None = None
+    verbose: bool = True  # overrides BaseConfig.verbose
 
 
 class UserRecord(TypedDict, total=False):

@@ -17,6 +17,7 @@
 ---@field type typescope.TypeInfo
 ---@field default? string source text of the default value
 ---@field badge? string e.g. "NotRequired" for TypedDict fields
+---@field origin? string parent class name for inherited fields (rendered as ↑Parent)
 ---@field source? { uri: string, range: table } where the type is declared
 ---@field children typescope.Node[]
 ---@field state typescope.NodeState
@@ -45,6 +46,7 @@ function M.new(spec)
     type = spec.type or { raw = "?", display = "?", category = "unresolved" },
     default = spec.default,
     badge = spec.badge,
+    origin = spec.origin,
     source = spec.source,
     children = {},
     state = {

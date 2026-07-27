@@ -238,8 +238,19 @@ function M.annotation(src, type_node)
   return { display = ok and display or clean(text(type_node, src)), refs = refs }
 end
 
+-- Construct-marker bases: they set the category but are never chased as
+-- parent classes with fields of their own.
+local MARKER_BASES = {
+  TypedDict = true,
+  BaseModel = true,
+  NamedTuple = true,
+  Protocol = true,
+  Generic = true,
+  object = true,
+}
+
 ---@param cls TSNode class_definition
----@return string category, boolean total_false
+---@return string category, boolean total_false, table[] bases chaseable parents {name,row,col}
 local function classify(cls, src)
   local category = "class"
   local parent = cls:parent()
@@ -257,6 +268,17 @@ local function classify(cls, src)
     end
   end
   local total_false = false
+  local bases = {}
+  local function add_base(node)
+    -- node is an identifier or attribute; position on the final identifier
+    local name = text(node, src)
+    if MARKER_BASES[name:match("[%w_]+$")] then
+      return
+    end
+    local target = node:type() == "attribute" and field1(node, "attribute") or node
+    local r, c = target:range()
+    table.insert(bases, { name = name, row = r, col = c })
+  end
   local superclasses = field1(cls, "superclasses")
   if superclasses then
     for i = 0, superclasses:named_child_count() - 1 do
@@ -272,19 +294,29 @@ local function classify(cls, src)
           category = "namedtuple"
         elseif name == "Protocol" then
           category = "protocol"
+        else
+          add_base(base)
+        end
+      elseif bt == "subscript" or bt == "generic_type" then
+        -- parameterized base like Base[int] or Generic[T]: chase the head
+        local head = field1(base, "value") or base:named_child(0)
+        if head and (head:type() == "identifier" or head:type() == "attribute") then
+          add_base(head)
         end
       elseif bt == "keyword_argument" and text(base, src):gsub("%s", "") == "total=False" then
         total_false = true
       end
     end
   end
-  return category, total_false
+  return category, total_false, bases
 end
 
 --- Field default, unwrapping dataclasses.field(...) / pydantic.Field(...)
---- down to the actual default value.
-local function unwrap_default(right, src, category)
-  if (category == "pydantic" or category == "dataclass") and right:type() == "call" then
+--- down to the actual default value. Not gated on category: a pydantic model
+--- inheriting from a user base classifies as plain "class" here (only the
+--- base names BaseModel) but still uses Field — the call shape is unambiguous.
+local function unwrap_default(right, src)
+  if right:type() == "call" then
     local fn = field1(right, "function")
     local fname = fn and text(fn, src):match("[%w_]+$")
     if fname == "Field" or fname == "field" then
@@ -343,12 +375,13 @@ function M.type_at(src, row, col)
     return nil
   end
 
-  local category, total_false = classify(cls, src)
+  local category, total_false, bases = classify(cls, src)
   local result = {
     category = category,
     class_name = text(field1(cls, "name"), src),
     fields = {},
     methods = {},
+    bases = bases,
   }
 
   local body = field1(cls, "body")
@@ -390,7 +423,7 @@ function M.type_at(src, row, col)
             table.insert(result.fields, {
               name = fname,
               type_node = inner,
-              default = right and unwrap_default(right, src, category) or nil,
+              default = right and unwrap_default(right, src) or nil,
               badge = badge,
             })
           end

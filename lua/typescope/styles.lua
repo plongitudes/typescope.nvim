@@ -6,6 +6,7 @@
 ---@field collapsed string marker on a collapsed expandable node
 ---@field leaf string marker on a non-expandable root (aligns with expanded/collapsed)
 ---@field unresolved string indicator when TreeSitter parsing failed
+---@field inherit string prefix for the origin class of inherited fields
 
 local M = {}
 
@@ -21,6 +22,7 @@ local charsets = {
     collapsed = "▸ ",
     leaf = "· ",
     unresolved = "[?]",
+    inherit = "↑",
   },
   ascii = {
     vert = "| ",
@@ -30,6 +32,7 @@ local charsets = {
     collapsed = "> ",
     leaf = "- ",
     unresolved = "[?]",
+    inherit = "^",
   },
   minimal = {
     vert = "  ",
@@ -39,6 +42,7 @@ local charsets = {
     collapsed = "+ ",
     leaf = "  ",
     unresolved = "[?]",
+    inherit = "^",
   },
   rounded = {
     vert = "│ ",
@@ -48,6 +52,7 @@ local charsets = {
     collapsed = "▸ ",
     leaf = "· ",
     unresolved = "[?]",
+    inherit = "↑",
   },
 }
 

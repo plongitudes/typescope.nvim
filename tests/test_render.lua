@@ -207,4 +207,56 @@ for _, ij in ipairs(wide.ts_injections) do
 end
 check("split spans do not inject; unsplit defaults still do", not split_injected and default_injected)
 
+-- 8b. atomic segments (origin/badges) never split mid-word when wrapping
+eq_lines(
+  "atomic origin tag jumps whole to continuation",
+  render.render({
+    model.new({
+      name = "px",
+      kind = "param",
+      expanded = true,
+      type = { display = "Wrap", category = "dataclass" },
+      children = {
+        {
+          name = "proxy",
+          type = {
+            display = "ClassVar[dict[weakref.ref[Any], weakref.ref[Proxy[Any]]]]",
+            category = "generic",
+          },
+          origin = "ReversibleProxy",
+          default = "{}",
+        },
+      },
+    }),
+  }, opts({ style = styles.get("rounded"), max_width = 44, show_examples = false })).lines,
+  {
+    '▾ px  Wrap',
+    '  ╰─ proxy  ClassVar[dict[weakref.ref[Any],',
+    '            weakref.ref[Proxy[Any]]]]',
+    '             ↑ReversibleProxy = {}',
+  }
+)
+
+-- 8. inherited fields render with the origin tag
+eq_lines(
+  "origin tag on inherited fields",
+  render.render({
+    model.new({
+      name = "cfg",
+      kind = "param",
+      expanded = true,
+      type = { display = "Child", category = "dataclass" },
+      children = {
+        { name = "z", type = { display = "float", category = "builtin" } },
+        { name = "x", type = { display = "int", category = "builtin" }, origin = "Base" },
+      },
+    }),
+  }, opts({ show_examples = false })).lines,
+  {
+    '▾ cfg  Child',
+    '  ├─ z  float',
+    '  └─ x  int ↑Base',
+  }
+)
+
 print(failures == 0 and "RENDER ALL PASS" or ("RENDER " .. failures .. " FAILURES"))

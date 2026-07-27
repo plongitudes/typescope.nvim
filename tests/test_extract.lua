@@ -177,4 +177,57 @@ check("plain class still yields fields", type_of("Vanilla").category == "class" 
 local _, marker = py.type_at(cls_src, 1, 25) -- on 'dataclass' in the from-import
 check("import statement yields marker", marker == "import")
 
+---------------------------------------------------------------- base classes
+local inh_src = [[
+class Base:
+    x: int
+
+class Mixin:
+    y: str
+
+class Child(Base, Mixin, Generic[T]):
+    z: float
+
+class Sub(pkg.RemoteBase, BaseModel):
+    w: int
+
+class Param(Base[int]):
+    v: int
+]]
+local function bases_of(name)
+  local row
+  for i, l in ipairs(vim.split(inh_src, "\n")) do
+    if l:find("class " .. name) then
+      row = i - 1
+    end
+  end
+  local res = py.type_at(inh_src, row, 7)
+  local names = {}
+  for _, b in ipairs(res.bases) do
+    table.insert(names, b.name)
+  end
+  return names, res
+end
+
+local child_bases = bases_of("Child")
+check(
+  "bases collected in order, Generic skipped",
+  #child_bases == 2 and child_bases[1] == "Base" and child_bases[2] == "Mixin"
+)
+local sub_bases, sub = bases_of("Sub")
+check("dotted base kept, marker base sets category", #sub_bases == 1 and sub_bases[1] == "pkg.RemoteBase" and sub.category == "pydantic")
+local param_bases = bases_of("Param")
+check("parameterized base chases the head", #param_bases == 1 and param_bases[1] == "Base")
+
+-- Field() unwraps even when the class isn't locally marked pydantic
+-- (UserCreate(UserBase) case: only the parent names BaseModel)
+local unmarked = [[
+class UserCreate(UserBase):
+    password: str = Field(..., min_length=8)
+    nickname: str = Field("anon")
+]]
+local ucls = py.type_at(unmarked, 0, 7)
+check("unmarked subclass: Field(...) sentinel yields no default", ucls.fields[1].default == nil)
+check("unmarked subclass: Field positional default unwrapped", ucls.fields[2].default == '"anon"')
+
 print(failures == 0 and "EXTRACT ALL PASS" or ("EXTRACT " .. failures .. " FAILURES"))
