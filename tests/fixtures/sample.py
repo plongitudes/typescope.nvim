@@ -41,6 +41,11 @@ def update_user(record: UserRecord) -> None:
 
 
 LoopMode = Literal["auto", "manual"]
+Payload = UserRecord
+
+
+def send(data: Payload) -> None:
+    ...
 
 
 def configure(mode: LoopMode, count=3) -> None:
@@ -51,3 +56,4 @@ handle = create_server(None, 1.0)
 result = update_user(None)
 secret = ask("token: ")
 configured = configure("auto", 1)
+sent = send(None)

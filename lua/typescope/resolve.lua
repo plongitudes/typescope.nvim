@@ -203,8 +203,9 @@ end
 ---@param src_buf integer buffer the refs' positions live in
 ---@param depth integer 1 = fields of a param's type
 ---@param ancestry table<string, true> loc_keys on the current path (cycle guard)
-attach_type = function(ctx, node, src_buf, refs, depth, ancestry)
-  local single = #refs == 1 and node.type.display == refs[1].name
+---@param force_single? boolean treat a lone ref as covering the whole node (alias transparency)
+attach_type = function(ctx, node, src_buf, refs, depth, ancestry, force_single)
+  local single = (force_single and #refs == 1) or (#refs == 1 and node.type.display == refs[1].name)
   for _, ref in ipairs(refs) do
     if async.stale(ctx.token) then
       return
@@ -233,6 +234,30 @@ attach_type = function(ctx, node, src_buf, refs, depth, ancestry)
       end
       if not single and #target.children > 0 then
         model.add_child(node, target)
+      end
+    elseif loc and not ancestry[loc_key(loc)] and not is_typeshed(loc.uri) then
+      -- alias hop: definition landed on `X = SomeClass` / `X = A | B` — parse
+      -- the RHS as an annotation and chase through it transparently, keeping
+      -- the alias name as the displayed vocabulary
+      local abuf = lsp.load_buf(loc.uri)
+      local arow, acol = lsp.range_start(abuf, loc.range)
+      local rhs = ctx.impl.alias_at(abuf, arow, acol)
+      local alias_ann = rhs and ctx.impl.annotation(abuf, rhs)
+      if alias_ann and #alias_ann.refs > 0 then
+        local alias_ancestry = vim.tbl_extend("force", {}, ancestry, { [loc_key(loc)] = true })
+        local target = single and node
+          or model.new({
+            name = ref.name,
+            kind = "variant",
+            type = { raw = ref.name, display = ref.name, category = "generic" },
+          })
+        attach_type(ctx, target, abuf, alias_ann.refs, depth, alias_ancestry, #alias_ann.refs == 1)
+        if async.stale(ctx.token) then
+          return
+        end
+        if not single and #target.children > 0 then
+          model.add_child(node, target)
+        end
       end
     end
   end

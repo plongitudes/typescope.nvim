@@ -247,6 +247,27 @@ if lines6 then
 end
 require("typescope").close()
 
+-- alias expansion: `data: Payload` where Payload = UserRecord resolves
+-- through the alias transparently — fields attach, alias name stays displayed
+for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+  if l:find("sent = send") then
+    vim.api.nvim_win_set_cursor(0, { i, 8 })
+  end
+end
+require("typescope").open()
+vim.wait(2000, function()
+  return float_lines() ~= nil
+end)
+local lines8 = float_lines()
+check("alias-expansion float opened", lines8 ~= nil)
+if lines8 then
+  local all8 = table.concat(lines8, "\n")
+  check("alias name kept as vocabulary", all8:find("Payload") ~= nil)
+  check("fields resolved through alias", all8:find("email") ~= nil and all8:find("age") ~= nil)
+  check("badges survive the alias hop", all8:find("NotRequired") ~= nil)
+end
+require("typescope").close()
+
 -- class under cursor: show the type's own structure (incl. inheritance)
 for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
   local col = l:find("config: ServerConfig")

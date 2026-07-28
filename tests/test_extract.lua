@@ -230,6 +230,31 @@ local ucls = py.type_at(unmarked, 0, 7)
 check("unmarked subclass: Field(...) sentinel yields no default", ucls.fields[1].default == nil)
 check("unmarked subclass: Field positional default unwrapped", ucls.fields[2].default == '"anon"')
 
+---------------------------------------------------------------- alias_at
+local alias_src = [[
+LoopMode = Literal["auto", "manual"]
+Alias = SomeClass
+U = ClassA | ClassB
+T: TypeAlias = list[int]
+x: int = 5
+handle = create()
+port = 8080
+]]
+local function alias_rhs(row, col)
+  local rhs = py.alias_at(alias_src, row, col)
+  return rhs and rhs:type() or nil
+end
+check("Literal subscript alias", alias_rhs(0, 2) == "subscript")
+check("plain class alias", alias_rhs(1, 2) == "identifier")
+check("union alias", alias_rhs(2, 0) == "binary_operator")
+check("TypeAlias-annotated alias", alias_rhs(3, 0) == "subscript")
+check("annotated variable is not an alias", alias_rhs(4, 0) == nil)
+check("call assignment is not an alias", alias_rhs(5, 2) == nil)
+check("value assignment is not an alias", alias_rhs(6, 2) == nil)
+check("position on RHS is not the alias name", py.alias_at(alias_src, 1, 12) == nil)
+local tstmt_rhs = py.alias_at("type Vec = list[float]\n", 0, 5)
+check("3.12 type statement alias", tstmt_rhs ~= nil and tstmt_rhs:type() == "type")
+
 ---------------------------------------------------------------- hover parsing
 local function hov(value)
   return { "```python", value, "```" }

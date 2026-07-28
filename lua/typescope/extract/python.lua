@@ -119,6 +119,53 @@ function M.function_info(src, row, col)
   return info
 end
 
+--- When (row, col) sits on the NAME of a type-alias definition, return the
+--- RHS node to be parsed as an annotation. Recognized shapes:
+---   X = SomeClass          X = A | B          X = Optional[Thing]
+---   X: TypeAlias = ...     type X = ...       (3.12 type statement)
+--- Value-ish assignments (calls, literals) return nil — `handle = create()`
+--- is not an alias.
+---@param src integer|string
+---@param row integer
+---@param col integer
+---@return TSNode? rhs
+function M.alias_at(src, row, col)
+  local node = node_at(src, row, col)
+  if not node then
+    return nil
+  end
+  local tstmt = walk_up(node, "type_alias_statement")
+  if tstmt then
+    -- `type X = RHS` (3.12)
+    return field1(tstmt, "right") or tstmt:named_child(tstmt:named_child_count() - 1)
+  end
+  local assign = walk_up(node, "assignment")
+  if not assign then
+    return nil
+  end
+  local left, right = field1(assign, "left"), field1(assign, "right")
+  if not left or not right or left:type() ~= "identifier" then
+    return nil
+  end
+  -- the position must be on the alias name itself (where definition lands)
+  local lrow, lcol, _, lend = left:range()
+  if row ~= lrow or col < lcol or col > lend then
+    return nil
+  end
+  -- annotated form must say TypeAlias; anything else annotated is a variable
+  local ann = field1(assign, "type")
+  if ann and not text(ann, src):find("TypeAlias") then
+    return nil
+  end
+  local rt = right:type()
+  local type_shaped = rt == "identifier"
+    or rt == "attribute"
+    or rt == "subscript"
+    or rt == "generic_type"
+    or rt == "binary_operator"
+  return type_shaped and right or nil
+end
+
 --- Extract the evaluated type from a pyright hover response for `name`.
 --- Pyright renders hovers like:
 ---   (type alias) LoopSetupType: type[Literal['auto', 'none']]
