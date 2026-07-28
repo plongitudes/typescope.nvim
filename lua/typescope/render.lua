@@ -200,7 +200,9 @@ function M.render(roots, opts)
     if marker then
       line:add(marker, "TypeScopeChrome")
     end
-    local name_group = node.kind == "return" and "TypeScopeKeyword" or "TypeScopeField"
+    local name_group = node.kind == "return" and "TypeScopeKeyword"
+      or node.kind == "type" and "TypeScopeType"
+      or "TypeScopeField"
     if node.active then
       name_group = "TypeScopeActive"
     end
@@ -215,9 +217,10 @@ function M.render(roots, opts)
 
     local segments = {}
     local type_text = node.type.display or node.type.raw or "?"
-    -- method "signatures" like (path: str) -> bytes aren't parseable
-    -- expressions, so they keep block coloring
-    local injectable = node.kind ~= "method" and "replace" or nil
+    -- method "signatures" like (path: str) -> bytes and class-root category
+    -- labels like (pydantic) aren't parseable expressions, so they keep
+    -- block coloring
+    local injectable = (node.kind ~= "method" and node.kind ~= "type") and "replace" or nil
     -- an unannotated param's declared type is only implicit Any; when we have
     -- pyright's inferred type, show just that instead of "Any ≈ T"
     if not (node.evaluated and type_text == "Any") then

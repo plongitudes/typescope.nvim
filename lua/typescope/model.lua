@@ -12,7 +12,7 @@
 
 ---@class typescope.Node
 ---@field id string stable path id, e.g. "root.config.host" (preserves expand state across re-renders)
----@field kind "param"|"field"|"return"|"method"|"variant"
+---@field kind "param"|"field"|"return"|"method"|"variant"|"type" ("type" = a class hovered directly, root shows its own structure)
 ---@field name string
 ---@field type typescope.TypeInfo
 ---@field default? string source text of the default value
