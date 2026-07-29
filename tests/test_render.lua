@@ -84,10 +84,10 @@ end
 -- 1. left-aligned unicode, examples on
 eq_lines("left/unicode/examples", render.render(tree(), opts()).lines, {
   '▾ config   ServerConfig',
-  '  ├─ host        str  "localhost"',
-  '  ├─ ▾ retry     RetryPolicy',
-  '  │ └─ max_attempts  int = 3',
-  '  └─ timeout_ms  int | None NotRequired = None',
+  '  ├─ · host        str  "localhost"',
+  '  ├─ ▾ retry       RetryPolicy',
+  '  │ └─ · max_attempts  int = 3',
+  '  └─ · timeout_ms  int | None NotRequired = None',
   '· opaque   Mystery [?]',
   '▸ returns  Response  (<CR> to expand)',
 })
@@ -98,10 +98,10 @@ eq_lines(
   render.render(tree(), opts({ style = styles.get("rounded"), align = "right", show_examples = false })).lines,
   {
     ' ▾ config  ServerConfig',
-    '  ├─       host  str',
-    '  ├─    ▾ retry  RetryPolicy',
-    '  │ ╰─ max_attempts  int = 3',
-    '  ╰─ timeout_ms  int | None NotRequired = None',
+    '  ├─       · host  str',
+    '  ├─      ▾ retry  RetryPolicy',
+    '  │ ╰─ · max_attempts  int = 3',
+    '  ╰─ · timeout_ms  int | None NotRequired = None',
     ' · opaque  Mystery [?]',
     '▸ returns  Response  (<CR> to expand)',
   }
@@ -113,11 +113,11 @@ eq_lines(
   render.render(tree(), opts({ style = styles.get("rounded"), max_width = 40, show_examples = false })).lines,
   {
     '▾ config   ServerConfig',
-    '  ├─ host        str',
-    '  ├─ ▾ retry     RetryPolicy',
-    '  │ ╰─ max_attempts  int = 3',
-    '  ╰─ timeout_ms  int | None NotRequired',
-    '                  = None',
+    '  ├─ · host        str',
+    '  ├─ ▾ retry       RetryPolicy',
+    '  │ ╰─ · max_attempts  int = 3',
+    '  ╰─ · timeout_ms  int | None',
+    '                    NotRequired = None',
     '· opaque   Mystery [?]',
     '▸ returns  Response  (<CR> to expand)',
   }
@@ -129,10 +129,10 @@ eq_lines(
   render.render(tree(), opts({ style = styles.get("minimal"), show_examples = false })).lines,
   {
     '- config   ServerConfig',
-    '    host        str',
-    '    - retry     RetryPolicy',
-    '      max_attempts  int = 3',
-    '    timeout_ms  int | None NotRequired = None',
+    '      host        str',
+    '    - retry       RetryPolicy',
+    '        max_attempts  int = 3',
+    '      timeout_ms  int | None NotRequired = None',
     '  opaque   Mystery [?]',
     '+ returns  Response  (<CR> to expand)',
   }
@@ -231,9 +231,9 @@ eq_lines(
   }, opts({ style = styles.get("rounded"), max_width = 44, show_examples = false })).lines,
   {
     '▾ px  Wrap',
-    '  ╰─ proxy  ClassVar[dict[weakref.ref[Any],',
-    '            weakref.ref[Proxy[Any]]]]',
-    '             ↑ReversibleProxy = {}',
+    '  ╰─ · proxy  ClassVar[dict[weakref.ref[Any]',
+    '              , weakref.ref[Proxy[Any]]]]',
+    '               ↑ReversibleProxy = {}',
   }
 )
 
@@ -280,8 +280,8 @@ eq_lines(
   }, opts({ show_examples = false })).lines,
   {
     '▾ cfg  Child',
-    '  ├─ z  float',
-    '  └─ x  int ↑Base',
+    '  ├─ · z  float',
+    '  └─ · x  int ↑Base',
   }
 )
 

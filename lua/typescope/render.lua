@@ -179,27 +179,23 @@ function M.render(roots, opts)
   ---@param branch string chrome immediately before this node's name
   local function render_node(node, bars, branch, depth)
     local line = new_line()
-    local marker
-    if depth == 0 then
-      marker = is_expandable(node) and (node.state.expanded and style.expanded or style.collapsed)
-        or style.leaf
-    elseif is_expandable(node) then
-      marker = node.state.expanded and style.expanded or style.collapsed
-    end
+    -- every row carries a marker glyph — expandable (▾/▸) or leaf (·) — so
+    -- names inside a sibling group align regardless of expandability
+    -- (Tony's call, 2026-07-29)
+    local marker = is_expandable(node) and (node.state.expanded and style.expanded or style.collapsed)
+      or style.leaf
     if depth > 0 then
       line:add(branch, "TypeScopeChrome")
     end
 
     -- marker + name form one unit, aligned within the sibling group's column:
     -- left mode pads after the name, right mode pads before the marker
-    local unit_width = strwidth(node.name) + (marker and strwidth(marker) or 0)
+    local unit_width = strwidth(node.name) + strwidth(marker)
     local pad = math.max(0, (node._unit_col or unit_width) - unit_width)
     if opts.align == "right" then
       line:add(string.rep(" ", pad))
     end
-    if marker then
-      line:add(marker, "TypeScopeChrome")
-    end
+    line:add(marker, "TypeScopeChrome")
     local name_group = node.kind == "return" and "TypeScopeKeyword"
       or node.kind == "type" and "TypeScopeType"
       or "TypeScopeField"
@@ -260,11 +256,8 @@ function M.render(roots, opts)
       local kids = node.children
       local unit_col = 0
       for _, child in ipairs(kids) do
-        local w = strwidth(child.name)
-        if is_expandable(child) then
-          w = w + strwidth(style.expanded)
-        end
-        unit_col = math.max(unit_col, w)
+        -- all marker glyphs share one width, so units align uniformly
+        unit_col = math.max(unit_col, strwidth(child.name) + strwidth(style.expanded))
       end
       for i, child in ipairs(kids) do
         local last = i == #kids
