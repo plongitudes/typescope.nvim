@@ -144,6 +144,11 @@ local function show(srcbuf, roots, token, client, sig_result, hover_lines)
         require("typescope.resolve").recurse(session.client, node, session.token, done)
       end
     end,
+    on_llm = function(tree_roots, done)
+      if session then
+        require("typescope.examples").llm(tree_roots, session.token, done)
+      end
+    end,
   })
 
   local augroup = vim.api.nvim_create_augroup("TypeScopeSession", { clear = true })

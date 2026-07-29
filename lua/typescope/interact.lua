@@ -17,6 +17,7 @@ local M = {}
 ---@field max_height integer
 ---@field on_close fun()
 ---@field on_recurse? fun(node: typescope.Node, done: fun()) lazily resolve a beyond-depth node
+---@field on_llm? fun(roots: typescope.Node[], done: fun(ok: boolean, err: string?)) generate LLM examples for the visible tree
 ---@field extra_help? { [1]: string, [2]: string }[] host rows for the ? overlay
 
 ---@param width integer
@@ -28,8 +29,8 @@ local function help_lines(width, extra)
     { km.collapse_node .. " / " .. km.expand_node, "collapse / expand node" },
     { km.collapse_all .. " / " .. km.expand_all, "collapse / expand all" },
     { km.toggle_examples, "toggle examples" },
-    { km.llm_generate, "llm examples (phase 6)" },
-    { km.recurse, "recurse deeper (phase 3)" },
+    { km.llm_generate, "llm examples (ollama)" },
+    { km.recurse, "recurse deeper" },
     { km.close .. " / <Esc>", "close" },
     { km.help, "toggle this help" },
   }
@@ -188,7 +189,29 @@ function M.attach(args)
     refresh()
   end)
   map(km.llm_generate, function()
-    vim.notify("typescope: LLM examples arrive in phase 6", vim.log.levels.INFO)
+    if not args.on_llm then
+      vim.notify("typescope: LLM examples need a live LSP session (not available in the spike)", vim.log.levels.INFO)
+      return
+    end
+    if st.generating then
+      return
+    end
+    st.generating = true
+    local spinner = require("typescope.anim").title_spinner(st.handle.win, "generating")
+    args.on_llm(st.roots, function(ok, err)
+      st.generating = false
+      spinner.stop()
+      if not vim.api.nvim_win_is_valid(st.handle.win) then
+        return
+      end
+      if ok then
+        st.opts.example_kind = "llm"
+        st.opts.show_examples = true
+        refresh()
+      elseif err then
+        vim.notify("typescope: " .. err .. " (keeping heuristic examples)", vim.log.levels.WARN)
+      end
+    end)
   end)
   map(km.recurse, function()
     local node = node_under_cursor()

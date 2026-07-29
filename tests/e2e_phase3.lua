@@ -340,4 +340,79 @@ do
   check("offset-form labels resolve", lspu.active_param(offset_sig) == "count")
 end
 
+-- LLM examples (E): fake Ollama server serves canned literals; the whole
+-- keymap → spinner → request → parse → re-render path runs for real
+local fake_port
+do
+  local uv = vim.uv
+  local server = uv.new_tcp()
+  server:bind("127.0.0.1", 0)
+  fake_port = server:getsockname().port
+  server:listen(16, function()
+    local sock = uv.new_tcp()
+    server:accept(sock)
+    sock:read_start(function(_, chunk)
+      if chunk then
+        local body = vim.json.encode({
+          response = 'config.host = "llm-host.example.io"\nconfig.port = 8443\ntimeout = 12.5',
+        })
+        sock:write(
+          "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " .. #body .. "\r\n\r\n" .. body
+        )
+        sock:shutdown()
+        sock:close()
+      end
+    end)
+  end)
+end
+
+require("typescope").setup({ ollama = { enabled = true, port = fake_port, timeout_ms = 3000 } })
+for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+  if l:find("handle = create_server") then
+    vim.api.nvim_win_set_cursor(0, { i, 12 })
+  end
+end
+require("typescope").open()
+vim.wait(2000, function()
+  return float_lines() ~= nil
+end)
+local _, llm_win = float_lines()
+check("float for LLM test opened", llm_win ~= nil)
+if llm_win then
+  vim.api.nvim_set_current_win(llm_win)
+  vim.api.nvim_feedkeys("E", "x", false)
+  vim.wait(4000, function()
+    return table.concat(float_lines() or {}, "\n"):find("llm%-host") ~= nil
+  end)
+  local all9 = table.concat(float_lines() or {}, "\n")
+  check("LLM values rendered after E", all9:find("llm%-host") ~= nil and all9:find("8443") ~= nil)
+  local title_ok = false
+  local cfg9 = vim.api.nvim_win_get_config(llm_win)
+  if cfg9.title and cfg9.title[1] and cfg9.title[1][1]:find("typescope") then
+    title_ok = true
+  end
+  check("spinner restored the title", title_ok)
+end
+require("typescope").close()
+
+-- unreachable ollama: E falls back gracefully, heuristics stay
+require("typescope").setup({ ollama = { enabled = true, port = 1, timeout_ms = 1000 } })
+require("typescope").open()
+vim.wait(2000, function()
+  return float_lines() ~= nil
+end)
+local _, dead_win = float_lines()
+check("float for fallback test opened", dead_win ~= nil)
+if dead_win then
+  vim.api.nvim_set_current_win(dead_win)
+  vim.api.nvim_feedkeys("E", "x", false)
+  vim.wait(3000, function()
+    local c = vim.api.nvim_win_get_config(dead_win)
+    return c.title and c.title[1] and c.title[1][1]:find("typescope") ~= nil
+  end)
+  local all10 = table.concat(float_lines() or {}, "\n")
+  check("heuristics survive unreachable ollama", all10:find("localhost") ~= nil)
+end
+require("typescope").close()
+
 print(failures == 0 and "ALL PASS" or (failures .. " FAILURES"))

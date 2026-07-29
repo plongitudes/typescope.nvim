@@ -83,4 +83,25 @@ check("unresolved skipped", roots[1].children[3].example.heuristic == nil)
 check("real default suppresses example", roots[1].children[4].example.heuristic == nil)
 check("None default still gets example", roots[1].children[5].example.heuristic == '"example"')
 
+-- ollama prompt/parse round trip
+local ollama = require("typescope.examples.ollama")
+local prompt = ollama.prompt({
+  { id = "config.host", name = "host", display = "str" },
+  { id = "config.port", name = "port", display = "int" },
+})
+check("prompt lists dotted paths with types", prompt:find("config%.host: str") ~= nil and prompt:find("config%.port: int") ~= nil)
+
+local parsed = ollama.parse([[
+Here are the values:
+```
+config.host = "api.internal.example.io"
+config.port = 8443
+```
+config.retry.backoff = 1.5
+not a value line
+]])
+check("parse tolerates prose and fences", parsed["config.host"] == '"api.internal.example.io"')
+check("parse handles ints and nested paths", parsed["config.port"] == "8443" and parsed["config.retry.backoff"] == "1.5")
+check("parse skips non-matching lines", parsed["not"] == nil)
+
 print(failures == 0 and "EXAMPLES ALL PASS" or ("EXAMPLES " .. failures .. " FAILURES"))
