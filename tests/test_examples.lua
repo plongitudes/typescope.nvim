@@ -40,10 +40,13 @@ local cases = {
   { "label", "str", '"example"' },
   { "nothing", "None", "None" },
   -- token semantics: substring is not enough, tokens are
-  { "timeout_ms", "int | None", "30" }, -- timeout token + int variant
+  { "timeout_ms", "int | None", "30" }, -- 'ms' head unknown → any-token fallback: timeout + int variant
   { "width", "int", "42" }, -- 'id' must NOT match inside 'width'
   { "user_id", "str", '"a1b2c3d4"' },
-  { "server_name", "str", '"localhost"' }, -- server rule outranks name rule
+  -- head-noun-first (Tony, 2026-07-29): the rightmost token wins
+  { "server_name", "str", '"example"' }, -- ...it IS a name (of a server)
+  { "name_server", "str", '"localhost"' }, -- ...and this IS a server
+  { "file_url", "str", '"https://example.com"' }, -- ...and this IS a url
   { "port", "str", '"8080"' }, -- by_type variant
   -- optional handling
   { "uds", "str | None", '"example"' }, -- known base type wins over None
