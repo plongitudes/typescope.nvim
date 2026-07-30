@@ -243,8 +243,10 @@ function M.render(roots, opts)
     if example then
       table.insert(segments, { "  ", nil })
       -- overlay: examples are hypothetical values, they keep their dim
-      -- TypeScopeExample styling underneath the syntax colors
-      table.insert(segments, { example, "TypeScopeExample", "overlay" })
+      -- TypeScopeExample styling underneath the syntax colors. Atomic: an
+      -- example jumps whole to the next line rather than splitting mid-word
+      -- (still splits if longer than a full line).
+      table.insert(segments, { example, "TypeScopeExample", "overlay", true })
     end
     if is_expandable(node) and not node.state.expanded and depth == 0 then
       table.insert(segments, { "  (<CR> to expand)", "TypeScopeHint" })
