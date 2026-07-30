@@ -12,10 +12,11 @@
 ---@field max_width number >1: absolute columns; <=1: fraction of editor width
 ---@field max_height integer
 ---@field border string|string[] any nvim float border value
----@field anchor "signature"|"cursor"
+---@field docstring "bottom"|"top"|false docstring section placement in the float
 ---@field hint boolean virtual-text "▸ typescope" marker on resolved call lines
 
 ---@class typescope.KeymapConfig
+---@field docstring string toggle full docstring section
 ---@field expand string toggle node under cursor
 ---@field expand_node string expand node under cursor (no-op on leaves)
 ---@field collapse_node string collapse node, or jump to + collapse parent
@@ -62,7 +63,7 @@ local defaults = {
     max_width = 0.5, -- fraction of editor width; values > 1 are absolute columns
     max_height = 20,
     border = "rounded",
-    anchor = "signature", -- "signature" | "cursor"
+    docstring = "bottom", -- "bottom" | "top" | false (structure first, prose last)
     hint = true,
   },
   highlights = {},
@@ -73,6 +74,7 @@ local defaults = {
     expand_all = "L",
     collapse_all = "H",
     toggle_examples = "e",
+    docstring = "d",
     llm_generate = "E",
     recurse = "r",
     close = "q",
@@ -138,7 +140,9 @@ local function validate(cfg)
   if type(cfg.ui.border) ~= "string" and type(cfg.ui.border) ~= "table" then
     error("typescope.setup: `ui.border` must be a string or table (any nvim float border value)", 0)
   end
-  check("ui.anchor", cfg.ui.anchor, { "signature", "cursor" })
+  if cfg.ui.docstring ~= false then
+    check("ui.docstring", cfg.ui.docstring, { "bottom", "top" })
+  end
   check("ui.hint", cfg.ui.hint, "boolean")
 
   check("highlights", cfg.highlights, "table")
@@ -150,6 +154,7 @@ local function validate(cfg)
     "expand_all",
     "collapse_all",
     "toggle_examples",
+    "docstring",
     "llm_generate",
     "recurse",
     "close",

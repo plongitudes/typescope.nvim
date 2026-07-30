@@ -24,6 +24,10 @@
 ---@field show_examples boolean
 ---@field example_kind "heuristic"|"llm"
 ---@field lang? string treesitter language for injected snippet highlighting
+---@field header? string one-line call shape shown above the tree
+---@field docstring? string full docstring text (render decides how much shows)
+---@field docstring_expanded? boolean full text vs first paragraph
+---@field docstring_pos? "top"|"bottom"|false where the docstring section sits
 
 local M = {}
 
@@ -274,6 +278,71 @@ function M.render(roots, opts)
     end
   end
 
+  -- ── sections (unification U1): header / docstring around the tree ──────
+  local separators = {}
+  local function emit_separator()
+    table.insert(separators, #result.lines + 1)
+    emit(new_line(), nil)
+  end
+  -- greedy word-wrap for prose/header text, hanging indent 2 on continuations
+  local function emit_prose(text, group)
+    local remaining = text
+    local first = true
+    while remaining ~= "" do
+      local prefix = first and "" or "  "
+      local avail = opts.max_width - strwidth(prefix)
+      local line = new_line()
+      line:add(prefix)
+      if strwidth(remaining) <= avail then
+        line:add(remaining, group)
+        remaining = ""
+      else
+        local cut = math.max(1, find_break_point(remaining, avail))
+        line:add(remaining:sub(1, cut), group)
+        remaining = remaining:sub(cut + 1):gsub("^%s+", "")
+      end
+      emit(line, nil)
+      first = false
+    end
+  end
+  local function emit_docstring()
+    local text = opts.docstring
+    if not opts.docstring_expanded then
+      text = text:match("^(.-)\n%s*\n") or text -- first paragraph
+    end
+    for _, doc_line in ipairs(vim.split(vim.trim(text), "\n")) do
+      if doc_line == "" then
+        emit(new_line(), nil)
+      else
+        emit_prose(doc_line, "TypeScopeDocstring")
+      end
+    end
+  end
+
+  local has_doc = opts.docstring ~= nil and opts.docstring ~= "" and opts.docstring_pos ~= nil and opts.docstring_pos ~= false
+  if opts.header then
+    -- the header is a one-liner by contract: a 48-param call shape must not
+    -- eat the float, so the param list elides at width with the return type
+    -- kept visible — run(app, *, host=…, …) -> None
+    local header = opts.header
+    if strwidth(header) > opts.max_width then
+      local ret_part = header:match("%)(%s*->.*)$") or ""
+      local body = header:sub(1, #header - #ret_part)
+      local suffix = "…)" .. ret_part
+      local budget = math.max(8, opts.max_width - strwidth(", " .. suffix))
+      local cut = math.max(1, find_break_point(body, budget))
+      -- drop the final (possibly cut-in-half) token so only whole params show
+      header = body:sub(1, cut):gsub(",%s*[^,]*$", "") .. ", " .. suffix
+    end
+    emit_prose(header, "TypeScopeHeader")
+  end
+  if has_doc and opts.docstring_pos == "top" then
+    emit_docstring()
+  end
+  if opts.header or (has_doc and opts.docstring_pos == "top") then
+    emit_separator()
+  end
+
   -- no spacer lines between top-level entries: the expander markers carry
   -- the visual grouping (Tony's call, 2026-07-26 — revisit if it feels dense)
   --
@@ -295,6 +364,18 @@ function M.render(roots, opts)
     local w = strwidth(root.name)
     root._unit_col = w <= cap and root_col or (w + marker_w)
     render_node(root, string.rep(" ", marker_w), "", 0)
+  end
+
+  if has_doc and opts.docstring_pos == "bottom" then
+    emit_separator()
+    emit_docstring()
+  end
+
+  -- separators stretch to the final content width, known only now
+  for _, lnum in ipairs(separators) do
+    local bar = string.rep(style.rule, math.max(4, result.width))
+    result.lines[lnum] = bar
+    table.insert(result.highlights, { line = lnum - 1, col_start = 0, col_end = #bar, group = "TypeScopeChrome" })
   end
 
   return result

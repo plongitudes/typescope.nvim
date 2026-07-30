@@ -18,6 +18,8 @@ class BaseConfig:
 
 @dataclass
 class ServerConfig(BaseConfig):
+    """Connection settings container."""
+
     host: str
     port: int
     debug: bool = False
@@ -33,6 +35,10 @@ class UserRecord(TypedDict, total=False):
 
 
 def create_server(config: ServerConfig, timeout: float = 30.0) -> Response:
+    """Spin up the demo service.
+
+    Prose continues at considerable length in the second paragraph.
+    """
     ...
 
 

@@ -285,4 +285,46 @@ eq_lines(
   }
 )
 
+-- 9. unified-float sections: header + separators + docstring (U1)
+local section_tree = { model.new({ name = "x", kind = "param", type = { display = "int", category = "builtin" } }) }
+eq_lines(
+  "sections: header + collapsed docstring at bottom",
+  render.render(section_tree, opts({
+    style = styles.get("rounded"),
+    max_width = 40,
+    show_examples = false,
+    header = "f(x, *, y=…) -> str",
+    docstring = "First line of prose.\n\nSecond paragraph here.",
+    docstring_expanded = false,
+    docstring_pos = "bottom",
+  })).lines,
+  {
+    'f(x, *, y=…) -> str',
+    '────────────────────',
+    '· x  int',
+    '────────────────────',
+    'First line of prose.',
+  }
+)
+eq_lines(
+  "sections: expanded docstring at top",
+  render.render(section_tree, opts({
+    style = styles.get("rounded"),
+    max_width = 40,
+    show_examples = false,
+    header = "f(x) -> str",
+    docstring = "First line of prose.\n\nSecond paragraph here.",
+    docstring_expanded = true,
+    docstring_pos = "top",
+  })).lines,
+  {
+    'f(x) -> str',
+    'First line of prose.',
+    '',
+    'Second paragraph here.',
+    '──────────────────────',
+    '· x  int',
+  }
+)
+
 print(failures == 0 and "RENDER ALL PASS" or ("RENDER " .. failures .. " FAILURES"))

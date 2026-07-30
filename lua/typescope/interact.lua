@@ -31,6 +31,7 @@ local function help_lines(width, extra)
     { km.toggle_examples, "toggle examples" },
     { km.llm_generate, "llm examples (ollama)" },
     { km.recurse, "recurse deeper" },
+    { km.docstring, "toggle full docstring" },
     { km.close .. " / <Esc>", "close" },
     { km.help, "toggle this help" },
   }
@@ -187,6 +188,12 @@ function M.attach(args)
   map(km.help, function()
     st.show_help = not st.show_help
     refresh()
+  end)
+  map(km.docstring, function()
+    if st.opts.docstring and st.opts.docstring_pos then
+      st.opts.docstring_expanded = not st.opts.docstring_expanded
+      refresh()
+    end
   end)
   map(km.llm_generate, function()
     if not args.on_llm then

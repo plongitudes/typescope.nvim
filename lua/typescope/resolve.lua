@@ -273,7 +273,8 @@ end
 ---@param bufnr integer source buffer
 ---@param win integer source window (cursor position)
 ---@param token typescope.CancelToken
----@return typescope.Node[]? roots, string? err
+---@return typescope.Node[]? roots
+---@return table|string|nil meta_or_err on success: { header?: string, docstring?: string }; on failure: error message
 function M.function_scope(client, bufnr, win, token)
   local ft = vim.bo[bufnr].filetype
   local impl = extract.get(ft)
@@ -326,7 +327,8 @@ function M.function_scope(client, bufnr, win, token)
         -- category may have been corrected by the base walk (UserCreate case)
         root.type.display = header()
         require("typescope.examples").annotate({ root })
-        return { root }
+        -- no call-shape header for a class hover: the root row is the header
+        return { root }, { docstring = cls.docstring }
       end
     end
 
@@ -400,7 +402,17 @@ function M.function_scope(client, bufnr, win, token)
     return nil, ("%s has no parameters or return annotation"):format(info.name)
   end
   require("typescope.examples").annotate(roots)
-  return roots
+
+  local ret = info.return_type and impl.annotation(fbuf, info.return_type).display
+  local meta = {
+    header = info.name
+      .. "("
+      .. table.concat(info.shape or {}, ", ")
+      .. ")"
+      .. (ret and (" -> " .. ret) or ""),
+    docstring = info.docstring,
+  }
+  return roots, meta
 end
 
 --- Lazily resolve a beyond-depth node (the `r` keymap / expanding an

@@ -8,6 +8,7 @@
 ---@field unresolved string indicator when TreeSitter parsing failed
 ---@field inherit string prefix for the origin class of inherited fields
 ---@field evaluated string prefix for hover-evaluated type decorations
+---@field rule string section-separator character (repeated to width)
 
 local M = {}
 
@@ -25,6 +26,7 @@ local charsets = {
     unresolved = "[?]",
     inherit = "↑",
     evaluated = "≈ ",
+    rule = "─",
   },
   ascii = {
     vert = "| ",
@@ -36,6 +38,7 @@ local charsets = {
     unresolved = "[?]",
     inherit = "^",
     evaluated = "~ ",
+    rule = "-",
   },
   minimal = {
     vert = "  ",
@@ -47,6 +50,7 @@ local charsets = {
     unresolved = "[?]",
     inherit = "^",
     evaluated = "~ ",
+    rule = " ",
   },
   rounded = {
     vert = "│ ",
@@ -58,6 +62,7 @@ local charsets = {
     unresolved = "[?]",
     inherit = "↑",
     evaluated = "≈ ",
+    rule = "─",
   },
 }
 

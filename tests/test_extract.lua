@@ -280,4 +280,25 @@ check(
   pos_info.params[1].name_row == 0 and pos_info.params[1].name_col == 6 and pos_info.params[2].name_col == 13
 )
 
+---------------------------------------------------------------- shape + docstring
+local shape_info = py.function_info("def f(a, /, b, *, c=1, **kw): ...", 0, 4)
+check(
+  "shape keeps separators and elides defaults",
+  table.concat(shape_info.shape, ", ") == "a, /, b, *, c=…, **kw"
+)
+local m_shape = py.function_info("class C:\n    def m(self, x: int = 2): ...", 1, 8)
+check("shape skips self like the tree does", table.concat(m_shape.shape, ", ") == "x=…")
+
+local doc_src = 'def g():\n    """First line.\n\n    Indented body prose.\n    """\n    pass\n'
+local doc_info = py.function_info(doc_src, 0, 4)
+check(
+  "docstring extracted, dedented, quotes stripped",
+  doc_info.docstring == "First line.\n\nIndented body prose."
+)
+check("no docstring -> nil", py.function_info("def h():\n    pass\n", 0, 4).docstring == nil)
+
+local cls_doc = py.type_at('class D:\n    """Class doc."""\n\n    x: int\n', 0, 7)
+check("class docstring extracted", cls_doc.docstring == "Class doc.")
+check("class docstring does not eat fields", #cls_doc.fields == 1)
+
 print(failures == 0 and "EXTRACT ALL PASS" or ("EXTRACT " .. failures .. " FAILURES"))

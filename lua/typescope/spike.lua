@@ -1,7 +1,7 @@
--- :TypeScope spike [style] — visual prototyping harness (phase 1).
--- Opens a mock signature float + the TypeScope float with fixture trees, no
--- LSP involved. Everything rendered here goes through the production
--- render.lua/float.lua path, so style decisions made in the spike ship as-is.
+-- :TypeScope spike [style] — visual prototyping harness.
+-- Opens the unified TypeScope float (header + tree + docstring sections)
+-- with fixture trees, no LSP involved. Everything rendered here goes through
+-- the production render.lua/float.lua path, so style decisions ship as-is.
 
 local model = require("typescope.model")
 local render = require("typescope.render")
@@ -155,7 +155,7 @@ end
 ---@field fixture_idx integer
 ---@field style_idx integer
 ---@field show_examples boolean
----@field sig typescope.FloatHandle?
+---@field docstring_expanded boolean
 ---@field ts typescope.FloatHandle?
 ---@field fixtures table[]
 local state = nil
@@ -174,7 +174,6 @@ local function close_all()
   if not state then
     return
   end
-  float.close(state.sig)
   float.close(state.ts)
   state = nil
 end
@@ -192,41 +191,29 @@ local function draw()
     show_examples = state.show_examples,
     example_kind = "heuristic",
     lang = "python",
+    header = fixture.signature,
+    docstring = fixture.docstring
+      or "Mock docstring for visual evaluation.\n\nLonger prose lives in the second paragraph, revealed with the d key.",
+    docstring_expanded = state.docstring_expanded,
+    docstring_pos = cfg.ui.docstring,
   }
   local result = render.render(fixture.roots, render_opts)
 
-  local sig_line = fixture.signature
   local border = style_borders[style_name] or cfg.ui.border
   -- nvim rejects title/footer on borderless floats
   local borderless = border == "none"
-  local width = math.min(max_width, math.max(result.width, #sig_line, 40))
+  local width = math.min(max_width, math.max(result.width, 40))
   local height = math.min(cfg.ui.max_height, #result.lines)
   local col = math.max(0, math.floor((vim.o.columns - width) / 2))
-  local sig_row = 2
 
-  -- Dev harness: rebuild both floats each redraw; flicker-free transitions are
-  -- phase 2. Detach handles BEFORE closing — nvim_win_close fires WinClosed
-  -- synchronously, and the teardown autocmd must see this as a redraw, not a
-  -- user close.
-  local old_sig, old_ts = state.sig, state.ts
-  state.sig, state.ts = nil, nil
-  float.close(old_sig)
+  -- Dev harness: rebuild the float each redraw; detach the handle BEFORE
+  -- closing — nvim_win_close fires WinClosed synchronously, and the teardown
+  -- autocmd must see this as a redraw, not a user close.
+  local old_ts = state.ts
+  state.ts = nil
   float.close(old_ts)
 
-  local paren = sig_line:find("%(") or #sig_line
-  state.sig = float.open({
-    lines = { sig_line },
-    highlights = { { line = 0, col_start = 0, col_end = paren - 1, group = "@function" } },
-    title = not borderless and " signature (mock) " or nil,
-    relative = "editor",
-    row = sig_row,
-    col = col,
-    width = width,
-    height = 1,
-    border = border,
-    focusable = false,
-  })
-
+  -- unified float (U1): header + tree + docstring sections in one window
   state.ts = float.open({
     lines = result.lines,
     highlights = result.highlights,
@@ -235,7 +222,7 @@ local function draw()
     title = not borderless and (" typescope · %s · %s "):format(fixture.name, style_name) or nil,
     footer = not borderless and " ? help " or nil,
     relative = "editor",
-    row = sig_row + (borderless and 2 or 3), -- sig height + border rows
+    row = 2,
     col = col,
     width = width,
     height = height,
@@ -291,9 +278,7 @@ local function draw()
       -- only tear down if this is still the live window (user :q etc.);
       -- during a redraw state.ts has already been detached or replaced
       if state and state.ts and state.ts.win == ts_win then
-        local sig = state.sig
         state = nil
-        float.close(sig)
       end
     end,
   })
@@ -316,6 +301,7 @@ function M.run(args)
     fixture_idx = 1,
     style_idx = style_idx,
     show_examples = config.get().show_examples,
+    docstring_expanded = false,
     fixtures = fixtures(),
   }
   draw()

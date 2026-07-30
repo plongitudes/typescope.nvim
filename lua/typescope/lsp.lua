@@ -177,15 +177,6 @@ function M.signature_help(client, bufnr, win, token)
   return nil
 end
 
---- Signature-help result rendered to markdown lines for the anchor float.
----@param result table signatureHelp result
----@param ft string
----@return string[]?
-function M.signature_markdown(result, ft)
-  local lines = vim.lsp.util.convert_signature_help_to_markdown_lines(result, ft, nil)
-  return lines and #lines > 0 and lines or nil
-end
-
 --- Hover contents as markdown lines at a 0-based (row, byte-col).
 ---@param client vim.lsp.Client
 ---@param bufnr integer
@@ -207,19 +198,6 @@ function M.hover_lines(client, bufnr, row, col, token)
     table.remove(lines)
   end
   return #lines > 0 and lines or nil
-end
-
---- Hover at the window's cursor — the anchor fallback when signatureHelp is
---- empty (servers only answer it with the cursor inside the call parens;
---- hover answers anywhere on the symbol).
----@param client vim.lsp.Client
----@param bufnr integer
----@param win integer
----@param token typescope.CancelToken
----@return string[]?
-function M.hover_markdown(client, bufnr, win, token)
-  local pos = vim.api.nvim_win_get_cursor(win)
-  return M.hover_lines(client, bufnr, pos[1] - 1, pos[2], token)
 end
 
 --- NAME of the active parameter, or nil. Matching by name rather than index

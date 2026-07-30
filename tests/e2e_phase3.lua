@@ -142,7 +142,7 @@ if lines5 then
 end
 require("typescope").close()
 
--- phase 4: signature anchoring, active param, hint extmark
+-- unified float (U1): single window with header + tree + docstring sections
 local function all_floats()
   local out = {}
   for _, w in ipairs(vim.api.nvim_list_wins()) do
@@ -160,20 +160,27 @@ for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
 end
 require("typescope").open()
 vim.wait(2000, function()
-  return #all_floats() >= 2
+  return float_lines() ~= nil
 end)
-local floats = all_floats()
-check("two floats open (signature + typescope)", #floats == 2)
-if #floats == 2 then
-  local _, ts_win = float_lines()
-  local sig_win = floats[1] == ts_win and floats[2] or floats[1]
-  local sig_pos = vim.api.nvim_win_get_position(sig_win)
-  local ts_pos = vim.api.nvim_win_get_position(ts_win)
-  check("typescope anchored below signature", ts_pos[1] > sig_pos[1] and ts_pos[2] == sig_pos[2])
+check("exactly one float (anchor retired)", #all_floats() == 1)
+local ulines, ts_win = float_lines()
+if ulines then
+  local all_u = table.concat(ulines, "\n")
   check(
-    "typescope at least as wide as signature",
-    vim.api.nvim_win_get_width(ts_win) >= vim.api.nvim_win_get_width(sig_win)
+    "header: one-line call shape, elided to width, return kept",
+    ulines[1]:find("create_server(config", 1, true) ~= nil and ulines[1]:find("-> Response", 1, true) ~= nil
   )
+  check("separator rule present", all_u:find("────", 1, true) ~= nil)
+  check("docstring first paragraph at bottom", ulines[#ulines]:find("Spin up the demo service") ~= nil)
+  check("docstring second paragraph hidden when collapsed", not all_u:find("considerable length"))
+
+  -- d expands the docstring, d again collapses
+  vim.api.nvim_set_current_win(ts_win)
+  vim.api.nvim_feedkeys("d", "x", false)
+  local expanded = table.concat(float_lines(), "\n")
+  check("d expands full docstring", expanded:find("considerable length") ~= nil)
+  vim.api.nvim_feedkeys("d", "x", false)
+  check("d collapses again", not table.concat(float_lines(), "\n"):find("considerable length"))
 
   -- active param (mock always reports 0 → config) renders TypeScopeActive
   local ts_buf = vim.api.nvim_win_get_buf(ts_win)
@@ -188,12 +195,17 @@ if #floats == 2 then
 
   -- hint extmark on this call line (earlier opens hinted their own lines)
   local hint_ns = vim.api.nvim_create_namespace("typescope_hint")
-  local row = vim.api.nvim_win_get_cursor(0)[1] - 1
-  local hints = vim.api.nvim_buf_get_extmarks(bufnr, hint_ns, { row, 0 }, { row, -1 }, {})
+  local hrow
+  for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+    if l:find("handle = create_server") then
+      hrow = i - 1
+    end
+  end
+  local hints = vim.api.nvim_buf_get_extmarks(bufnr, hint_ns, { hrow, 0 }, { hrow, -1 }, {})
   check("hint extmark placed on call line", #hints == 1)
 
   require("typescope").close()
-  check("both floats closed", #all_floats() == 0)
+  check("float closed", #all_floats() == 0)
 end
 
 -- hover() takeover: function symbol → typescope; non-function → plain hover
@@ -289,6 +301,7 @@ if lines7 then
   )
   check("class fields shown", all7:find("host") and all7:find("retry"))
   check("class inheritance merged", all7:find("env") and all7:find("↑BaseConfig", 1, true))
+  check("class docstring section at bottom", lines7[#lines7]:find("Connection settings container") ~= nil)
 end
 require("typescope").close()
 

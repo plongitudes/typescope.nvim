@@ -36,7 +36,6 @@ end
 
 ---@class typescope.Session
 ---@field handle typescope.FloatHandle
----@field sig typescope.FloatHandle? anchored signature float (nil when cursor-anchored)
 ---@field ctrl typescope.Controller
 ---@field token typescope.CancelToken
 ---@field client vim.lsp.Client
@@ -58,18 +57,16 @@ function M.close()
   session = nil
   require("typescope.async").cancel(s.token)
   pcall(vim.api.nvim_del_augroup_by_id, s.augroup)
-  local float = require("typescope.float")
-  float.close(s.handle)
-  float.close(s.sig)
+  require("typescope.float").close(s.handle)
 end
 
 ---@param srcbuf integer
 ---@param roots typescope.Node[]
+---@param meta { header?: string, docstring?: string }?
 ---@param token typescope.CancelToken
 ---@param client vim.lsp.Client
----@param sig_result table? signatureHelp result for the anchor float
----@param hover_lines string[]? hover markdown, the anchor fallback
-local function show(srcbuf, roots, token, client, sig_result, hover_lines)
+---@param sig_result table? signatureHelp result (activeParameter only)
+local function show(srcbuf, roots, meta, token, client, sig_result)
   local cfg = require("typescope.config").get()
   local float = require("typescope.float")
   local render = require("typescope.render")
@@ -98,26 +95,16 @@ local function show(srcbuf, roots, token, client, sig_result, hover_lines)
     show_examples = cfg.show_examples and cfg.example_mode ~= "none",
     example_kind = cfg.example_mode == "llm" and "llm" or "heuristic",
     lang = vim.bo[srcbuf].filetype,
+    -- unified float (U1): call-shape header + docstring section, absorbing
+    -- the retired anchor float's content
+    header = meta and meta.header or nil,
+    docstring = meta and meta.docstring or nil,
+    docstring_expanded = false,
+    docstring_pos = cfg.ui.docstring,
   }
   local result = render.render(roots, render_opts)
   local width = math.min(max_width, math.max(result.width, 30))
   local height = math.min(cfg.ui.max_height, #result.lines)
-
-  -- anchor: below the signature/hover float when configured and available,
-  -- else at the cursor
-  local sig_handle
-  local position = { relative = "cursor", row = 1, col = 0 }
-  if cfg.ui.anchor == "signature" then
-    local md = sig_result and lsp.signature_markdown(sig_result, vim.bo[srcbuf].filetype) or hover_lines
-    if md then
-      sig_handle = float.open_markdown(md, { border = cfg.ui.border, max_width = max_width })
-    end
-    if sig_handle then
-      local row, col, sig_width = float.below(sig_handle.win)
-      width = math.max(width, sig_width) -- visually connected: at least as wide
-      position = { relative = "editor", row = row, col = col }
-    end
-  end
 
   local handle = float.open({
     lines = result.lines,
@@ -126,9 +113,9 @@ local function show(srcbuf, roots, token, client, sig_result, hover_lines)
     lang = render_opts.lang,
     title = " typescope ",
     footer = " ? help ",
-    relative = position.relative,
-    row = position.row,
-    col = position.col,
+    relative = "cursor",
+    row = 1,
+    col = 0,
     width = width,
     height = height,
     border = cfg.ui.border,
@@ -157,7 +144,6 @@ local function show(srcbuf, roots, token, client, sig_result, hover_lines)
   local augroup = vim.api.nvim_create_augroup("TypeScopeSession", { clear = true })
   session = {
     handle = handle,
-    sig = sig_handle,
     ctrl = ctrl,
     token = token,
     client = client,
@@ -227,9 +213,9 @@ local function show(srcbuf, roots, token, client, sig_result, hover_lines)
   })
   vim.api.nvim_create_autocmd("WinClosed", {
     group = augroup,
-    pattern = tostring(handle.win) .. (sig_handle and ("," .. sig_handle.win) or ""),
+    pattern = tostring(handle.win),
     callback = function()
-      M.close() -- either float dying takes both down
+      M.close()
     end,
   })
 end
@@ -278,7 +264,7 @@ function M.open(opts)
   local token = async.token()
   async.run(function()
     local resolve = require("typescope.resolve")
-    local roots, err = resolve.function_scope(client, bufnr, win, token)
+    local roots, meta_or_err = resolve.function_scope(client, bufnr, win, token)
     if async.stale(token) then
       return
     end
@@ -286,22 +272,16 @@ function M.open(opts)
       if opts.on_unresolved then
         opts.on_unresolved()
       elseif not opts.silent then
-        vim.notify("typescope: " .. err, vim.log.levels.INFO)
+        vim.notify("typescope: " .. tostring(meta_or_err), vim.log.levels.INFO)
       end
       return
     end
+    -- signatureHelp still requested, but only for activeParameter now
     local sig_result = lsp.signature_help(client, bufnr, win, token)
     if async.stale(token) then
       return
     end
-    local hover_lines
-    if not sig_result and require("typescope.config").get().ui.anchor == "signature" then
-      hover_lines = lsp.hover_markdown(client, bufnr, win, token)
-      if async.stale(token) then
-        return
-      end
-    end
-    show(bufnr, roots, token, client, sig_result, hover_lines)
+    show(bufnr, roots, meta_or_err, token, client, sig_result)
   end)
 end
 

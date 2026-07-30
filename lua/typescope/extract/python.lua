@@ -66,6 +66,42 @@ local function node_at(src, row, col)
   return root and root:named_descendant_for_range(row, col, row, col) or nil
 end
 
+--- Docstring of a function/class body: the first statement when it is a
+--- bare string. Quotes stripped, following lines dedented.
+---@param body TSNode? block node
+---@param src integer|string
+---@return string?
+local function docstring_of(body, src)
+  if not body then
+    return nil
+  end
+  local first = body:named_child(0)
+  if not first or first:type() ~= "expression_statement" then
+    return nil
+  end
+  local str = first:named_child(0)
+  if not str or str:type() ~= "string" then
+    return nil
+  end
+  local raw = text(str, src)
+  raw = raw:gsub("^[rRbBuUfF]*'''", ""):gsub('^[rRbBuUfF]*"""', ""):gsub("^[rRbBuUfF]*['\"]", "")
+  raw = raw:gsub("'''%s*$", ""):gsub('"""%s*$', ""):gsub("['\"]%s*$", "")
+  local lines = vim.split(raw, "\n")
+  local indent = math.huge
+  for i = 2, #lines do
+    if lines[i]:match("%S") then
+      indent = math.min(indent, #lines[i]:match("^%s*"))
+    end
+  end
+  if indent ~= math.huge then
+    for i = 2, #lines do
+      lines[i] = lines[i]:sub(indent + 1)
+    end
+  end
+  local out = vim.trim(table.concat(lines, "\n"))
+  return out ~= "" and out or nil
+end
+
 --- Structured signature of the function whose definition contains (row, col).
 ---@param src integer|string
 ---@param row integer 0-based
@@ -79,23 +115,30 @@ function M.function_info(src, row, col)
   local info = {
     name = text(field1(fn, "name"), src),
     params = {},
+    -- ordered call-shape tokens for the header line: param names (defaults
+    -- elided to name=…) plus the * and / separators the tree itself drops
+    shape = {},
     return_type = field1(fn, "return_type"),
+    docstring = docstring_of(field1(fn, "body"), src),
   }
   local params_node = field1(fn, "parameters")
   if params_node then
     for i = 0, params_node:named_child_count() - 1 do
       local p = params_node:named_child(i)
       local t = p:type()
-      local entry, name_node
+      local entry, name_node, shape_token
       if t == "identifier" then
         name_node = p
         entry = { name = text(p, src) }
+        shape_token = entry.name
       elseif t == "typed_parameter" then
         name_node = p:named_child(0)
         entry = { name = text(name_node, src), type_node = field1(p, "type") }
+        shape_token = entry.name
       elseif t == "default_parameter" then
         name_node = field1(p, "name")
         entry = { name = text(name_node, src), default = clean(text(field1(p, "value"), src)) }
+        shape_token = entry.name .. "=…"
       elseif t == "typed_default_parameter" then
         name_node = field1(p, "name")
         entry = {
@@ -103,8 +146,14 @@ function M.function_info(src, row, col)
           type_node = field1(p, "type"),
           default = clean(text(field1(p, "value"), src)),
         }
+        shape_token = entry.name .. "=…"
       elseif t == "list_splat_pattern" or t == "dictionary_splat_pattern" then
         entry = { name = text(p, src) }
+        shape_token = entry.name
+      elseif t == "keyword_separator" then
+        table.insert(info.shape, "*")
+      elseif t == "positional_separator" then
+        table.insert(info.shape, "/")
       end
       if entry and entry.name ~= "self" and entry.name ~= "cls" then
         if name_node then
@@ -113,6 +162,7 @@ function M.function_info(src, row, col)
           entry.name_row, entry.name_col = name_node:range()
         end
         table.insert(info.params, entry)
+        table.insert(info.shape, shape_token)
       end
     end
   end
@@ -468,15 +518,15 @@ function M.type_at(src, row, col)
   end
 
   local category, total_false, bases = classify(cls, src)
+  local body = field1(cls, "body")
   local result = {
     category = category,
     class_name = text(field1(cls, "name"), src),
     fields = {},
     methods = {},
     bases = bases,
+    docstring = docstring_of(body, src),
   }
-
-  local body = field1(cls, "body")
   if not body then
     return result
   end
