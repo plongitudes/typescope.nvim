@@ -395,6 +395,47 @@ if llm_win then
 end
 require("typescope").close()
 
+-- silent ollama (accepts, never answers): timeout → auto-retry → honest
+-- timeout message, not "unreachable"
+local silent_port
+do
+  local uv = vim.uv
+  local server = uv.new_tcp()
+  server:bind("127.0.0.1", 0)
+  silent_port = server:getsockname().port
+  server:listen(16, function()
+    local sock = uv.new_tcp()
+    server:accept(sock)
+    sock:read_start(function() end) -- swallow the request, never respond
+  end)
+end
+require("typescope").setup({ ollama = { enabled = true, port = silent_port, timeout_ms = 1000 } })
+require("typescope").open()
+vim.wait(2000, function()
+  return float_lines() ~= nil
+end)
+local _, slow_win = float_lines()
+check("float for timeout test opened", slow_win ~= nil)
+if slow_win then
+  local captured
+  local orig_notify = vim.notify
+  vim.notify = function(msg, ...)
+    captured = msg
+    return orig_notify(msg, ...)
+  end
+  vim.api.nvim_set_current_win(slow_win)
+  vim.api.nvim_feedkeys("E", "x", false)
+  vim.wait(6000, function()
+    return captured ~= nil
+  end)
+  vim.notify = orig_notify
+  check(
+    "timeout reported as timeout (after one retry), not unreachable",
+    captured ~= nil and captured:find("timed out twice") ~= nil
+  )
+end
+require("typescope").close()
+
 -- unreachable ollama: E falls back gracefully, heuristics stay
 require("typescope").setup({ ollama = { enabled = true, port = 1, timeout_ms = 1000 } })
 require("typescope").open()

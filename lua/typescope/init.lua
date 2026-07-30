@@ -166,6 +166,11 @@ local function show(srcbuf, roots, token, client, sig_result, hover_lines)
   local cursor = vim.api.nvim_win_get_cursor(0)
   require("typescope.hint").place(srcbuf, cursor[1] - 1)
 
+  -- pre-load the model in the background so the first E press is warm
+  if cfg.ollama.enabled then
+    require("typescope.examples.ollama").warmup(cfg.ollama)
+  end
+
   -- the float follows the builtin hover contract: any movement or edit in the
   -- source buffer dismisses it
   vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI", "InsertEnter" }, {
