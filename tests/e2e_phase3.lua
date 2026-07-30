@@ -346,6 +346,7 @@ local fake_port
 do
   local uv = vim.uv
   local server = uv.new_tcp()
+  _G.__typescope_fake_ollama = server -- anchor: GC of the handle closes the socket
   server:bind("127.0.0.1", 0)
   fake_port = server:getsockname().port
   server:listen(16, function()
@@ -354,7 +355,7 @@ do
     sock:read_start(function(_, chunk)
       if chunk then
         local body = vim.json.encode({
-          response = 'config.host = "llm-host.example.io"\nconfig.port = 8443\ntimeout = 12.5',
+          response = 'config.host = "llm-host.example.io"\nconfig.port = 8443\nconfig.timeout_ms = 250\ntimeout = 12.5',
         })
         sock:write(
           "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " .. #body .. "\r\n\r\n" .. body
@@ -396,11 +397,14 @@ end
 require("typescope").close()
 
 -- silent ollama (accepts, never answers): timeout → auto-retry → honest
--- timeout message, not "unreachable"
+-- timeout message, not "unreachable". Cache cleared first or the E press is
+-- served from the previous test's values and no request ever fires.
+require("typescope.examples")._clear_llm_cache()
 local silent_port
 do
   local uv = vim.uv
   local server = uv.new_tcp()
+  _G.__typescope_silent_ollama = server -- anchor against GC (see above)
   server:bind("127.0.0.1", 0)
   silent_port = server:getsockname().port
   server:listen(16, function()
@@ -437,6 +441,7 @@ end
 require("typescope").close()
 
 -- unreachable ollama: E falls back gracefully, heuristics stay
+require("typescope.examples")._clear_llm_cache()
 require("typescope").setup({ ollama = { enabled = true, port = 1, timeout_ms = 1000 } })
 require("typescope").open()
 vim.wait(2000, function()
@@ -453,6 +458,35 @@ if dead_win then
   end)
   local all10 = table.concat(float_lines() or {}, "\n")
   check("heuristics survive unreachable ollama", all10:find("localhost") ~= nil)
+end
+require("typescope").close()
+
+-- example_mode = "llm": generation fires automatically on open, no E needed
+require("typescope").setup({
+  example_mode = "llm",
+  ollama = { enabled = true, port = fake_port, timeout_ms = 3000 },
+})
+for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+  if l:find("handle = create_server") then
+    vim.api.nvim_win_set_cursor(0, { i, 12 })
+  end
+end
+local auto_msgs = {}
+local auto_orig_notify = vim.notify
+vim.notify = function(m, ...)
+  table.insert(auto_msgs, tostring(m))
+  return auto_orig_notify(m, ...)
+end
+require("typescope").open()
+vim.wait(6000, function()
+  return table.concat(float_lines() or {}, "\n"):find("llm%-host") ~= nil
+end)
+vim.notify = auto_orig_notify
+local auto = table.concat(float_lines() or {}, "\n")
+check("auto LLM values render without pressing E", auto:find("llm%-host") ~= nil)
+if not auto:find("llm%-host") then
+  print("  DEBUG float:\n" .. auto)
+  print("  DEBUG notifies: " .. vim.inspect(auto_msgs))
 end
 require("typescope").close()
 

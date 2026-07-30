@@ -46,6 +46,9 @@ end
 ---@type typescope.Session?
 local session = nil
 
+-- auto-LLM failure is reported once per nvim session, not once per float
+local llm_auto_warned = false
+
 --- Close any open TypeScope float and cancel in-flight work.
 function M.close()
   if not session then
@@ -171,6 +174,27 @@ local function show(srcbuf, roots, token, client, sig_result, hover_lines)
     require("typescope.examples.ollama").warmup(cfg.ollama)
   end
 
+  -- example_mode = "llm": generate automatically on open. The float is fully
+  -- usable meanwhile (heuristics show immediately); LLM values swap in when
+  -- the background request lands. E stays useful for newly expanded leaves.
+  if cfg.ollama.enabled and cfg.example_mode == "llm" then
+    local spinner = require("typescope.anim").title_spinner(handle.win, "generating")
+    require("typescope.examples").llm(roots, token, function(ok, err)
+      spinner.stop()
+      if not session or session.token ~= token or not vim.api.nvim_win_is_valid(handle.win) then
+        return
+      end
+      if ok then
+        ctrl.opts.example_kind = "llm"
+        ctrl.opts.show_examples = true
+        ctrl.refresh()
+      elseif err and not llm_auto_warned then
+        llm_auto_warned = true -- once per session; every open would otherwise nag
+        vim.notify("typescope: auto LLM examples unavailable — " .. err, vim.log.levels.WARN)
+      end
+    end)
+  end
+
   -- the float follows the builtin hover contract: any movement or edit in the
   -- source buffer dismisses it
   vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI", "InsertEnter" }, {
@@ -182,9 +206,15 @@ local function show(srcbuf, roots, token, client, sig_result, hover_lines)
     group = augroup,
     buffer = srcbuf,
     callback = function()
-      -- leaving the source buffer INTO our float is the focus gesture, not a dismissal
+      -- leaving the source buffer INTO our float is the focus gesture, not a
+      -- dismissal. The scheduled check is bound to THIS session's window: a
+      -- stale check surviving a close must not murder the next session.
       vim.schedule(function()
-        if session and vim.api.nvim_get_current_win() ~= session.handle.win then
+        if
+          session
+          and session.handle.win == handle.win
+          and vim.api.nvim_get_current_win() ~= handle.win
+        then
           M.close()
         end
       end)

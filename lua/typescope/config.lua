@@ -44,7 +44,10 @@ local defaults = {
   trigger = "manual", -- "hover" (CursorHold) | "manual" (keymap only)
   depth = 2,
   show_examples = true,
-  example_mode = "heuristic", -- "heuristic" | "llm" | "none"
+  -- "heuristic": pattern-table examples, E generates LLM values on demand
+  -- "llm": auto-generate via ollama on open (heuristics show until they land)
+  -- "none": no examples at all
+  example_mode = "heuristic",
   ollama = {
     enabled = false,
     host = "localhost",

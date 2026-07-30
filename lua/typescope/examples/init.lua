@@ -11,6 +11,11 @@ local M = {}
 -- session-lifetime LLM cache: model.hash(node) -> literal
 local llm_cache = {}
 
+--- Test seam: drop cached LLM values so failure paths can be exercised.
+function M._clear_llm_cache()
+  llm_cache = {}
+end
+
 --- Annotate every leaf in the forest with a heuristic example. Structs,
 --- methods, and unresolved types get none — examples belong on concrete
 --- fields. Fields with a real default are also skipped: the default is
@@ -103,10 +108,10 @@ function M.llm(roots, token, done)
   -- ~16 tokens per answer line; a 48-leaf uvicorn.run needs far more than a
   -- fixed 512 or the tail fields get silently truncated
   local budget = math.min(2048, 96 + 16 * #specs)
+  local _ = token -- staleness is the callers' concern: they guard UI updates,
+  -- while we always parse and cache — a generation that finished after the
+  -- float closed still pays for the next open
   ollama.generate(ollama.prompt(specs), cfg.ollama, function(response, err)
-    if require("typescope.async").stale(token) then
-      return
-    end
     if not response then
       return done(false, err)
     end
