@@ -197,6 +197,10 @@ function M.attach(args)
       return
     end
     st.generating = true
+    -- flip upfront: render falls back to heuristics until values land, and
+    -- each batch swaps its rows in as it arrives
+    st.opts.example_kind = "llm"
+    st.opts.show_examples = true
     local spinner = require("typescope.anim").title_spinner(st.handle.win, "generating")
     args.on_llm(st.roots, function(ok, err)
       st.generating = false
@@ -205,11 +209,13 @@ function M.attach(args)
         return
       end
       if ok then
-        st.opts.example_kind = "llm"
-        st.opts.show_examples = true
         refresh()
       elseif err then
         vim.notify("typescope: " .. err .. " (keeping heuristic examples)", vim.log.levels.WARN)
+      end
+    end, function()
+      if vim.api.nvim_win_is_valid(st.handle.win) then
+        refresh()
       end
     end)
   end)

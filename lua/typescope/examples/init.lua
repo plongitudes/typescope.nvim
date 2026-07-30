@@ -72,14 +72,24 @@ local function visible_leaves(roots)
   return leaves
 end
 
---- Generate LLM examples for every eligible leaf in the forest (one request
---- for the whole float). done(true) when node.example.llm values are filled
---- (possibly all from cache), done(false) on any failure — callers keep
---- heuristics and tell the user once.
+-- Leaves per request: a batch's ~8×15 output tokens finishes in a few
+-- seconds even on small machines. One monolithic request for a 48-leaf
+-- uvicorn.run takes 30s+ of generation — no timeout survives that, and a
+-- timed-out request caches nothing (ollama cancels on disconnect).
+local LLM_BATCH = 8
+
+--- Generate LLM examples for the VISIBLE eligible leaves, in batches, filling
+--- progressively: on_progress fires after each batch lands (callers
+--- re-render), done fires at the end — done(true) if anything was filled
+--- (cache included), done(false, err) on total failure. Staleness is the
+--- callers' concern: they guard UI updates, while we always parse and cache —
+--- batches that complete after the float closed still pay for the next open.
 ---@param roots typescope.Node[]
 ---@param token typescope.CancelToken
 ---@param done fun(ok: boolean, err: string?)
-function M.llm(roots, token, done)
+---@param on_progress? fun() a batch of values just landed
+function M.llm(roots, token, done, on_progress)
+  local _ = token
   local cfg = require("typescope.config").get()
   if not cfg.ollama.enabled then
     return done(false, "ollama is disabled — setup({ ollama = { enabled = true } })")
@@ -88,8 +98,7 @@ function M.llm(roots, token, done)
   local leaves = visible_leaves(roots)
   local pending = {}
   for _, node in ipairs(leaves) do
-    local key = model.hash(node) .. "#" .. node.name
-    local cached = llm_cache[key]
+    local cached = llm_cache[model.hash(node) .. "#" .. node.name]
     if cached then
       node.example.llm = cached
     else
@@ -100,33 +109,49 @@ function M.llm(roots, token, done)
     return done(#leaves > 0)
   end
 
-  local specs = {}
-  for _, node in ipairs(pending) do
-    table.insert(specs, { id = node.id, name = node.name, display = node.type.display or "Any" })
-  end
   local ollama = require("typescope.examples.ollama")
-  -- ~16 tokens per answer line; a 48-leaf uvicorn.run needs far more than a
-  -- fixed 512 or the tail fields get silently truncated
-  local budget = math.min(2048, 96 + 16 * #specs)
-  local _ = token -- staleness is the callers' concern: they guard UI updates,
-  -- while we always parse and cache — a generation that finished after the
-  -- float closed still pays for the next open
-  ollama.generate(ollama.prompt(specs), cfg.ollama, function(response, err)
-    if not response then
-      return done(false, err)
+  local index = 1
+  local any_filled = false
+
+  local function next_batch()
+    if index > #pending then
+      return done(any_filled, not any_filled and "model returned nothing usable" or nil)
     end
-    local values = ollama.parse(response)
-    local filled = 0
-    for _, node in ipairs(pending) do
-      local value = values[node.id]
-      if value then
-        node.example.llm = value
-        llm_cache[model.hash(node) .. "#" .. node.name] = value
-        filled = filled + 1
+    local batch = {}
+    for i = index, math.min(index + LLM_BATCH - 1, #pending) do
+      table.insert(batch, pending[i])
+    end
+    index = index + LLM_BATCH
+
+    local specs = {}
+    for _, node in ipairs(batch) do
+      table.insert(specs, { id = node.id, name = node.name, display = node.type.display or "Any" })
+    end
+    ollama.generate(ollama.prompt(specs), cfg.ollama, function(response, err)
+      if not response then
+        -- abort the chain but report partial success: earlier batches landed
+        return done(any_filled, err)
       end
-    end
-    done(filled > 0, filled == 0 and "model returned nothing usable" or nil)
-  end, { num_predict = budget })
+      local values = ollama.parse(response)
+      local filled = 0
+      for _, node in ipairs(batch) do
+        local value = values[node.id]
+        if value then
+          node.example.llm = value
+          llm_cache[model.hash(node) .. "#" .. node.name] = value
+          filled = filled + 1
+        end
+      end
+      if filled > 0 then
+        any_filled = true
+        if on_progress then
+          on_progress()
+        end
+      end
+      next_batch()
+    end, { num_predict = math.min(2048, 96 + 16 * #specs) })
+  end
+  next_batch()
 end
 
 return M

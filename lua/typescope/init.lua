@@ -147,9 +147,9 @@ local function show(srcbuf, roots, token, client, sig_result, hover_lines)
         require("typescope.resolve").recurse(session.client, node, session.token, done)
       end
     end,
-    on_llm = function(tree_roots, done)
+    on_llm = function(tree_roots, done, on_progress)
       if session then
-        require("typescope.examples").llm(tree_roots, session.token, done)
+        require("typescope.examples").llm(tree_roots, session.token, done, on_progress)
       end
     end,
   })
@@ -179,18 +179,23 @@ local function show(srcbuf, roots, token, client, sig_result, hover_lines)
   -- the background request lands. E stays useful for newly expanded leaves.
   if cfg.ollama.enabled and cfg.example_mode == "llm" then
     local spinner = require("typescope.anim").title_spinner(handle.win, "generating")
+    local function live()
+      return session ~= nil and session.token == token and vim.api.nvim_win_is_valid(handle.win)
+    end
     require("typescope.examples").llm(roots, token, function(ok, err)
       spinner.stop()
-      if not session or session.token ~= token or not vim.api.nvim_win_is_valid(handle.win) then
+      if not live() then
         return
       end
       if ok then
-        ctrl.opts.example_kind = "llm"
-        ctrl.opts.show_examples = true
         ctrl.refresh()
       elseif err and not llm_auto_warned then
         llm_auto_warned = true -- once per session; every open would otherwise nag
         vim.notify("typescope: auto LLM examples unavailable — " .. err, vim.log.levels.WARN)
+      end
+    end, function()
+      if live() then
+        ctrl.refresh() -- batch landed: swap its rows in
       end
     end)
   end
