@@ -300,13 +300,21 @@ function M.function_scope(client, bufnr, win, token)
     -- import hop and the typeshed guard, so `str` won't explode here).
     local cls, tbuf, realloc = class_at_location(ctx, loc, 0)
     if cls and (#cls.fields > 0 or #cls.methods > 0 or #(cls.bases or {}) > 0) then
+      -- header declares the ancestry up top: (pydantic ← UserBase)
+      local function header()
+        local names = {}
+        for _, base in ipairs(cls.bases or {}) do
+          table.insert(names, base.name)
+        end
+        return "(" .. cls.category .. (#names > 0 and " ← " .. table.concat(names, ", ") or "") .. ")"
+      end
       local root = model.new({
         name = cls.class_name,
         kind = "type",
         expanded = true,
         type = {
           raw = cls.class_name,
-          display = "(" .. cls.category .. ")",
+          display = header(),
           category = cls.category,
         },
       })
@@ -316,7 +324,7 @@ function M.function_scope(client, bufnr, win, token)
       end
       if #root.children > 0 then
         -- category may have been corrected by the base walk (UserCreate case)
-        root.type.display = "(" .. cls.category .. ")"
+        root.type.display = header()
         require("typescope.examples").annotate({ root })
         return { root }
       end

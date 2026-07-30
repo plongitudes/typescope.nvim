@@ -283,7 +283,10 @@ local lines7 = float_lines()
 check("class-hover float opened", lines7 ~= nil)
 if lines7 then
   local all7 = table.concat(lines7, "\n")
-  check("class root with category label", lines7[1]:find("ServerConfig") and lines7[1]:find("(dataclass)", 1, true))
+  check(
+    "class root with category + ancestry header",
+    lines7[1]:find("ServerConfig") and lines7[1]:find("(dataclass ← BaseConfig)", 1, true)
+  )
   check("class fields shown", all7:find("host") and all7:find("retry"))
   check("class inheritance merged", all7:find("env") and all7:find("↑BaseConfig", 1, true))
 end
