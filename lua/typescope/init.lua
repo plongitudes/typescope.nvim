@@ -76,15 +76,11 @@ local function show(srcbuf, roots, meta, token, client, sig_result)
   require("typescope.highlights").apply()
 
   -- mark the active parameter (cursor inside the call's argument list),
-  -- matched by name — see lsp.active_param for why not by index
+  -- matched by name — see lsp.active_param for why not by index. Cached
+  -- trees carry the previous open's flag, so clear before setting.
   local active_name = lsp.active_param(sig_result)
-  if active_name then
-    for _, root in ipairs(roots) do
-      if root.kind == "param" and root.name == active_name then
-        root.active = true
-        break
-      end
-    end
+  for _, root in ipairs(roots) do
+    root.active = root.kind == "param" and root.name == active_name or false
   end
 
   local max_width = require("typescope.config").resolved_max_width()

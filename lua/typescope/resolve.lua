@@ -20,6 +20,27 @@ local function loc_key(loc)
   return loc.uri .. "#" .. loc.range.start.line
 end
 
+-- resolve cache (U2): key -> { roots, meta, tick }. Crude size cap: resolved
+-- trees are small, but unbounded growth across a long session isn't free.
+local cache = {}
+local cache_count = 0
+local function cache_put(key, entry)
+  if cache_count >= 50 then
+    cache = {}
+    cache_count = 0
+  end
+  if not cache[key] then
+    cache_count = cache_count + 1
+  end
+  cache[key] = entry
+end
+
+--- Drop all cached resolutions (test seam + future manual refresh).
+function M.clear_cache()
+  cache = {}
+  cache_count = 0
+end
+
 -- Terminal library boundary: never recurse into typeshed stubs or the
 -- runtime stdlib (definition is a runtime question, so TextIO lands in
 -- typing.py — stdlib but not "typeshed"). site-packages stays recursable:
@@ -64,31 +85,78 @@ local function type_info(display, refs)
   }
 end
 
---- Structural resolution came up empty for this node (alias, TypeVar,
---- unresolvable name): ask the evaluated universe instead. Hovers the refs in
---- order and keeps the first *informative* answer — a hover that merely
---- echoes the name back (a class behind the typeshed guard says "(class)
---- Protocol") decorates nothing, but an alias expansion does.
+--- Structural resolution came up empty for a node (alias, TypeVar,
+--- unresolvable, unannotated param): queue it for hover enrichment. The
+--- hovers all fire in PARALLEL at the end of the pipeline (U2) — they are
+--- independent, and ~8 sequential round-trips were a third of uvicorn.run's
+--- open time.
 ---@param ctx typescope.ResolveCtx
 ---@param node typescope.Node
 ---@param src_buf integer
----@param refs table[] annotation refs
-local function evaluate_leaf(ctx, node, src_buf, refs)
-  for i = 1, math.min(#refs, 3) do
-    local ref = refs[i]
-    local lines = lsp.hover_lines(ctx.client, src_buf, ref.row, ref.col, ctx.token)
-    if async.stale(ctx.token) then
-      return
+---@param refs table[] annotation refs (position candidates, tried in order)
+local function queue_enrichment(ctx, node, src_buf, refs)
+  table.insert(ctx.enrich, { node = node, src_buf = src_buf, refs = refs })
+end
+
+--- Fire every queued enrichment hover concurrently, then apply the first
+--- *informative* answer per node in ref order — a hover that merely echoes
+--- the name back (a class behind the typeshed guard says "(class) Protocol")
+--- decorates nothing, but an alias expansion or an inferred type does.
+---@param ctx typescope.ResolveCtx
+local function run_enrichment(ctx)
+  local jobs = {}
+  local total = 0
+  for _, item in ipairs(ctx.enrich) do
+    local cands = {}
+    for i = 1, math.min(#item.refs, 3) do
+      table.insert(cands, { ref = item.refs[i] })
+      total = total + 1
     end
-    local evaluated = lines and ctx.impl.evaluated_from_hover(lines, ref.name)
-    if
-      evaluated
-      and evaluated ~= node.type.display
-      and evaluated ~= ref.name
-      and evaluated ~= ref.name:match("[%w_]+$")
-    then
-      node.evaluated = evaluated
-      return
+    table.insert(jobs, { node = item.node, src_buf = item.src_buf, cands = cands })
+  end
+  ctx.enrich = {}
+  if total == 0 then
+    return
+  end
+
+  async.await(function(resume)
+    local remaining = total
+    local resumed = false
+    local function one_done()
+      remaining = remaining - 1
+      if remaining == 0 and not resumed then
+        resumed = true
+        resume()
+      end
+    end
+    for _, job in ipairs(jobs) do
+      for _, cand in ipairs(job.cands) do
+        local params = lsp.position_params(job.src_buf, cand.ref.row, cand.ref.col)
+        lsp.request_cb(ctx.client, "textDocument/hover", params, ctx.token, function(err, result)
+          cand.result = not err and result or nil
+          one_done()
+        end)
+      end
+    end
+  end)
+  if async.stale(ctx.token) then
+    return
+  end
+
+  for _, job in ipairs(jobs) do
+    for _, cand in ipairs(job.cands) do
+      local lines = lsp.hover_result_lines(cand.result)
+      local evaluated = lines and ctx.impl.evaluated_from_hover(lines, cand.ref.name)
+      if
+        evaluated
+        and evaluated ~= job.node.type.display
+        and evaluated ~= cand.ref.name
+        and evaluated ~= cand.ref.name:match("[%w_]+$")
+        and evaluated ~= "Any"
+      then
+        job.node.evaluated = evaluated
+        break
+      end
     end
   end
 end
@@ -264,7 +332,7 @@ attach_type = function(ctx, node, src_buf, refs, depth, ancestry, force_single)
   -- every ref failed structurally (alias, TypeVar, unresolvable): decorate
   -- the leaf with pyright's evaluated view instead of leaving a dead end
   if #node.children == 0 and #refs > 0 and not node._lazy then
-    evaluate_leaf(ctx, node, src_buf, refs)
+    queue_enrichment(ctx, node, src_buf, refs)
   end
 end
 
@@ -281,7 +349,7 @@ function M.function_scope(client, bufnr, win, token)
   if not impl then
     return nil, ("no extractor for filetype %q"):format(ft)
   end
-  local ctx = { client = client, token = token, impl = impl }
+  local ctx = { client = client, token = token, impl = impl, enrich = {} }
 
   local pos = vim.api.nvim_win_get_cursor(win)
   local loc = lsp.definition(client, bufnr, pos[1] - 1, pos[2], token)
@@ -293,6 +361,17 @@ function M.function_scope(client, bufnr, win, token)
   end
 
   local fbuf = lsp.load_buf(loc.uri)
+
+  -- resolve cache (U2): warm reopen of the same symbol reuses the tree —
+  -- folds, lazy expansions, and LLM values survive for free. Invalidated by
+  -- edits to the definition buffer (changedtick) and by config depth.
+  local cache_key = ("%s#%d#%s#%d"):format(loc.uri, loc.range.start.line, ft, config.get().depth)
+  local cache_tick = vim.b[fbuf].changedtick
+  local hit = cache[cache_key]
+  if hit and hit.tick == cache_tick then
+    return hit.roots, hit.meta
+  end
+
   local frow, fcol = lsp.range_start(fbuf, loc.range)
   local info = impl.function_info(fbuf, frow, fcol)
   if not info then
@@ -324,11 +403,17 @@ function M.function_scope(client, bufnr, win, token)
         return nil, "stale"
       end
       if #root.children > 0 then
+        run_enrichment(ctx)
+        if async.stale(token) then
+          return nil, "stale"
+        end
         -- category may have been corrected by the base walk (UserCreate case)
         root.type.display = header()
         require("typescope.examples").annotate({ root })
         -- no call-shape header for a class hover: the root row is the header
-        return { root }, { docstring = cls.docstring }
+        local roots, meta = { root }, { docstring = cls.docstring }
+        cache_put(cache_key, { roots = roots, meta = meta, tick = cache_tick })
+        return roots, meta
       end
     end
 
@@ -367,14 +452,8 @@ function M.function_scope(client, bufnr, win, token)
       end
     elseif not p.type_node and p.name_row then
       -- unannotated param: pyright still infers a type — hover the name
-      local lines = lsp.hover_lines(client, fbuf, p.name_row, p.name_col, token)
-      if async.stale(token) then
-        return nil, "stale"
-      end
-      local evaluated = lines and impl.evaluated_from_hover(lines, p.name)
-      if evaluated and evaluated ~= "Any" then
-        node.evaluated = evaluated
-      end
+      -- (joins the same parallel enrichment fan-out as failed leaves)
+      queue_enrichment(ctx, node, fbuf, { { name = p.name, row = p.name_row, col = p.name_col } })
     end
     -- auto-expand policy (v1): params with resolved structure start open,
     -- everything deeper starts closed
@@ -401,6 +480,10 @@ function M.function_scope(client, bufnr, win, token)
   if #roots == 0 then
     return nil, ("%s has no parameters or return annotation"):format(info.name)
   end
+  run_enrichment(ctx)
+  if async.stale(token) then
+    return nil, "stale"
+  end
   require("typescope.examples").annotate(roots)
 
   local ret = info.return_type and impl.annotation(fbuf, info.return_type).display
@@ -412,6 +495,7 @@ function M.function_scope(client, bufnr, win, token)
       .. (ret and (" -> " .. ret) or ""),
     docstring = info.docstring,
   }
+  cache_put(cache_key, { roots = roots, meta = meta, tick = cache_tick })
   return roots, meta
 end
 
@@ -428,9 +512,10 @@ function M.recurse(client, node, token, cb)
   end
   node.state.loading = true
   async.run(function()
-    local ctx = { client = client, token = token, impl = lazy.impl }
+    local ctx = { client = client, token = token, impl = lazy.impl, enrich = {} }
     local bufnr = lsp.load_buf(lazy.uri)
     attach_type(ctx, node, bufnr, lazy.refs, 1, lazy.ancestry or {})
+    run_enrichment(ctx)
     node.state.loading = false
     if async.stale(token) then
       return

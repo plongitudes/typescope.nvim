@@ -208,6 +208,36 @@ if ulines then
   check("float closed", #all_floats() == 0)
 end
 
+-- resolve cache (U2): reopen reuses the tree — the lazily expanded `returns`
+-- children persist; editing the def buffer invalidates
+require("typescope").open()
+vim.wait(2000, function()
+  return float_lines() ~= nil
+end)
+local cached_lines = float_lines()
+check("cache reopen: lazy expansion persisted", table.concat(cached_lines or {}, "\n"):find("status") ~= nil)
+require("typescope").close()
+
+-- the buster must reach DISK: the mock server greps files, not buffers
+-- (real servers get didChange; this desync is mock-only)
+vim.api.nvim_buf_set_lines(bufnr, 0, 0, false, { "# cache-buster comment" })
+vim.cmd("silent write")
+for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+  if l:find("handle = create_server") then
+    vim.api.nvim_win_set_cursor(0, { i, 12 })
+  end
+end
+require("typescope").open()
+vim.wait(2000, function()
+  return float_lines() ~= nil
+end)
+local fresh = table.concat(float_lines() or {}, "\n")
+check("edit invalidates cache: fresh tree, returns collapsed again", fresh:find("returns") ~= nil and not fresh:find("status"))
+require("typescope").close()
+vim.api.nvim_buf_set_lines(bufnr, 0, 1, false, {}) -- restore fixture
+vim.cmd("silent write")
+require("typescope.resolve").clear_cache()
+
 -- hover() takeover: function symbol → typescope; non-function → plain hover
 for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
   if l:find("handle = create_server") then

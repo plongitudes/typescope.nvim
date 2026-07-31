@@ -66,6 +66,48 @@ local function get_line(bufnr, row)
   return vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1] or ""
 end
 
+--- Fire one request with a plain callback (at most once). The building block
+--- for parallel fan-outs; M.request wraps it for sequential await use.
+---@param client vim.lsp.Client
+---@param method string
+---@param params table
+---@param token typescope.CancelToken
+---@param cb fun(err: any, result: any)
+function M.request_cb(client, method, params, token, cb)
+  local done = false
+  local function finish(e, r)
+    if not done then
+      done = true
+      cb(e, r)
+    end
+  end
+  local handler = function(e, r)
+    finish(e, r)
+  end
+  local ok, request_id
+  if has_011 then
+    ok, request_id = client:request(method, params, handler)
+  else
+    ok, request_id = client.request(method, params, handler)
+  end
+  if not ok then
+    finish("request failed")
+    return
+  end
+  table.insert(token.cancels, function()
+    if request_id then
+      if has_011 then
+        pcall(function()
+          client:cancel_request(request_id)
+        end)
+      else
+        pcall(client.cancel_request, request_id)
+      end
+    end
+    finish("cancelled")
+  end)
+end
+
 --- Await one request on one client. Returns nil on error or cancellation.
 --- Must be called inside async.run.
 ---@param client vim.lsp.Client
@@ -75,43 +117,38 @@ end
 ---@return any? result
 function M.request(client, method, params, token)
   local err, result = async.await(function(resume)
-    local done = false
-    local function finish(e, r)
-      if not done then
-        done = true
-        resume(e, r)
-      end
-    end
-    local handler = function(e, r)
-      finish(e, r)
-    end
-    local ok, request_id
-    if has_011 then
-      ok, request_id = client:request(method, params, handler)
-    else
-      ok, request_id = client.request(method, params, handler)
-    end
-    if not ok then
-      finish("request failed")
-      return
-    end
-    table.insert(token.cancels, function()
-      if request_id then
-        if has_011 then
-          pcall(function()
-            client:cancel_request(request_id)
-          end)
-        else
-          pcall(client.cancel_request, request_id)
-        end
-      end
-      finish("cancelled")
-    end)
+    M.request_cb(client, method, params, token, resume)
   end)
   if err then
     return nil
   end
   return result
+end
+
+--- LSP position params at a 0-based (row, byte-col).
+---@param bufnr integer
+---@param row integer
+---@param col integer byte column
+---@return table
+function M.position_params(bufnr, row, col)
+  return {
+    textDocument = { uri = vim.uri_from_bufnr(bufnr) },
+    position = { line = row, character = M.to_utf16(get_line(bufnr, row), col) },
+  }
+end
+
+--- Hover result → trimmed markdown lines (nil when empty).
+---@param result any textDocument/hover result
+---@return string[]?
+function M.hover_result_lines(result)
+  if not result or not result.contents then
+    return nil
+  end
+  local lines = vim.lsp.util.convert_input_to_markdown_lines(result.contents)
+  while lines[#lines] == "" do
+    table.remove(lines)
+  end
+  return #lines > 0 and lines or nil
 end
 
 --- Normalize a definition response (Location | Location[] | LocationLink[])
@@ -185,19 +222,8 @@ end
 ---@param token typescope.CancelToken
 ---@return string[]?
 function M.hover_lines(client, bufnr, row, col, token)
-  local params = {
-    textDocument = { uri = vim.uri_from_bufnr(bufnr) },
-    position = { line = row, character = M.to_utf16(get_line(bufnr, row), col) },
-  }
-  local result = M.request(client, "textDocument/hover", params, token)
-  if not result or not result.contents then
-    return nil
-  end
-  local lines = vim.lsp.util.convert_input_to_markdown_lines(result.contents)
-  while lines[#lines] == "" do
-    table.remove(lines)
-  end
-  return #lines > 0 and lines or nil
+  local result = M.request(client, "textDocument/hover", M.position_params(bufnr, row, col), token)
+  return M.hover_result_lines(result)
 end
 
 --- NAME of the active parameter, or nil. Matching by name rather than index
