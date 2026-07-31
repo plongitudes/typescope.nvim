@@ -1,5 +1,6 @@
 ---@class typescope.OllamaConfig
 ---@field enabled boolean
+---@field autostart boolean spawn `ollama serve` (dies with nvim) when the port refuses connections
 ---@field host string
 ---@field port integer
 ---@field model string
@@ -30,6 +31,7 @@
 
 ---@class typescope.Config
 ---@field trigger "hover"|"manual"
+---@field prefetch boolean idle-cursor cache warming (CursorHold, no float)
 ---@field depth integer
 ---@field show_examples boolean
 ---@field example_mode "heuristic"|"llm"|"none"
@@ -43,6 +45,9 @@ local M = {}
 ---@type typescope.Config
 local defaults = {
   trigger = "manual", -- "hover" (CursorHold) | "manual" (keymap only)
+  -- resolve the symbol under a resting cursor into the cache before any
+  -- keypress, so the eventual K/open paints warm. No visible effect.
+  prefetch = true,
   depth = 2,
   show_examples = true,
   -- "heuristic": pattern-table examples, E generates LLM values on demand
@@ -51,6 +56,10 @@ local defaults = {
   example_mode = "heuristic",
   ollama = {
     enabled = false,
+    -- spawn `ollama serve` as a child process if the port refuses
+    -- connections; the server dies with nvim (RAM reclaimed on quit).
+    -- A server that's already running is never touched.
+    autostart = false,
     host = "localhost",
     port = 11434,
     model = "qwen2.5-coder:3b",
@@ -118,12 +127,14 @@ end
 ---@param cfg typescope.Config
 local function validate(cfg)
   check("trigger", cfg.trigger, { "hover", "manual" })
+  check("prefetch", cfg.prefetch, "boolean")
   check("depth", cfg.depth, "positive_integer")
   check("show_examples", cfg.show_examples, "boolean")
   check("example_mode", cfg.example_mode, { "heuristic", "llm", "none" })
 
   check("ollama", cfg.ollama, "table")
   check("ollama.enabled", cfg.ollama.enabled, "boolean")
+  check("ollama.autostart", cfg.ollama.autostart, "boolean")
   check("ollama.host", cfg.ollama.host, "string")
   check("ollama.port", cfg.ollama.port, "positive_integer")
   check("ollama.model", cfg.ollama.model, "string")

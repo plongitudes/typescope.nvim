@@ -49,23 +49,125 @@ function M.generate(prompt, cfg, cb, gen_opts, _retrying)
   )
 end
 
+-- autostart state: the handle exists only for a server WE spawned. A server
+-- that was already answering the port is never touched (and never killed).
+local server_handle = nil
+local ensuring = false
+
+--- One cheap liveness probe. cb(ok) on the main loop.
+---@param cfg typescope.OllamaConfig
+---@param cb fun(ok: boolean)
+local function probe(cfg, cb)
+  local url = ("http://%s:%d/api/version"):format(cfg.host, cfg.port)
+  vim.system(
+    { "curl", "-sf", "--max-time", "1", url },
+    {},
+    vim.schedule_wrap(function(out)
+      cb(out.code == 0)
+    end)
+  )
+end
+
+--- Spawn `ollama serve` as a plain child process and wait for it to answer.
+--- Non-detached is the point: nvim tears the child down on ANY exit path
+--- (:q, ZZ, :qa, ...), reclaiming the model's RAM; the VimLeavePre kill is
+--- just an explicit graceful SIGTERM on top. Single-flight; re-entry no-ops.
+---@param cfg typescope.OllamaConfig
+---@param cb fun(ready: boolean)
+function M.ensure_server(cfg, cb)
+  if ensuring then
+    return
+  end
+  ensuring = true
+  local function done(ready)
+    ensuring = false
+    cb(ready)
+  end
+  probe(cfg, function(alive)
+    if alive then
+      return done(true) -- someone else's server — use it, never own it
+    end
+    if not server_handle then
+      local ok, handle = pcall(vim.system, { "ollama", "serve" }, {})
+      if not ok then
+        return done(false) -- ollama binary missing
+      end
+      server_handle = handle
+      vim.api.nvim_create_autocmd("VimLeavePre", {
+        group = vim.api.nvim_create_augroup("TypeScopeOllamaServer", { clear = true }),
+        callback = function()
+          pcall(server_handle.kill, server_handle, "sigterm")
+        end,
+      })
+    end
+    -- ~10s readiness budget (500ms polls); the port binds well before the
+    -- model loads, so this only covers process startup
+    local attempts = 0
+    local function poll()
+      probe(cfg, function(up)
+        if up then
+          return done(true)
+        end
+        attempts = attempts + 1
+        if attempts >= 20 then
+          return done(false)
+        end
+        vim.defer_fn(poll, 500)
+      end)
+    end
+    poll()
+  end)
+end
+
 local warmed = false
 
+--- Fire the actual model-load request (empty prompt loads without
+--- generating). cb(ok) on the main loop.
+---@param cfg typescope.OllamaConfig
+---@param cb fun(ok: boolean)
+local function load_model(cfg, cb)
+  local url = ("http://%s:%d/api/generate"):format(cfg.host, cfg.port)
+  local body = vim.json.encode({ model = cfg.model, prompt = "", stream = false, keep_alive = "30m" })
+  vim.system(
+    { "curl", "-sf", "--max-time", "120", url, "-H", "Content-Type: application/json", "-d", body },
+    {},
+    vim.schedule_wrap(function(out)
+      cb(out.code == 0)
+    end)
+  )
+end
+
 --- Fire-and-forget model load so the first E press doesn't pay the cold
---- start. Ollama loads the model on an empty prompt without generating.
+--- start. `warmed` flips optimistically (so overlapping calls don't stack
+--- curls) but resets on failure — a server started later still gets warmed
+--- by the next float open. With autostart, an unreachable server is spawned
+--- and the warmup retried once it answers.
 ---@param cfg typescope.OllamaConfig
 function M.warmup(cfg)
   if warmed then
     return
   end
   warmed = true
-  local url = ("http://%s:%d/api/generate"):format(cfg.host, cfg.port)
-  local body = vim.json.encode({ model = cfg.model, prompt = "", stream = false, keep_alive = "30m" })
-  vim.system(
-    { "curl", "-sf", "--max-time", "120", url, "-H", "Content-Type: application/json", "-d", body },
-    {},
-    function() end
-  )
+  load_model(cfg, function(ok)
+    if ok then
+      return
+    end
+    warmed = false
+    if not cfg.autostart then
+      return
+    end
+    M.ensure_server(cfg, function(ready)
+      if not ready then
+        return
+      end
+      warmed = true
+      load_model(cfg, function(ok2)
+        if not ok2 then
+          warmed = false
+        end
+      end)
+    end)
+  end)
 end
 
 --- Build the prompt: one dotted-path line per leaf so the model answers in a

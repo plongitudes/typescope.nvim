@@ -41,6 +41,11 @@ function M.clear_cache()
   cache_count = 0
 end
 
+--- Number of cached resolutions (test seam).
+function M._cache_count()
+  return cache_count
+end
+
 -- Terminal library boundary: never recurse into typeshed stubs or the
 -- runtime stdlib (definition is a runtime question, so TextIO lands in
 -- typing.py — stdlib but not "typeshed"). site-packages stays recursable:

@@ -238,6 +238,48 @@ vim.api.nvim_buf_set_lines(bufnr, 0, 1, false, {}) -- restore fixture
 vim.cmd("silent write")
 require("typescope.resolve").clear_cache()
 
+-- prefetch (warmstart): CursorHold silently fills the resolve cache — no
+-- float — so the eventual open() paints warm
+do
+  local resolve = require("typescope.resolve")
+  require("typescope").setup({}) -- registers warmstart autocmds (prefetch on by default)
+  for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+    if l:find("handle = create_server") then
+      vim.api.nvim_win_set_cursor(0, { i, 12 })
+    end
+  end
+  vim.cmd("doautocmd CursorHold")
+  vim.wait(2000, function()
+    return resolve._cache_count() > 0
+  end)
+  check("prefetch fills cache with no float", resolve._cache_count() > 0 and float_lines() == nil)
+
+  -- same word again: the suppression key blocks a re-run (cache stays empty)
+  resolve.clear_cache()
+  vim.cmd("doautocmd CursorHold")
+  vim.wait(500)
+  check("prefetch suppressed on same word", resolve._cache_count() == 0)
+
+  -- different call: prefetch runs again, and open() serves from the warm cache
+  for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+    if l:find("result = update_user") then
+      vim.api.nvim_win_set_cursor(0, { i, 12 })
+    end
+  end
+  vim.cmd("doautocmd CursorHold")
+  vim.wait(2000, function()
+    return resolve._cache_count() > 0
+  end)
+  check("prefetch runs for a new word", resolve._cache_count() > 0)
+  require("typescope").open()
+  vim.wait(2000, function()
+    return float_lines() ~= nil
+  end)
+  check("open after prefetch paints from cache", float_lines() ~= nil)
+  require("typescope").close()
+  resolve.clear_cache()
+end
+
 -- hover() takeover: function symbol → typescope; non-function → plain hover
 for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
   if l:find("handle = create_server") then

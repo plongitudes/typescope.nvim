@@ -7,6 +7,7 @@ function M.setup(opts)
   if cfg.trigger == "hover" then
     M._enable_hover()
   end
+  M._enable_warmstart(cfg)
 end
 
 -- Suppression key of the last CursorHold attempt: don't re-fire the pipeline
@@ -47,6 +48,110 @@ local session = nil
 
 -- auto-LLM failure is reported once per nvim session, not once per float
 local llm_auto_warned = false
+
+-- idle prefetch: single-flight token + the same word-suppression heuristic
+-- as the hover trigger (separate key — they're independent features)
+local prefetch_token = nil
+local last_prefetch_key = nil
+
+local function cancel_prefetch()
+  if prefetch_token then
+    require("typescope.async").cancel(prefetch_token)
+    prefetch_token = nil
+  end
+end
+
+-- Throwaway hover at (0,0): the server's initial semantic pass is paid for
+-- by the first request it receives, so send a worthless one at attach time —
+-- the analysis happens while the user is still reading the file, not when
+-- they press K.
+local function kick_analysis(bufnr)
+  if vim.bo[bufnr].filetype ~= "python" or vim.b[bufnr].typescope_kicked then
+    return
+  end
+  local lsp = require("typescope.lsp")
+  local client = lsp.client_for(bufnr)
+  if not client then
+    return
+  end
+  vim.b[bufnr].typescope_kicked = true
+  lsp.request_cb(
+    client,
+    "textDocument/hover",
+    lsp.position_params(bufnr, 0, 0),
+    require("typescope.async").token(),
+    function() end
+  )
+end
+
+--- Front-load the cold-open costs the moment we know we're in a python
+--- buffer: server analysis at attach, resolve cache on cursor rest, ollama
+--- model at plugin load.
+---@param cfg typescope.Config
+function M._enable_warmstart(cfg)
+  local group = vim.api.nvim_create_augroup("TypeScopeWarmstart", { clear = true })
+
+  -- lazy-loading on FileType python races LspAttach, so sweep buffers that
+  -- already have a client, then watch for future attaches
+  vim.api.nvim_create_autocmd("LspAttach", {
+    group = group,
+    desc = "TypeScope: kick server analysis for python buffers",
+    callback = function(args)
+      kick_analysis(args.buf)
+    end,
+  })
+  for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_loaded(bufnr) then
+      kick_analysis(bufnr)
+    end
+  end
+
+  -- silent cache warming on cursor rest: run the resolve pipeline with no
+  -- float so the eventual K/open paints from the cache. The hover trigger
+  -- already does this work (with a float), so prefetch defers to it.
+  if cfg.prefetch and cfg.trigger ~= "hover" then
+    vim.api.nvim_create_autocmd("CursorHold", {
+      group = group,
+      desc = "TypeScope: silent cache warming on cursor rest (prefetch)",
+      callback = function()
+        if vim.bo.filetype ~= "python" or vim.fn.mode() ~= "n" or session then
+          return
+        end
+        local lsp = require("typescope.lsp")
+        local client = lsp.client_for(0)
+        local cword = vim.fn.expand("<cword>")
+        if not client or cword == "" then
+          return
+        end
+        local pos = vim.api.nvim_win_get_cursor(0)
+        local key = ("%d:%d:%s"):format(vim.api.nvim_get_current_buf(), pos[1], cword)
+        if key == last_prefetch_key then
+          return
+        end
+        last_prefetch_key = key
+        cancel_prefetch()
+        local async = require("typescope.async")
+        local token = async.token()
+        prefetch_token = token
+        local bufnr = vim.api.nvim_get_current_buf()
+        local win = vim.api.nvim_get_current_win()
+        async.run(function()
+          -- results and errors both discarded: the cache write inside
+          -- function_scope is the entire point
+          require("typescope.resolve").function_scope(client, bufnr, win, token)
+          if prefetch_token == token then
+            prefetch_token = nil
+          end
+        end)
+      end,
+    })
+  end
+
+  -- model (and, with autostart, the server itself) warm before any float
+  if cfg.ollama.enabled then
+    require("typescope.examples.ollama").warmup(cfg.ollama)
+  end
+end
 
 --- Close any open TypeScope float and cancel in-flight work.
 function M.close()
@@ -230,6 +335,7 @@ function M.open(opts)
     return
   end
   M.close()
+  cancel_prefetch() -- the real pipeline supersedes any in-flight warming
 
   local bufnr = vim.api.nvim_get_current_buf()
   local win = vim.api.nvim_get_current_win()
