@@ -164,24 +164,12 @@ local function show(srcbuf, roots, meta, token, client, sig_result)
   -- usable meanwhile (heuristics show immediately); LLM values swap in when
   -- the background request lands. E stays useful for newly expanded leaves.
   if cfg.ollama.enabled and cfg.example_mode == "llm" then
-    local spinner = require("typescope.anim").title_spinner(handle.win, "generating")
-    local function live()
-      return session ~= nil and session.token == token and vim.api.nvim_win_is_valid(handle.win)
-    end
-    require("typescope.examples").llm(roots, token, function(ok, err)
-      spinner.stop()
-      if not live() then
-        return
-      end
-      if ok then
-        ctrl.refresh()
-      elseif err and not llm_auto_warned then
-        llm_auto_warned = true -- once per session; every open would otherwise nag
+    -- same single-flight machinery as the E keymap (spinner, progress,
+    -- refresh); only the error policy differs: warn once per nvim session
+    ctrl.generate(function(err)
+      if not llm_auto_warned then
+        llm_auto_warned = true
         vim.notify("typescope: auto LLM examples unavailable — " .. err, vim.log.levels.WARN)
-      end
-    end, function()
-      if live() then
-        ctrl.refresh() -- batch landed: swap its rows in
       end
     end)
   end

@@ -77,11 +77,15 @@ function M.attach(args)
         })
       end
     end
+    -- expanding deep subtrees produces wider content than the float opened
+    -- with — grow the window (never shrink; up to max_width) or lines clip
+    st.width = math.max(st.width, math.min(st.opts.max_width, st.result.width))
     float.update(st.handle, {
       lines = lines,
       highlights = highlights,
       ts_injections = st.result.ts_injections,
       lang = st.opts.lang,
+      width = st.width,
       height = math.min(st.max_height, #lines),
     })
     if focus_id then
@@ -195,12 +199,13 @@ function M.attach(args)
       refresh()
     end
   end)
-  map(km.llm_generate, function()
-    if not args.on_llm then
-      vim.notify("typescope: LLM examples need a live LSP session (not available in the spike)", vim.log.levels.INFO)
-      return
-    end
-    if st.generating then
+  -- Single-flight LLM generation, shared by the E keymap and the auto-open
+  -- path: concurrent runs double requests AND nest title spinners (the inner
+  -- one captures "generating…" as the original title and restores it
+  -- forever — Tony's frozen-title screenshot).
+  ---@param on_error? fun(err: string) override the default warn
+  local function generate(on_error)
+    if not args.on_llm or st.generating then
       return
     end
     st.generating = true
@@ -218,13 +223,28 @@ function M.attach(args)
       if ok then
         refresh()
       elseif err then
-        vim.notify("typescope: " .. err .. " (keeping heuristic examples)", vim.log.levels.WARN)
+        if on_error then
+          on_error(err)
+        else
+          vim.notify("typescope: " .. err .. " (keeping heuristic examples)", vim.log.levels.WARN)
+        end
       end
-    end, function()
+    end, function(batches_done, batches_total)
+      if batches_total and batches_total > 1 then
+        spinner.set_label(("generating %d/%d"):format(math.min(batches_done + 1, batches_total), batches_total))
+      end
       if vim.api.nvim_win_is_valid(st.handle.win) then
         refresh()
       end
     end)
+  end
+
+  map(km.llm_generate, function()
+    if not args.on_llm then
+      vim.notify("typescope: LLM examples need a live LSP session (not available in the spike)", vim.log.levels.INFO)
+      return
+    end
+    generate()
   end)
   map(km.recurse, function()
     local node = node_under_cursor()
@@ -240,7 +260,7 @@ function M.attach(args)
 
   st.result = render.render(st.roots, st.opts)
 
-  return { opts = st.opts, refresh = refresh }
+  return { opts = st.opts, refresh = refresh, generate = generate }
 end
 
 return M

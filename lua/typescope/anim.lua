@@ -6,12 +6,21 @@ local M = {}
 
 local FRAMES = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
 
---- Start a title spinner on a float. Returns a handle whose stop() restores
---- the original title (safe to call after the window died).
+-- one spinner per window: a second start on the same win must not capture
+-- the first spinner's text as the "original title" and restore it forever
+local active = {} ---@type table<integer, { stop: fun(), set_label: fun(l: string) }>
+
+--- Start a title spinner on a float. Returns a handle with stop() (restores
+--- the pre-spinner title; safe after the window died) and set_label() for
+--- progress text. Starting again on the same window stops the old spinner
+--- first.
 ---@param win integer
 ---@param label string e.g. "generating"
----@return { stop: fun() }
+---@return { stop: fun(), set_label: fun(label: string) }
 function M.title_spinner(win, label)
+  if active[win] then
+    active[win].stop()
+  end
   local ok, cfg = pcall(vim.api.nvim_win_get_config, win)
   local original = ok and cfg.title or nil
   local animate = require("typescope.config").get().ui.animations
@@ -39,18 +48,30 @@ function M.title_spinner(win, label)
     set_title((" %s… "):format(label))
   end
 
-  return {
+  local handle
+  handle = {
+    set_label = function(new_label)
+      label = new_label
+      if not animate then
+        set_title((" %s… "):format(label))
+      end
+    end,
     stop = function()
       if timer then
         timer:stop()
         timer:close()
         timer = nil
       end
+      if active[win] == handle then
+        active[win] = nil
+      end
       if original and vim.api.nvim_win_is_valid(win) then
         pcall(vim.api.nvim_win_set_config, win, { title = original })
       end
     end,
   }
+  active[win] = handle
+  return handle
 end
 
 return M

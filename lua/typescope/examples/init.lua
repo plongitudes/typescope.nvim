@@ -87,7 +87,7 @@ local LLM_BATCH = 8
 ---@param roots typescope.Node[]
 ---@param token typescope.CancelToken
 ---@param done fun(ok: boolean, err: string?)
----@param on_progress? fun() a batch of values just landed
+---@param on_progress? fun(batches_done: integer, batches_total: integer) a batch of values just landed
 function M.llm(roots, token, done, on_progress)
   local _ = token
   local cfg = require("typescope.config").get()
@@ -112,6 +112,8 @@ function M.llm(roots, token, done, on_progress)
   local ollama = require("typescope.examples.ollama")
   local index = 1
   local any_filled = false
+  local batches_total = math.ceil(#pending / LLM_BATCH)
+  local batches_done = 0
 
   local function next_batch()
     if index > #pending then
@@ -142,10 +144,11 @@ function M.llm(roots, token, done, on_progress)
           filled = filled + 1
         end
       end
+      batches_done = batches_done + 1
       if filled > 0 then
         any_filled = true
         if on_progress then
-          on_progress()
+          on_progress(batches_done, batches_total)
         end
       end
       next_batch()
