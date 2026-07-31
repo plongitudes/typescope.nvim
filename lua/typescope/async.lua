@@ -1,24 +1,24 @@
 ---@class typescope.CancelToken
----@field generation integer
 ---@field cancelled boolean
 ---@field cancels fun()[] cleanup hooks (e.g. LSP $/cancelRequest) run on cancel
 
 local M = {}
 
-local generation = 0
-
---- New token for one pipeline run. Creating a token stales every older one,
---- so a fresh trigger implicitly abandons in-flight work.
+--- New token for one pipeline run. Cancellation is explicit only: pipelines
+--- run concurrently (prefetch, open, attach kicks), each owning its token,
+--- and a trigger that supersedes another must cancel it itself. (An earlier
+--- global-generation design staled every older token on mint — that broke
+--- the moment two pipelines could legitimately overlap: an LspAttach kick
+--- fired by the def-site buffers a pipeline loads would kill that pipeline.)
 ---@return typescope.CancelToken
 function M.token()
-  generation = generation + 1
-  return { generation = generation, cancelled = false, cancels = {} }
+  return { cancelled = false, cancels = {} }
 end
 
 ---@param token typescope.CancelToken
 ---@return boolean
 function M.stale(token)
-  return token.cancelled or token.generation ~= generation
+  return token.cancelled
 end
 
 ---@param token typescope.CancelToken

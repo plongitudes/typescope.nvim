@@ -54,6 +54,10 @@ local llm_auto_warned = false
 local prefetch_token = nil
 local last_prefetch_key = nil
 
+-- the open() pipeline in flight before a session exists; a newer open must
+-- explicitly abandon it (cancellation is explicit — see async.token)
+local open_token = nil
+
 local function cancel_prefetch()
   if prefetch_token then
     require("typescope.async").cancel(prefetch_token)
@@ -336,6 +340,9 @@ function M.open(opts)
   end
   M.close()
   cancel_prefetch() -- the real pipeline supersedes any in-flight warming
+  if open_token then
+    require("typescope.async").cancel(open_token)
+  end
 
   local bufnr = vim.api.nvim_get_current_buf()
   local win = vim.api.nvim_get_current_win()
@@ -352,6 +359,7 @@ function M.open(opts)
 
   local async = require("typescope.async")
   local token = async.token()
+  open_token = token
   async.run(function()
     local resolve = require("typescope.resolve")
     local roots, meta_or_err = resolve.function_scope(client, bufnr, win, token)
@@ -372,6 +380,9 @@ function M.open(opts)
       return
     end
     show(bufnr, roots, meta_or_err, token, client, sig_result)
+    if open_token == token then
+      open_token = nil -- pipeline done; the session owns the token now
+    end
   end)
 end
 

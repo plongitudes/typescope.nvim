@@ -238,6 +238,19 @@ vim.api.nvim_buf_set_lines(bufnr, 0, 1, false, {}) -- restore fixture
 vim.cmd("silent write")
 require("typescope.resolve").clear_cache()
 
+-- cancellation is explicit: concurrent pipelines (prefetch / open / attach
+-- kicks) each own their token; minting one must not stale the others.
+-- Regression: LspAttach kicks fired by def-site buffers a pipeline loads
+-- were killing that very pipeline under the old global-generation design.
+do
+  local async = require("typescope.async")
+  local a = async.token()
+  local b = async.token()
+  check("minting a token does not stale others", not async.stale(a) and not async.stale(b))
+  async.cancel(a)
+  check("cancel stales only its own token", async.stale(a) and not async.stale(b))
+end
+
 -- prefetch (warmstart): CursorHold silently fills the resolve cache — no
 -- float — so the eventual open() paints warm
 do
