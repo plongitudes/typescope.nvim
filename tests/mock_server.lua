@@ -107,7 +107,18 @@ function M.cmd(fixture_dir)
       elseif method == "textDocument/signatureHelp" then
         local fname = vim.uri_to_fname(params.textDocument.uri)
         local word = word_at(fname, params.position.line, params.position.character)
-        callback(nil, word and signature_for(word) or nil)
+        local sig = word and signature_for(word) or nil
+        if not sig then
+          -- real servers resolve the ENCLOSING call when the cursor sits in
+          -- the argument list (the insert-mode surface's position); take the
+          -- last `name(` before the cursor as the callee
+          -- greedy .* would backtrack the capture down to one char, so
+          -- anchor on the last unclosed paren before the cursor instead
+          local text = (vim.fn.readfile(fname)[params.position.line + 1] or ""):sub(1, params.position.character)
+          local callee = text:match("([%w_]+)%s*%([^()]*$")
+          sig = callee and signature_for(callee) or nil
+        end
+        callback(nil, sig)
       elseif method == "textDocument/hover" then
         local fname = vim.uri_to_fname(params.textDocument.uri)
         local word = word_at(fname, params.position.line, params.position.character)

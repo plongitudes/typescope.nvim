@@ -293,6 +293,60 @@ do
   resolve.clear_cache()
 end
 
+-- insert-mode typing surface (U3): budget-reduced float inside call parens —
+-- header + collapsed roots, no docstring, never focusable, active param
+-- follows signatureHelp, closes on InsertLeave
+do
+  require("typescope").setup({ insert_mode = { enabled = true } })
+  local function insert_float()
+    for _, w in ipairs(vim.api.nvim_list_wins()) do
+      local c = vim.api.nvim_win_get_config(w)
+      if c.relative ~= "" and vim.bo[vim.api.nvim_win_get_buf(w)].filetype == "typescope" then
+        return w, c
+      end
+    end
+  end
+  for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+    local col = l:find("create_server%(None")
+    if col then
+      vim.api.nvim_win_set_cursor(0, { i, col + 14 }) -- inside the parens
+    end
+  end
+  -- insert mode itself is unreachable headless (feedkeys "x!" hangs on the
+  -- nested input loop, startinsert never applies mid-script); the module has
+  -- no mode checks — its insert-only trigger events are the guard — so the
+  -- entry point is driven directly
+  require("typescope.insert")._update()
+  vim.wait(2000, function()
+    return insert_float() ~= nil
+  end)
+  local iw, ic = insert_float()
+  check("insert surface opened", iw ~= nil)
+  if iw then
+    check("insert float never focusable", ic.focusable == false)
+    local ibuf = vim.api.nvim_win_get_buf(iw)
+    local ilines = vim.api.nvim_buf_get_lines(ibuf, 0, -1, false)
+    local alli = table.concat(ilines, "\n")
+    check("insert header shows call shape", ilines[1]:find("create_server(config", 1, true) ~= nil)
+    check("insert roots collapsed (no class fields)", not alli:find("host"))
+    check("no docstring while typing", not alli:find("Spin up"))
+    -- active param: mock always reports parameter 0 → config row highlighted
+    local ns = vim.api.nvim_create_namespace("typescope")
+    local has_active = vim.wait(3000, function()
+      for _, m in ipairs(vim.api.nvim_buf_get_extmarks(ibuf, ns, 0, -1, { details = true })) do
+        if m[4].hl_group == "TypeScopeActive" then
+          return true
+        end
+      end
+      return false
+    end, 100)
+    check("insert active param follows signatureHelp", has_active)
+    vim.cmd("doautocmd InsertLeave")
+    check("insert float closes on InsertLeave", insert_float() == nil)
+  end
+  require("typescope").setup({}) -- back to defaults for the remaining tests
+end
+
 -- hover() takeover: function symbol → typescope; non-function → plain hover
 for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
   if l:find("handle = create_server") then

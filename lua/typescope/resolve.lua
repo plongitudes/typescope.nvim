@@ -346,9 +346,11 @@ end
 ---@param bufnr integer source buffer
 ---@param win integer source window (cursor position)
 ---@param token typescope.CancelToken
+---@param pos? { [1]: integer, [2]: integer } (1-based row, byte col) override —
+--- the insert-mode surface resolves the call's callee, not the cursor
 ---@return typescope.Node[]? roots
 ---@return table|string|nil meta_or_err on success: { header?: string, docstring?: string }; on failure: error message
-function M.function_scope(client, bufnr, win, token)
+function M.function_scope(client, bufnr, win, token, pos)
   local ft = vim.bo[bufnr].filetype
   local impl = extract.get(ft)
   if not impl then
@@ -356,7 +358,7 @@ function M.function_scope(client, bufnr, win, token)
   end
   local ctx = { client = client, token = token, impl = impl, enrich = {} }
 
-  local pos = vim.api.nvim_win_get_cursor(win)
+  pos = pos or vim.api.nvim_win_get_cursor(win)
   local loc = lsp.definition(client, bufnr, pos[1] - 1, pos[2], token)
   if async.stale(token) then
     return nil, "stale"

@@ -100,6 +100,7 @@ end
 ---@field border string|string[]
 ---@field enter? boolean
 ---@field focusable? boolean
+---@field anchor? "NW"|"NE"|"SW"|"SE"
 
 ---@param opts typescope.FloatOpts
 ---@return typescope.FloatHandle
@@ -111,6 +112,7 @@ function M.open(opts)
 
   local win = vim.api.nvim_open_win(buf, opts.enter or false, {
     relative = opts.relative,
+    anchor = opts.anchor,
     row = opts.row,
     col = opts.col,
     width = math.max(1, opts.width),

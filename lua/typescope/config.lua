@@ -29,9 +29,13 @@
 ---@field close string
 ---@field help string
 
+---@class typescope.InsertModeConfig
+---@field enabled boolean insert-mode typing surface (replaces signature help)
+
 ---@class typescope.Config
 ---@field trigger "hover"|"manual"
 ---@field prefetch boolean idle-cursor cache warming (CursorHold, no float)
+---@field insert_mode typescope.InsertModeConfig
 ---@field depth integer
 ---@field show_examples boolean
 ---@field example_mode "heuristic"|"llm"|"none"
@@ -48,6 +52,11 @@ local defaults = {
   -- resolve the symbol under a resting cursor into the cache before any
   -- keypress, so the eventual K/open paints warm. No visible effect.
   prefetch = true,
+  -- typing surface (U3): budget-reduced float while the cursor is inside a
+  -- call's parens — header + collapsed tree, heuristics only, never
+  -- focusable. Opt-in while it bakes; turn off blink/core signature help
+  -- when enabling.
+  insert_mode = { enabled = false },
   depth = 2,
   show_examples = true,
   -- "heuristic": pattern-table examples, E generates LLM values on demand
@@ -128,6 +137,8 @@ end
 local function validate(cfg)
   check("trigger", cfg.trigger, { "hover", "manual" })
   check("prefetch", cfg.prefetch, "boolean")
+  check("insert_mode", cfg.insert_mode, "table")
+  check("insert_mode.enabled", cfg.insert_mode.enabled, "boolean")
   check("depth", cfg.depth, "positive_integer")
   check("show_examples", cfg.show_examples, "boolean")
   check("example_mode", cfg.example_mode, { "heuristic", "llm", "none" })

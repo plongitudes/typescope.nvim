@@ -7,6 +7,9 @@ function M.setup(opts)
   if cfg.trigger == "hover" then
     M._enable_hover()
   end
+  if cfg.insert_mode.enabled then
+    require("typescope.insert").enable()
+  end
   M._enable_warmstart(cfg)
 end
 
