@@ -518,6 +518,31 @@ if lines9 then
     return table.concat(float_lines() or {}, "\n"):find("max_attempts") ~= nil
   end)
   check("lazy overload param expands to class structure", table.concat(float_lines(), "\n"):find("max_attempts") ~= nil)
+
+  -- evaluation-only expansion (alias to a builtins-only RHS): the ≈ view
+  -- folds like a branch — h collapses the node itself, NOT the parent group
+  for i, l in ipairs(float_lines()) do
+    if l:find("mode%s") and l:find("LoopMode") then
+      vim.api.nvim_win_set_cursor(ov_win, { i, 0 })
+      break
+    end
+  end
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "x", false)
+  vim.wait(2000, function()
+    return table.concat(float_lines() or {}, "\n"):find("Literal") ~= nil
+  end)
+  check("evaluation-only expand decorates with ≈", table.concat(float_lines(), "\n"):find("Literal") ~= nil)
+  for i, l in ipairs(float_lines()) do
+    if l:find("mode%s") and l:find("LoopMode") then
+      vim.api.nvim_win_set_cursor(ov_win, { i, 0 })
+      break
+    end
+  end
+  vim.api.nvim_feedkeys("h", "x", false)
+  local after_h = table.concat(float_lines(), "\n")
+  check("h folds the ≈ view, not the parent", not after_h:find("Literal") and after_h:find("max_attempts") ~= nil)
+  vim.api.nvim_feedkeys("l", "x", false)
+  check("l re-expands the ≈ view without re-resolving", table.concat(float_lines(), "\n"):find("Literal") ~= nil)
 end
 require("typescope").close()
 

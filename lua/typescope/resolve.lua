@@ -62,7 +62,9 @@ end
 ---@param ctx typescope.ResolveCtx
 ---@return table? cls, integer? bufnr, table? loc
 local function class_at_location(ctx, loc, hops)
-  if is_typeshed(loc.uri) then
+  -- ctx.pierce (user-initiated recurse): an explicit expand is the user
+  -- ASKING for stub internals — the guard only protects automatic resolution
+  if not ctx.pierce and is_typeshed(loc.uri) then
     return nil
   end
   local bufnr = lsp.load_buf(loc.uri)
@@ -308,7 +310,7 @@ attach_type = function(ctx, node, src_buf, refs, depth, ancestry, force_single)
       if not single and #target.children > 0 then
         model.add_child(node, target)
       end
-    elseif loc and not ancestry[loc_key(loc)] and not is_typeshed(loc.uri) then
+    elseif loc and not ancestry[loc_key(loc)] and (ctx.pierce or not is_typeshed(loc.uri)) then
       -- alias hop: definition landed on `X = SomeClass` / `X = A | B` — parse
       -- the RHS as an annotation and chase through it transparently, keeping
       -- the alias name as the displayed vocabulary
@@ -588,7 +590,10 @@ function M.recurse(client, node, token, cb)
   -- swallowed the ≈ decoration and expanding did nothing at all
   node._lazy = nil
   async.run(function()
-    local ctx = { client = client, token = token, impl = lazy.impl, enrich = {} }
+    -- pierce = true: see class_at_location — explicit expansion may enter
+    -- typeshed (open()'s returns showing TextIOWrapper's structure is the
+    -- whole point of the keypress)
+    local ctx = { client = client, token = token, impl = lazy.impl, enrich = {}, pierce = true }
     local bufnr = lsp.load_buf(lazy.uri)
     attach_type(ctx, node, bufnr, lazy.refs, 1, lazy.ancestry or {})
     run_enrichment(ctx)
@@ -596,8 +601,20 @@ function M.recurse(client, node, token, cb)
     if async.stale(token) then
       return
     end
-    node.state.loaded = true
-    node.state.expanded = #node.children > 0
+    if #node.children > 0 then
+      node.state.loaded = true
+      node.state.expanded = true
+    elseif node.evaluated then
+      -- evaluation-only outcome: keep the node expandable (loaded stays
+      -- false, source stays set) so the ≈ view folds like any branch —
+      -- h collapses THIS node, not its parent. Re-expanding is a plain
+      -- toggle: _lazy is gone, so no re-resolve.
+      node.evaluated_on_expand = true
+      node.state.expanded = true
+    else
+      node.state.loaded = true -- honest leaf: nothing behind the marker
+      node.state.expanded = false
+    end
     require("typescope.examples").annotate({ node })
     cb()
   end)

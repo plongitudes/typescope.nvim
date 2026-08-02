@@ -228,7 +228,9 @@ function M.render(roots, opts)
     if not (node.evaluated and type_text == "Any") then
       table.insert(segments, { type_text, "TypeScopeType", injectable })
     end
-    if node.evaluated then
+    -- an evaluation acquired BY expanding folds with its node (h hides it
+    -- again); pipeline-acquired evaluations are always visible
+    if node.evaluated and not (node.evaluated_on_expand and not node.state.expanded) then
       table.insert(segments, { (type_text == "Any" and "" or " ") .. style.evaluated, "TypeScopeEvaluated" })
       table.insert(segments, { node.evaluated, "TypeScopeEvaluated" })
     end
