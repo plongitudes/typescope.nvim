@@ -202,6 +202,7 @@ function M.render(roots, opts)
     line:add(marker, "TypeScopeChrome")
     local name_group = node.kind == "return" and "TypeScopeKeyword"
       or node.kind == "type" and "TypeScopeType"
+      or node.kind == "param" and "TypeScopeParam"
       or "TypeScopeField"
     if node.active then
       name_group = "TypeScopeActive"
@@ -334,7 +335,24 @@ function M.render(roots, opts)
       -- drop the final (possibly cut-in-half) token so only whole params show
       header = body:sub(1, cut):gsub(",%s*[^,]*$", "") .. ", " .. suffix
     end
-    emit_prose(header, "TypeScopeHeader")
+    -- elision marks (`=…`, trailing `…`) carry no information beyond
+    -- "something was here"; at full header brightness they blend into the
+    -- names, so they render dimmed at the same hue (Tony, 2026-08-01)
+    local hline = new_line()
+    local hi = 1
+    while hi <= #header do
+      local s, e = header:find("=?…", hi)
+      if not s then
+        hline:add(header:sub(hi), "TypeScopeHeader")
+        break
+      end
+      if s > hi then
+        hline:add(header:sub(hi, s - 1), "TypeScopeHeader")
+      end
+      hline:add(header:sub(s, e), "TypeScopeHeaderDim")
+      hi = e + 1
+    end
+    emit(hline, nil)
   end
   if has_doc and opts.docstring_pos == "top" then
     emit_docstring()

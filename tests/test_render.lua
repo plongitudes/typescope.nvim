@@ -165,7 +165,7 @@ check(
   h1.group == "TypeScopeChrome"
     and h1.col_start == 0
     and h1.col_end == 4
-    and h2.group == "TypeScopeField"
+    and h2.group == "TypeScopeParam" -- params match @variable.parameter (2026-08-01)
     and h2.col_start == 4
     and h2.col_end == 10
     and h3.group == "TypeScopeType"
