@@ -11,6 +11,9 @@ local M = {}
 ---@field key string call identity (buf + call node start)
 ---@field srcbuf integer
 ---@field display typescope.Node[] shallow root clones (fold/active state stays ours)
+---@field roots typescope.Node[] full resolve result (all overload groups)
+---@field meta table? resolve meta (headers/overloads for auto-follow)
+---@field overload_idx integer? currently displayed overload
 ---@field opts table render opts
 ---@field token typescope.CancelToken
 ---@field width integer
@@ -111,8 +114,29 @@ local function repaint(st)
   })
 end
 
--- Debounced signatureHelp → active-param row highlight. Repaints only when
--- the active name actually changes; no resolve, no definition chases.
+-- shallow clones with their OWN state tables: the cached tree's fold state
+-- belongs to the reading surface; the typing surface always shows collapsed
+-- roots and must not clobber K's folds
+local function clone_roots(source)
+  local display = {}
+  for _, root in ipairs(source) do
+    local copy = vim.tbl_extend("force", {}, root)
+    copy.state = { expanded = false, loaded = root.state.loaded, loading = false }
+    copy.active = false
+    table.insert(display, copy)
+  end
+  return display
+end
+
+---@param meta table
+---@param idx integer
+local function overload_header(meta, idx)
+  return meta.headers[idx] .. (" [%d/%d]"):format(idx, meta.overloads)
+end
+
+-- Debounced signatureHelp → active-param row highlight, and (U4) overload
+-- auto-follow: when activeSignature changes, the display silently swaps to
+-- that overload's params. Repaints only on change; no resolve, no chases.
 local function refresh_active()
   stop_timer()
   sig_timer = vim.uv.new_timer()
@@ -137,15 +161,31 @@ local function refresh_active()
           return
         end
         local ok_result = result and result.signatures and #result.signatures > 0 and result or nil
+        local changed = false
+        -- follow only on a real answer: servers return nil at some positions
+        -- (basedpyright: inside string arguments) and that must not snap the
+        -- display back to overload 1
+        if st.meta and st.meta.overloads and ok_result then
+          local idx = math.min((ok_result.activeSignature or 0) + 1, st.meta.overloads)
+          if idx ~= st.overload_idx then
+            st.overload_idx = idx
+            st.display = clone_roots(st.roots[idx].children)
+            st.opts.header = overload_header(st.meta, idx)
+            st.active_name = nil
+            changed = true
+          end
+        end
         local name = lsp.active_param(ok_result)
-        if name == st.active_name then
-          return
+        if name ~= st.active_name then
+          st.active_name = name
+          for _, root in ipairs(st.display) do
+            root.active = root.kind == "param" and root.name == name or false
+          end
+          changed = true
         end
-        st.active_name = name
-        for _, root in ipairs(st.display) do
-          root.active = root.kind == "param" and root.name == name or false
+        if changed then
+          repaint(st)
         end
-        repaint(st)
       end)
     end)
   )
@@ -179,16 +219,10 @@ local function open_for(srcbuf, key, frow0, fcol)
     end
     pending_key = nil
 
-    -- shallow clones with their OWN state tables: the cached tree's fold
-    -- state belongs to the reading surface; the typing surface always shows
-    -- collapsed roots and must not clobber K's folds
-    local display = {}
-    for _, root in ipairs(roots) do
-      local copy = vim.tbl_extend("force", {}, root)
-      copy.state = { expanded = false, loaded = root.state.loaded, loading = false }
-      copy.active = false
-      table.insert(display, copy)
-    end
+    -- overloads (U4): the typing surface never stacks — it shows the active
+    -- overload's params only and swaps silently as activeSignature moves
+    local has_overloads = type(meta) == "table" and meta.overloads ~= nil
+    local display = clone_roots(has_overloads and roots[1].children or roots)
 
     local config = require("typescope.config")
     local cfg = config.get()
@@ -199,7 +233,7 @@ local function open_for(srcbuf, key, frow0, fcol)
       show_examples = cfg.show_examples and cfg.example_mode ~= "none",
       example_kind = "heuristic", -- LLM values decorate if already cached, never requested
       lang = vim.bo[srcbuf].filetype,
-      header = type(meta) == "table" and meta.header or nil,
+      header = has_overloads and overload_header(meta, 1) or (type(meta) == "table" and meta.header or nil),
       docstring = nil, -- no prose while typing
       docstring_pos = false,
     }
@@ -231,6 +265,9 @@ local function open_for(srcbuf, key, frow0, fcol)
       key = key,
       srcbuf = srcbuf,
       display = display,
+      roots = roots,
+      meta = has_overloads and meta or nil,
+      overload_idx = has_overloads and 1 or nil,
       opts = opts,
       token = token,
       width = width,

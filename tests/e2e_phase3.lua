@@ -344,6 +344,59 @@ do
     vim.cmd("doautocmd InsertLeave")
     check("insert float closes on InsertLeave", insert_float() == nil)
   end
+
+  -- overloads in the typing surface (U4): never stacked — the active
+  -- overload's params only, [n/m] in the header
+  for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+    if l:find("fetched = fetch") then
+      vim.api.nvim_win_set_cursor(0, { i, 16 }) -- inside fetch( parens
+    end
+  end
+  require("typescope.insert")._update()
+  vim.wait(2000, function()
+    return insert_float() ~= nil
+  end)
+  local ow = insert_float()
+  check("insert overload float opened", ow ~= nil)
+  if ow then
+    local obuf = vim.api.nvim_win_get_buf(ow)
+    local olines = vim.api.nvim_buf_get_lines(obuf, 0, -1, false)
+    local allo = table.concat(olines, "\n")
+    check("insert overload header [1/2]", olines[1]:find("%[1/2%]") ~= nil)
+    check("insert shows single overload, not stacked", not allo:find("%[2/2%]"))
+
+    -- auto-follow: adding a second argument bumps the mock's arity-based
+    -- activeSignature; the display silently swaps to overload 2. The line
+    -- must reach DISK — the mock reads files, not buffers (didChange desync
+    -- is mock-only, same as the cache-buster test above).
+    local frow
+    for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+      if l:find("fetched = fetch") then
+        frow = i
+      end
+    end
+    vim.api.nvim_buf_set_lines(bufnr, frow - 1, frow, false, { 'fetched = fetch("a", "b")' })
+    vim.cmd("silent write")
+    vim.api.nvim_win_set_cursor(0, { frow, 21 }) -- after the comma
+    require("typescope.insert")._update()
+    local followed = vim.wait(3000, function()
+      local ww = insert_float()
+      if not ww then
+        return false
+      end
+      local h = vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(ww), 0, -1, false)[1]
+      return h:find("%[2/2%]") ~= nil
+    end, 100)
+    check("insert auto-follows activeSignature to overload 2", followed)
+    local ww = insert_float()
+    if ww then
+      local swapped = table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(ww), 0, -1, false), "\n")
+      check("swapped display shows overload 2's default param", swapped:find("auto") ~= nil)
+    end
+    vim.api.nvim_buf_set_lines(bufnr, frow - 1, frow, false, { "fetched = fetch(1)" })
+    vim.cmd("silent write")
+    vim.cmd("doautocmd InsertLeave")
+  end
   require("typescope").setup({}) -- back to defaults for the remaining tests
 end
 
@@ -416,6 +469,38 @@ if lines8 then
   check("alias name kept as vocabulary", all8:find("Payload") ~= nil)
   check("fields resolved through alias", all8:find("email") ~= nil and all8:find("age") ~= nil)
   check("badges survive the alias hop", all8:find("NotRequired") ~= nil)
+end
+require("typescope").close()
+
+-- overloads (U4): sibling @overload defs render as stacked groups — active
+-- expanded, others collapsed, [n/m] in the header
+for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+  if l:find("fetched = fetch") then
+    vim.api.nvim_win_set_cursor(0, { i, 11 })
+  end
+end
+require("typescope").open()
+vim.wait(2000, function()
+  return float_lines() ~= nil
+end)
+local lines9, ov_win = float_lines()
+check("overload float opened", lines9 ~= nil)
+if lines9 then
+  local all9 = table.concat(lines9, "\n")
+  check("overload header carries [1/2]", lines9[1]:find("%[1/2%]") ~= nil)
+  check("both overload groups stacked", all9:find("%[1/2%]") ~= nil and all9:find("%[2/2%]") ~= nil)
+  check("active overload expanded (key: int visible)", all9:find("int") ~= nil)
+  check("inactive overload collapsed (its default hidden)", not all9:find("auto"))
+  -- expanding the second group reveals its params
+  vim.api.nvim_set_current_win(ov_win)
+  for i, l in ipairs(float_lines()) do
+    if l:find("%[2/2%]") then
+      vim.api.nvim_win_set_cursor(ov_win, { i, 0 })
+      break
+    end
+  end
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "x", false)
+  check("second overload expands to its params", table.concat(float_lines(), "\n"):find("auto") ~= nil)
 end
 require("typescope").close()
 

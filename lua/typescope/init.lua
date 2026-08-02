@@ -191,8 +191,23 @@ local function show(srcbuf, roots, meta, token, client, sig_result)
   -- matched by name — see lsp.active_param for why not by index. Cached
   -- trees carry the previous open's flag, so clear before setting.
   local active_name = lsp.active_param(sig_result)
-  for _, root in ipairs(roots) do
-    root.active = root.kind == "param" and root.name == active_name or false
+  local header = meta and meta.header or nil
+  if meta and meta.overloads then
+    -- overloads (U4): stacked groups — expand the one basedpyright says
+    -- matches the arguments so far, collapse the rest; the active-param
+    -- flag lives on that group's children. Header follows the same choice.
+    local idx = math.min((sig_result and sig_result.activeSignature or 0) + 1, meta.overloads)
+    for i, root in ipairs(roots) do
+      root.state.expanded = i == idx
+      for _, child in ipairs(root.children) do
+        child.active = i == idx and child.kind == "param" and child.name == active_name or false
+      end
+    end
+    header = meta.headers[idx] .. (" [%d/%d]"):format(idx, meta.overloads)
+  else
+    for _, root in ipairs(roots) do
+      root.active = root.kind == "param" and root.name == active_name or false
+    end
   end
 
   local max_width = require("typescope.config").resolved_max_width()
@@ -205,7 +220,7 @@ local function show(srcbuf, roots, meta, token, client, sig_result)
     lang = vim.bo[srcbuf].filetype,
     -- unified float (U1): call-shape header + docstring section, absorbing
     -- the retired anchor float's content
-    header = meta and meta.header or nil,
+    header = header,
     docstring = meta and meta.docstring or nil,
     docstring_expanded = false,
     docstring_pos = cfg.ui.docstring,

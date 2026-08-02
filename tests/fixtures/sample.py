@@ -58,7 +58,20 @@ def configure(mode: LoopMode, count=3) -> None:
     ...
 
 
+@overload
+def fetch(key: int) -> str: ...
+
+
+@overload
+def fetch(key: str, default: str = "auto") -> str: ...
+
+
+def fetch(key, default=None):
+    ...
+
+
 handle = create_server(None, 1.0)
+fetched = fetch(1)
 result = update_user(None)
 secret = ask("token: ")
 configured = configure("auto", 1)

@@ -169,6 +169,64 @@ function M.function_info(src, row, col)
   return info
 end
 
+--- Overload set (U4) for the function whose definition contains (row, col):
+--- sibling defs with the same name in the same block, at least one decorated
+--- `@overload` / `@typing.overload`. Returns name positions of the decorated
+--- defs in source order — the bare implementation def is the catch-all, not
+--- a signature (matches how pyright builds its signature list). Returns nil
+--- for plain functions.
+---@param src integer|string
+---@param row integer
+---@param col integer
+---@return { row: integer, col: integer }[]?
+function M.overloads(src, row, col)
+  local fn = walk_up(node_at(src, row, col), "function_definition")
+  if not fn then
+    return nil
+  end
+  local name = text(field1(fn, "name"), src)
+  local top = fn
+  if top:parent() and top:parent():type() == "decorated_definition" then
+    top = top:parent()
+  end
+  local container = top:parent()
+  if not container then
+    return nil
+  end
+  local sigs, any_overload = {}, false
+  for child in container:iter_children() do
+    local def, decorated = nil, false
+    if child:type() == "function_definition" then
+      def = child
+    elseif child:type() == "decorated_definition" then
+      local inner = field1(child, "definition")
+      if inner and inner:type() == "function_definition" then
+        def = inner
+        for deco in child:iter_children() do
+          if deco:type() == "decorator" then
+            local dtext = text(deco, src)
+            if dtext:match("^@%s*overload%s*$") or dtext:match("^@%s*typing%s*%.%s*overload%s*$") then
+              decorated = true
+            end
+          end
+        end
+      end
+    end
+    if def then
+      local dname = field1(def, "name")
+      if dname and text(dname, src) == name and decorated then
+        local nrow, ncol = dname:range()
+        table.insert(sigs, { row = nrow, col = ncol })
+        any_overload = true
+      end
+    end
+  end
+  if not any_overload or #sigs < 2 then
+    return nil
+  end
+  return sigs
+end
+
 --- When (row, col) sits on the NAME of a type-alias definition, return the
 --- RHS node to be parsed as an annotation. Recognized shapes:
 ---   X = SomeClass          X = A | B          X = Optional[Thing]

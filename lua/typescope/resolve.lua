@@ -442,6 +442,70 @@ function M.function_scope(client, bufnr, win, token, pos)
     return nil, "symbol does not resolve to a function definition or class"
   end
 
+  -- overloads (U4): sibling @overload defs become stacked group roots, each
+  -- with shallow param/return children — annotations straight from the def
+  -- site, no definition chases; structure lazy-loads on expand. Which group
+  -- is ACTIVE is a per-call decision the surfaces make from signatureHelp,
+  -- so the cache stores the whole set plus per-overload headers.
+  local overload_locs = impl.overloads and impl.overloads(fbuf, frow, fcol)
+  if overload_locs then
+    local uri = vim.uri_from_bufnr(fbuf)
+    local groups, headers, docstring = {}, {}, nil
+    local function shallow_child(name, kind, ann, default)
+      local child = model.new({
+        name = name,
+        kind = kind,
+        type = ann and type_info(ann.display, ann.refs) or { raw = "Any", display = "Any", category = "builtin" },
+        default = default,
+      })
+      if ann and #ann.refs > 0 then
+        child.state.loaded = false
+        child.source = { uri = uri, range = { start = { line = ann.refs[1].row, character = 0 } } }
+        child._lazy = { uri = uri, refs = ann.refs, ancestry = {}, impl = impl }
+      end
+      return child
+    end
+    for _, o in ipairs(overload_locs) do
+      local oinfo = impl.function_info(fbuf, o.row, o.col)
+      if oinfo then
+        docstring = docstring or oinfo.docstring
+        local ret = oinfo.return_type and impl.annotation(fbuf, oinfo.return_type)
+        local group = model.new({
+          id = "overload" .. (#groups + 1),
+          name = oinfo.name,
+          kind = "overload",
+          type = { raw = "", display = "(" .. table.concat(oinfo.shape or {}, ", ") .. ")", category = "builtin" },
+        })
+        for _, p in ipairs(oinfo.params) do
+          local ann = p.type_node and impl.annotation(fbuf, p.type_node)
+          model.add_child(group, shallow_child(p.name, "param", ann, p.default))
+        end
+        if ret then
+          model.add_child(group, shallow_child("returns", "return", ret))
+        end
+        table.insert(groups, group)
+        table.insert(
+          headers,
+          oinfo.name
+            .. "("
+            .. table.concat(oinfo.shape or {}, ", ")
+            .. ")"
+            .. (ret and (" -> " .. ret.display) or "")
+        )
+      end
+    end
+    if #groups >= 2 then
+      for i, g in ipairs(groups) do
+        g.badge = ("[%d/%d]"):format(i, #groups)
+      end
+      groups[1].state.expanded = true -- surfaces re-aim this at the active one
+      require("typescope.examples").annotate(groups)
+      local meta = { header = headers[1], headers = headers, overloads = #groups, docstring = docstring }
+      cache_put(cache_key, { roots = groups, meta = meta, tick = cache_tick })
+      return groups, meta
+    end
+  end
+
   local roots = {}
   for _, p in ipairs(info.params) do
     local ann = p.type_node and impl.annotation(fbuf, p.type_node)

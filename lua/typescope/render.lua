@@ -218,10 +218,11 @@ function M.render(roots, opts)
 
     local segments = {}
     local type_text = node.type.display or node.type.raw or "?"
-    -- method "signatures" like (path: str) -> bytes and class-root category
-    -- labels like (pydantic) aren't parseable expressions, so they keep
-    -- block coloring
-    local injectable = (node.kind ~= "method" and node.kind ~= "type") and "replace" or nil
+    -- method "signatures" like (path: str) -> bytes, class-root category
+    -- labels like (pydantic), and overload shapes with elision marks aren't
+    -- parseable expressions, so they keep block coloring
+    local injectable = (node.kind ~= "method" and node.kind ~= "type" and node.kind ~= "overload") and "replace"
+      or nil
     -- an unannotated param's declared type is only implicit Any; when we have
     -- pyright's inferred type, show just that instead of "Any ≈ T"
     if not (node.evaluated and type_text == "Any") then

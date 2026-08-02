@@ -56,30 +56,30 @@ function M.cmd(fixture_dir)
     return find_by_patterns(word, { "^%s*class%s+WORD%f[%W]", "^%s*def%s+WORD%f[%W]" })
   end
 
-  -- naive signatureHelp: find the word's single-line def, split its params
+  -- naive signatureHelp: every single-line def of the word becomes one
+  -- signature (overloaded fixtures yield several, like pyright does)
   local function signature_for(word)
-    local loc = find_declaration(word)
-    if not loc then
-      return nil
-    end
-    local line = vim.fn.readfile(vim.uri_to_fname(loc.uri))[loc.range.start.line + 1] or ""
-    local inner = line:match("%((.*)%)")
-    if not inner then
-      return nil
-    end
-    local params = {}
-    for piece in vim.gsplit(inner, ",%s*") do
-      if piece ~= "" and piece ~= "self" then
-        table.insert(params, { label = piece })
+    local sigs = {}
+    for _, file in ipairs(files) do
+      for _, line in ipairs(vim.fn.readfile(file)) do
+        if line:match("^%s*def%s+" .. word .. "%s*%(") then
+          local inner = line:match("%((.*)%)")
+          if inner then
+            local params = {}
+            for piece in vim.gsplit(inner, ",%s*") do
+              if piece ~= "" and piece ~= "self" then
+                table.insert(params, { label = piece })
+              end
+            end
+            table.insert(sigs, { label = line:gsub("^%s*def%s*", ""):gsub(":%s*$", ""), parameters = params })
+          end
+        end
       end
     end
-    return {
-      signatures = {
-        { label = line:gsub("^%s*def%s*", ""):gsub(":%s*$", ""), parameters = params },
-      },
-      activeSignature = 0,
-      activeParameter = 0,
-    }
+    if #sigs == 0 then
+      return nil
+    end
+    return { signatures = sigs, activeSignature = 0, activeParameter = 0 }
   end
 
   return function(dispatchers)
@@ -117,6 +117,14 @@ function M.cmd(fixture_dir)
           local text = (vim.fn.readfile(fname)[params.position.line + 1] or ""):sub(1, params.position.character)
           local callee = text:match("([%w_]+)%s*%([^()]*$")
           sig = callee and signature_for(callee) or nil
+        end
+        if sig and #sig.signatures > 1 then
+          -- naive arity-based overload selection (real pyright doesn't even
+          -- do this — see U4 bead notes — but it lets tests drive the
+          -- auto-follow path): each comma before the cursor advances it
+          local before = (vim.fn.readfile(fname)[params.position.line + 1] or ""):sub(1, params.position.character)
+          local _, commas = before:gsub(",", "")
+          sig.activeSignature = math.min(commas, #sig.signatures - 1)
         end
         callback(nil, sig)
       elseif method == "textDocument/hover" then
