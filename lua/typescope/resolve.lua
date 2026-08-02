@@ -582,6 +582,11 @@ function M.recurse(client, node, token, cb)
     return
   end
   node.state.loading = true
+  -- clear the hook BEFORE resolving: attach_type's evaluated-hover fallback
+  -- (for chases the typeshed guard blocks — every param of a typeshed def)
+  -- is gated on "no lazy hook pending", so a still-attached hook silently
+  -- swallowed the ≈ decoration and expanding did nothing at all
+  node._lazy = nil
   async.run(function()
     local ctx = { client = client, token = token, impl = lazy.impl, enrich = {} }
     local bufnr = lsp.load_buf(lazy.uri)
@@ -592,7 +597,6 @@ function M.recurse(client, node, token, cb)
       return
     end
     node.state.loaded = true
-    node._lazy = nil
     node.state.expanded = #node.children > 0
     require("typescope.examples").annotate({ node })
     cb()

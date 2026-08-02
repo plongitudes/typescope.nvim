@@ -501,6 +501,23 @@ if lines9 then
   end
   vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "x", false)
   check("second overload expands to its params", table.concat(float_lines(), "\n"):find("auto") ~= nil)
+
+  -- lazy params INSIDE an overload group must actually resolve on expand
+  -- (regression: a still-attached _lazy hook swallowed the whole recurse
+  -- fallback and expanding did nothing)
+  -- the group row's shape display also says "policy=…" — target the param
+  -- ROW (name followed by its RetryPolicy annotation), not the group row
+  for i, l in ipairs(float_lines()) do
+    if l:find("policy%s") and l:find("RetryPolicy") then
+      vim.api.nvim_win_set_cursor(ov_win, { i, 0 })
+      break
+    end
+  end
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "x", false)
+  vim.wait(2000, function()
+    return table.concat(float_lines() or {}, "\n"):find("max_attempts") ~= nil
+  end)
+  check("lazy overload param expands to class structure", table.concat(float_lines(), "\n"):find("max_attempts") ~= nil)
 end
 require("typescope").close()
 
