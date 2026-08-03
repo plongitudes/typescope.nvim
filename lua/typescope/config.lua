@@ -5,6 +5,7 @@
 ---@field port integer
 ---@field model string
 ---@field timeout_ms integer
+---@field keep_alive string how long ollama keeps the model resident after a request (RAM tradeoff)
 
 ---@class typescope.UiConfig
 ---@field style "unicode"|"ascii"|"minimal"|"rounded"
@@ -73,6 +74,9 @@ local defaults = {
     port = 11434,
     model = "qwen2.5-coder:3b",
     timeout_ms = 8000,
+    -- model residency after a request: longer = warm E presses all session,
+    -- shorter = the ~2GB comes back sooner on small-RAM machines
+    keep_alive = "30m",
   },
   ui = {
     style = "rounded", -- "unicode" | "ascii" | "minimal" | "rounded"
@@ -150,6 +154,7 @@ local function validate(cfg)
   check("ollama.port", cfg.ollama.port, "positive_integer")
   check("ollama.model", cfg.ollama.model, "string")
   check("ollama.timeout_ms", cfg.ollama.timeout_ms, "positive_integer")
+  check("ollama.keep_alive", cfg.ollama.keep_alive, "string")
 
   check("ui", cfg.ui, "table")
   check("ui.style", cfg.ui.style, { "unicode", "ascii", "minimal", "rounded" })

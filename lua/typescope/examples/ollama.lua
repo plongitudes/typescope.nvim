@@ -16,7 +16,7 @@ function M.generate(prompt, cfg, cb, gen_opts, _retrying)
     model = cfg.model,
     prompt = prompt,
     stream = false,
-    keep_alive = "30m", -- stay resident through a working session
+    keep_alive = cfg.keep_alive or "30m", -- residency = RAM tradeoff, user's call
     options = { temperature = 0.2, num_predict = (gen_opts and gen_opts.num_predict) or 512 },
   })
   local timeout_s = math.max(1, math.ceil(cfg.timeout_ms / 1000))
@@ -127,7 +127,7 @@ local warmed = false
 ---@param cb fun(ok: boolean)
 local function load_model(cfg, cb)
   local url = ("http://%s:%d/api/generate"):format(cfg.host, cfg.port)
-  local body = vim.json.encode({ model = cfg.model, prompt = "", stream = false, keep_alive = "30m" })
+  local body = vim.json.encode({ model = cfg.model, prompt = "", stream = false, keep_alive = cfg.keep_alive or "30m" })
   vim.system(
     { "curl", "-sf", "--max-time", "120", url, "-H", "Content-Type: application/json", "-d", body },
     {},

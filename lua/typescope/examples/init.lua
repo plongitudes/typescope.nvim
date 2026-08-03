@@ -22,28 +22,27 @@ end
 --- already the best possible example (a `None` default doesn't count — a
 --- concrete example still adds information there).
 ---@param roots typescope.Node[]
-function M.annotate(roots)
-  model.walk(roots, function(node)
-    local has_real_default = node.default ~= nil and node.default ~= "None"
-    if
-      #node.children == 0
-      and node.kind ~= "method"
-      and node.type.category ~= "unresolved"
-      and not has_real_default
-    then
-      node.example.heuristic = heuristic.value(node.name, node.type.display)
-    end
-  end)
-end
-
 ---@param node typescope.Node
 ---@return boolean
 local function eligible(node)
   local has_real_default = node.default ~= nil and node.default ~= "None"
+  -- _lazy placeholders are unresolved structure (an alias name standing in
+  -- for a type nobody has chased yet) — an example for one is speculation,
+  -- and prompting a slow local model for speculation is what made K on
+  -- open() churn. Expanding resolves the node; examples follow honestly.
   return #node.children == 0
     and node.kind ~= "method"
     and node.type.category ~= "unresolved"
+    and node._lazy == nil
     and not has_real_default
+end
+
+function M.annotate(roots)
+  model.walk(roots, function(node)
+    if eligible(node) then
+      node.example.heuristic = heuristic.value(node.name, node.type.display)
+    end
+  end)
 end
 
 --- Eligible leaves that are actually VISIBLE (reachable through expanded
