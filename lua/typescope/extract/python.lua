@@ -123,6 +123,10 @@ function M.function_info(src, row, col)
   }
   local params_node = field1(fn, "parameters")
   if params_node then
+    -- pass-mode bookkeeping: params after `*` (or *args) are keyword-only;
+    -- a `/` retroactively marks everything before it positional-only
+    local kw_only = false
+    local slash_at = nil
     for i = 0, params_node:named_child_count() - 1 do
       local p = params_node:named_child(i)
       local t = p:type()
@@ -150,10 +154,13 @@ function M.function_info(src, row, col)
       elseif t == "list_splat_pattern" or t == "dictionary_splat_pattern" then
         entry = { name = text(p, src) }
         shape_token = entry.name
+        kw_only = t == "list_splat_pattern" -- params after *args are kw-only
       elseif t == "keyword_separator" then
         table.insert(info.shape, "*")
+        kw_only = true
       elseif t == "positional_separator" then
         table.insert(info.shape, "/")
+        slash_at = #info.params
       end
       if entry and entry.name ~= "self" and entry.name ~= "cls" then
         if name_node then
@@ -161,8 +168,16 @@ function M.function_info(src, row, col)
           -- with pyright's inferred type for unannotated params
           entry.name_row, entry.name_col = name_node:range()
         end
+        if kw_only and t ~= "list_splat_pattern" and t ~= "dictionary_splat_pattern" then
+          entry.mode = "*"
+        end
         table.insert(info.params, entry)
         table.insert(info.shape, shape_token)
+      end
+    end
+    if slash_at then
+      for i = 1, slash_at do
+        info.params[i].mode = "/"
       end
     end
   end

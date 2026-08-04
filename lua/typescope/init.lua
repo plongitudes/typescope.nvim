@@ -214,6 +214,7 @@ local function show(srcbuf, roots, meta, token, client, sig_result)
   local render_opts = {
     style = styles.get(cfg.ui.style),
     max_width = max_width,
+    layout = cfg.ui.layout,
     align = cfg.ui.align,
     show_examples = cfg.show_examples and cfg.example_mode ~= "none",
     example_kind = cfg.example_mode == "llm" and "llm" or "heuristic",

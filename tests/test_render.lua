@@ -327,4 +327,79 @@ eq_lines(
   }
 )
 
+-- 10. table layout (U5): column grid — name | */ | type | default | example |
+-- origin — alternating row backgrounds, wrapped cells continue in-column
+do
+  local table_tree = {
+    model.new({
+      name = "config",
+      kind = "param",
+      expanded = true,
+      type = { raw = "ServerConfig", display = "ServerConfig", category = "dataclass" },
+      children = {
+        { name = "host", kind = "field", type = { raw = "str", display = "str", category = "builtin" }, example = { heuristic = '"localhost"' } },
+        { name = "port", kind = "field", type = { raw = "int", display = "int", category = "builtin" }, default = "8000" },
+        { name = "env", kind = "field", type = { raw = "str", display = "str", category = "builtin" }, origin = "BaseConfig" },
+      },
+    }),
+    model.new({
+      name = "host",
+      kind = "param",
+      pass_mode = "*",
+      type = { raw = "str", display = "str", category = "builtin" },
+      default = '"127.0.0.1"',
+    }),
+    model.new({
+      name = "lifespan",
+      kind = "param",
+      pass_mode = "*",
+      type = { raw = "LifespanType", display = "LifespanType", category = "generic" },
+      evaluated = 'Literal["auto", "on", "off"]',
+      default = '"auto"',
+    }),
+    model.new({ name = "returns", kind = "return", type = { raw = "None", display = "None", category = "builtin" } }),
+  }
+  local tr = render.render(table_tree, opts({
+    style = styles.get("rounded"),
+    max_width = 78,
+    layout = "table",
+    show_examples = true,
+  }))
+  eq_lines("table layout golden", tr.lines, {
+    "▾ config        ServerConfig                                                  ",
+    "  ├─ · host     str                                   \"localhost\"             ",
+    "  ├─ · port     int                    = 8000                                 ",
+    "  ╰─ · env      str                                                ↑BaseConfig",
+    "· host       *  str                    = \"127.0.0.1\"                          ",
+    "· lifespan   *  LifespanType ≈         = \"auto\"                               ",
+    "                Literal[\"auto\", \"on\",                                         ",
+    "                \"off\"]                                                        ",
+    "· returns       None                                                          ",
+  })
+  -- alternating rows: odd NODE rows (1st, 3rd, 5th...) carry the bg group at
+  -- sub-100 priority; a wrapped row's continuations share its parity
+  local alt_lines = {}
+  for _, h in ipairs(tr.highlights) do
+    if h.group == "TypeScopeRowOdd" then
+      alt_lines[h.line] = h.priority
+    end
+  end
+  check(
+    "alternating rows on odd node rows, priority under text",
+    alt_lines[0] == 90 and alt_lines[2] == 90 and alt_lines[4] == 90 and alt_lines[8] == 90
+      and alt_lines[1] == nil and alt_lines[5] == nil and alt_lines[6] == nil
+  )
+  -- injections: unsplit default cell keeps replace; wrapped type cell drops
+  local inj = {}
+  for _, ij in ipairs(tr.ts_injections) do
+    inj[ij.text] = ij.mode
+  end
+  check("table injections: unsplit cells only", inj["8000"] == "replace" and inj["LifespanType"] == nil)
+  -- every line of a row maps back to its node
+  check(
+    "table line_to_node covers continuations",
+    tr.line_to_node[7] == "lifespan" and tr.line_to_node[8] == "lifespan" and tr.line_to_node[2] == "config.host"
+  )
+end
+
 print(failures == 0 and "RENDER ALL PASS" or ("RENDER " .. failures .. " FAILURES"))

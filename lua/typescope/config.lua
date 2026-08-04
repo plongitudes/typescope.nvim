@@ -9,8 +9,9 @@
 
 ---@class typescope.UiConfig
 ---@field style "unicode"|"ascii"|"minimal"|"rounded"
+---@field layout "tree"|"table" flowing segments vs column grid with alternating rows
 ---@field animations boolean
----@field align "left"|"right" name column alignment
+---@field align "left"|"right" name column alignment (tree layout)
 ---@field max_width number >1: absolute columns; <=1: fraction of editor width
 ---@field max_height integer
 ---@field border string|string[] any nvim float border value
@@ -80,6 +81,9 @@ local defaults = {
   },
   ui = {
     style = "rounded", -- "unicode" | "ascii" | "minimal" | "rounded"
+    -- "table" (U5): true columns — name | */ | type | default | example |
+    -- origin — with alternating row backgrounds
+    layout = "tree",
     animations = true,
     align = "left", -- "left" | "right" name column alignment
     max_width = 0.5, -- fraction of editor width; values > 1 are absolute columns
@@ -158,6 +162,7 @@ local function validate(cfg)
 
   check("ui", cfg.ui, "table")
   check("ui.style", cfg.ui.style, { "unicode", "ascii", "minimal", "rounded" })
+  check("ui.layout", cfg.ui.layout, { "tree", "table" })
   check("ui.animations", cfg.ui.animations, "boolean")
   check("ui.align", cfg.ui.align, { "left", "right" })
   if type(cfg.ui.max_width) ~= "number" or cfg.ui.max_width <= 0 then

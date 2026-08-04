@@ -20,6 +20,10 @@ local groups = {
   TypeScopeHint = { link = "Comment" },
   TypeScopeActive = { link = "LspSignatureActiveParameter" },
   TypeScopeTitle = { link = "FloatTitle" },
+  -- table layout (U5): alternating row backgrounds. Even rows keep the
+  -- float's own background; odd rows link CursorLine — subtle in most
+  -- themes, and it tracks the user's colorscheme (never invented colors).
+  TypeScopeRowOdd = { link = "CursorLine" },
 }
 
 local applied = false

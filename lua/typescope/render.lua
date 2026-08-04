@@ -20,7 +20,8 @@
 ---@class typescope.RenderOpts
 ---@field style typescope.Charset
 ---@field max_width integer resolved columns (callers use config.resolved_max_width)
----@field align? "left"|"right" name column alignment (default left)
+---@field layout? "tree"|"table" flowing segments (default) vs column grid (U5)
+---@field align? "left"|"right" name column alignment (default left, tree layout)
 ---@field show_examples boolean
 ---@field example_kind "heuristic"|"llm"
 ---@field lang? string treesitter language for injected snippet highlighting
@@ -123,6 +124,7 @@ function M.render(roots, opts)
         col_start = hl.col_start,
         col_end = hl.col_end,
         group = hl.group,
+        priority = hl.priority, -- optional: row backgrounds sit under text
       })
     end
     for _, inj in ipairs(line.inj) do
@@ -372,19 +374,231 @@ function M.render(roots, opts)
   -- every annotation to column 30 and force wraps; outliers sit ragged.
   -- Right mode is uncapped: padding lands before the name, so long names
   -- cost nothing extra (Tony's full-width request).
-  local cap = opts.align == "right" and math.huge or 16
-  local marker_w = strwidth(style.expanded)
-  local root_col = 0
-  for _, root in ipairs(roots) do
-    local w = strwidth(root.name)
-    if w <= cap then
-      root_col = math.max(root_col, w + marker_w)
+  -- ── table layout (U5): column grid with alternating row backgrounds ────
+  -- name | */ | type | default | example | origin. Column widths are
+  -- content-derived with caps on the wrappable columns (type, example);
+  -- a wrapped cell continues on extra lines at its own column, all lines of
+  -- a row sharing its background parity.
+  local function render_table()
+    local GAP = 2
+    -- pass 1: collect visible rows as per-column segment lists
+    local rows = {}
+    local function collect(node, bars, branch, depth)
+      local marker = is_expandable(node) and (node.state.expanded and style.expanded or style.collapsed)
+        or style.leaf
+      local name_group = node.kind == "return" and "TypeScopeKeyword"
+        or node.kind == "type" and "TypeScopeType"
+        or node.kind == "param" and "TypeScopeParam"
+        or "TypeScopeField"
+      if node.active then
+        name_group = "TypeScopeActive"
+      end
+      local name_segs = {}
+      if depth > 0 then
+        table.insert(name_segs, { branch, "TypeScopeChrome" })
+      end
+      table.insert(name_segs, { marker, "TypeScopeChrome" })
+      table.insert(name_segs, { node.name, name_group })
+
+      local mode_segs = {}
+      if node.pass_mode then
+        table.insert(mode_segs, { node.pass_mode, "TypeScopeKeyword" })
+      end
+
+      local type_segs = {}
+      local type_text = node.type.display or node.type.raw or "?"
+      local injectable = (node.kind ~= "method" and node.kind ~= "type" and node.kind ~= "overload") and "replace"
+        or nil
+      if not (node.evaluated and type_text == "Any") then
+        table.insert(type_segs, { type_text, "TypeScopeType", injectable })
+      end
+      if node.evaluated and not (node.evaluated_on_expand and not node.state.expanded) then
+        table.insert(type_segs, { (#type_segs > 0 and " " or "") .. style.evaluated, "TypeScopeEvaluated" })
+        table.insert(type_segs, { node.evaluated, "TypeScopeEvaluated" })
+      end
+      if node.type.category == "unresolved" then
+        table.insert(type_segs, { " " .. style.unresolved, "TypeScopeUnresolved" })
+      end
+      if node.badge then
+        table.insert(type_segs, { " " .. node.badge, "TypeScopeBadge" })
+      end
+
+      local default_segs = {}
+      if node.default then
+        table.insert(default_segs, { "= ", "TypeScopeChrome" })
+        table.insert(default_segs, { node.default, "TypeScopeDefault", "replace" })
+      end
+
+      local example_segs = {}
+      local example = example_for(node, opts)
+      if example then
+        table.insert(example_segs, { example, "TypeScopeExample", "overlay" })
+      end
+
+      local origin_segs = {}
+      if node.origin then
+        table.insert(origin_segs, { style.inherit .. node.origin, "TypeScopeHint" })
+      end
+
+      -- the tree layout's "(<CR> to expand)" hint is dropped here: the
+      -- marker glyph carries it, and a hint column would be pure noise
+      table.insert(rows, {
+        node = node,
+        cells = { name_segs, mode_segs, type_segs, default_segs, example_segs, origin_segs },
+      })
+      if node.state.expanded then
+        for i, child in ipairs(node.children) do
+          local last = i == #node.children
+          collect(
+            child,
+            bars .. (last and string.rep(" ", strwidth(style.vert)) or style.vert),
+            bars .. (last and style.last or style.branch),
+            depth + 1
+          )
+        end
+      end
+    end
+    for _, root in ipairs(roots) do
+      collect(root, string.rep(" ", strwidth(style.expanded)), "", 0)
+    end
+
+    local function segs_width(segs)
+      local w = 0
+      for _, s in ipairs(segs) do
+        w = w + strwidth(s[1])
+      end
+      return w
+    end
+
+    -- pass 2: column widths, capping the wrappable columns to fit max_width
+    local WRAPPABLE = { [3] = true, [5] = true } -- type, example
+    local widths = {}
+    for c = 1, 6 do
+      widths[c] = 0
+      for _, row in ipairs(rows) do
+        widths[c] = math.max(widths[c], segs_width(row.cells[c]))
+      end
+    end
+    local function grid_width()
+      local w = 0
+      for c = 1, 6 do
+        if widths[c] > 0 then
+          w = w + widths[c] + (w > 0 and GAP or 0)
+        end
+      end
+      return w
+    end
+    local over = grid_width() - opts.max_width
+    if over > 0 then
+      -- shrink type first, then example, floors at 16 cells each
+      for _, c in ipairs({ 3, 5 }) do
+        if over > 0 and widths[c] > 16 then
+          local cut = math.min(over, widths[c] - 16)
+          widths[c] = widths[c] - cut
+          over = over - cut
+        end
+      end
+    end
+
+    -- wrap one cell's segments into width-bounded slices; a wrapped cell
+    -- loses its injections (fragments aren't parseable source)
+    local function wrap_cell(segs, width)
+      if segs_width(segs) <= width then
+        return { segs }
+      end
+      local slices, current, cur_w = {}, {}, 0
+      for _, seg in ipairs(segs) do
+        local text, group = seg[1], seg[2]
+        while text ~= "" do
+          local avail = width - cur_w
+          if strwidth(text) <= avail then
+            table.insert(current, { text, group })
+            cur_w = cur_w + strwidth(text)
+            text = ""
+          elseif avail < 6 and cur_w > 0 then
+            table.insert(slices, current)
+            current, cur_w = {}, 0
+          else
+            local cut = math.max(1, find_break_point(text, avail))
+            local clean = text:sub(cut, cut):match("[%s,]") ~= nil or text:sub(cut + 1, cut + 1):match("%s") ~= nil
+            if cur_w > 0 and not clean then
+              -- forced mid-word cut on a shared slice reads terribly — give
+              -- the segment a fresh slice with the full column width instead
+              table.insert(slices, current)
+              current, cur_w = {}, 0
+            else
+              table.insert(current, { text:sub(1, cut), group })
+              text = text:sub(cut + 1):gsub("^%s+", "")
+              table.insert(slices, current)
+              current, cur_w = {}, 0
+            end
+          end
+        end
+      end
+      if #current > 0 then
+        table.insert(slices, current)
+      end
+      return slices
+    end
+
+    -- pass 3: emit — each row spans max(slices) lines; every line of a row
+    -- carries the row's background parity across the full grid width
+    for ri, row in ipairs(rows) do
+      local sliced = {}
+      local height = 1
+      for c = 1, 6 do
+        sliced[c] = wrap_cell(row.cells[c], math.max(widths[c], 1))
+        height = math.max(height, #sliced[c])
+      end
+      for k = 1, height do
+        local line = new_line()
+        for c = 1, 6 do
+          if widths[c] > 0 then
+            if line.width > 0 then
+              line:add(string.rep(" ", GAP))
+            end
+            local col_start = line.width
+            for _, seg in ipairs(sliced[c][k] or {}) do
+              -- injections survive only in unsplit cells
+              local inject = #sliced[c] == 1 and seg[3] or nil
+              line:add(seg[1], seg[2], inject)
+            end
+            local pad = widths[c] - (line.width - col_start)
+            if pad > 0 then
+              line:add(string.rep(" ", pad))
+            end
+          end
+        end
+        if ri % 2 == 1 then
+          table.insert(line.hls, {
+            col_start = 0,
+            col_end = #line.text,
+            group = "TypeScopeRowOdd",
+            priority = 90, -- under the text groups: bg only shines through
+          })
+        end
+        emit(line, row.node.id)
+      end
     end
   end
-  for _, root in ipairs(roots) do
-    local w = strwidth(root.name)
-    root._unit_col = w <= cap and root_col or (w + marker_w)
-    render_node(root, string.rep(" ", marker_w), "", 0)
+
+  if opts.layout == "table" then
+    render_table()
+  else
+    local cap = opts.align == "right" and math.huge or 16
+    local marker_w = strwidth(style.expanded)
+    local root_col = 0
+    for _, root in ipairs(roots) do
+      local w = strwidth(root.name)
+      if w <= cap then
+        root_col = math.max(root_col, w + marker_w)
+      end
+    end
+    for _, root in ipairs(roots) do
+      local w = strwidth(root.name)
+      root._unit_col = w <= cap and root_col or (w + marker_w)
+      render_node(root, string.rep(" ", marker_w), "", 0)
+    end
   end
 
   if has_doc and opts.docstring_pos == "bottom" then

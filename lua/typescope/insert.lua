@@ -229,6 +229,7 @@ local function open_for(srcbuf, key, frow0, fcol)
     local opts = {
       style = require("typescope.styles").get(cfg.ui.style),
       max_width = config.resolved_max_width(),
+      layout = cfg.ui.layout,
       align = cfg.ui.align,
       show_examples = cfg.show_examples and cfg.example_mode ~= "none",
       example_kind = "heuristic", -- LLM values decorate if already cached, never requested

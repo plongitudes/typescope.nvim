@@ -48,6 +48,7 @@ function M.new(spec)
     default = spec.default,
     badge = spec.badge,
     origin = spec.origin,
+    pass_mode = spec.pass_mode, -- "*" kw-only | "/" positional-only (params)
     evaluated = spec.evaluated,
     source = spec.source,
     children = {},

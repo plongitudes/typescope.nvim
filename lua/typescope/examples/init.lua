@@ -40,7 +40,10 @@ end
 function M.annotate(roots)
   model.walk(roots, function(node)
     if eligible(node) then
-      node.example.heuristic = heuristic.value(node.name, node.type.display)
+      local value = heuristic.value(node.name, node.type.display)
+      -- a None-default doesn't block examples (eligible), but an example
+      -- that IS the default restates the row — drop it
+      node.example.heuristic = value ~= node.default and value or nil
     end
   end)
 end

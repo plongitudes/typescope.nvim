@@ -74,7 +74,7 @@ local function set_content(buf, lines, highlights, injections, lang)
       vim.api.nvim_buf_set_extmark(buf, ns, hl.line, hl.col_start, {
         end_col = hl.col_end,
         hl_group = hl.group,
-        priority = 100,
+        priority = hl.priority or 100,
       })
     end
   end

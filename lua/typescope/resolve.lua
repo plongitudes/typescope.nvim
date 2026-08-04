@@ -453,12 +453,13 @@ function M.function_scope(client, bufnr, win, token, pos)
   if overload_locs then
     local uri = vim.uri_from_bufnr(fbuf)
     local groups, headers, docstring = {}, {}, nil
-    local function shallow_child(name, kind, ann, default)
+    local function shallow_child(name, kind, ann, default, mode)
       local child = model.new({
         name = name,
         kind = kind,
         type = ann and type_info(ann.display, ann.refs) or { raw = "Any", display = "Any", category = "builtin" },
         default = default,
+        pass_mode = mode,
       })
       if ann and #ann.refs > 0 then
         child.state.loaded = false
@@ -480,7 +481,7 @@ function M.function_scope(client, bufnr, win, token, pos)
         })
         for _, p in ipairs(oinfo.params) do
           local ann = p.type_node and impl.annotation(fbuf, p.type_node)
-          model.add_child(group, shallow_child(p.name, "param", ann, p.default))
+          model.add_child(group, shallow_child(p.name, "param", ann, p.default, p.mode))
         end
         if ret then
           model.add_child(group, shallow_child("returns", "return", ret))
@@ -517,6 +518,7 @@ function M.function_scope(client, bufnr, win, token, pos)
       -- unannotated params are implicitly Any to the type checker
       type = ann and type_info(ann.display, ann.refs) or { raw = "Any", display = "Any", category = "builtin" },
       default = p.default,
+      pass_mode = p.mode,
     })
     if ann and #ann.refs > 0 then
       attach_type(ctx, node, fbuf, ann.refs, 1, {})
