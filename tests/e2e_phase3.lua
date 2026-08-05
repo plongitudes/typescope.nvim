@@ -330,10 +330,17 @@ do
     check("insert float never focusable", ic.focusable == false)
     local ibuf = vim.api.nvim_win_get_buf(iw)
     local ilines = vim.api.nvim_buf_get_lines(ibuf, 0, -1, false)
-    local detail = ilines[#ilines]
+    -- the detail may wrap: everything below the rule belongs to it
+    local rule_at = 0
+    for i, l in ipairs(ilines) do
+      if l:find("──", 1, true) then
+        rule_at = i
+      end
+    end
+    local detail = table.concat(ilines, "\n", rule_at + 1)
     check("names block lists every param", ilines[1]:find("config") ~= nil and ilines[1]:find("timeout") ~= nil)
     check(
-      "detail line shows the active param with its shape",
+      "detail shows the active param with its shape",
       detail:find("config") ~= nil
         and detail:find("ServerConfig") ~= nil
         and detail:find("≈", 1, true) ~= nil
@@ -419,9 +426,9 @@ do
     vim.cmd("doautocmd InsertLeave")
   end
 
-  -- degradation ladder: a narrow budget drops the example before anything
-  -- else — the line never wraps
-  require("typescope").setup({ insert_mode = { enabled = true }, ui = { max_width = 28 } })
+  -- a narrow budget wraps the detail (nothing dropped, every line within
+  -- budget) — driven through insert_mode.max_width, the surface's own knob
+  require("typescope").setup({ insert_mode = { enabled = true, max_width = 28 } })
   for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
     if l:find("fetched = fetch") then
       vim.api.nvim_win_set_cursor(0, { i, 16 })
@@ -434,10 +441,15 @@ do
   local nw = insert_float()
   check("insert narrow ladder opened", nw ~= nil)
   if nw then
-    local nline = vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(nw), 0, -1, false)[1]
+    local nlines = vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(nw), 0, -1, false)
+    local nall = table.concat(nlines, "\n")
+    local within = true
+    for _, l in ipairs(nlines) do
+      within = within and vim.api.nvim_strwidth(l) <= 28
+    end
     check(
-      "narrow ladder drops the example, keeps identity",
-      not nline:find("e%.g%.") and nline:find("key") ~= nil and nline:find("int") ~= nil
+      "narrow ladder wraps within insert_mode.max_width, keeps everything",
+      #nlines > 1 and within and nall:find("e%.g%.") ~= nil and nall:find("key") ~= nil and nall:find("%[1/2%]") ~= nil
     )
     vim.cmd("doautocmd InsertLeave")
   end

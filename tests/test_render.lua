@@ -498,18 +498,13 @@ do
   local full = render.ladder(node, vim.tbl_extend("force", base, { max_width = 60 }))
   eq_lines("ladder full", full.lines, { "port: int = 8000   e.g. 8080   run [2/2]" })
   check("ladder maps to the param", full.line_to_node[1] == "port")
-  -- degradation: example drops first, then the default, then the type cuts
-  local no_ex = render.ladder(node, vim.tbl_extend("force", base, { max_width = 33 }))
-  check("ladder drops example first", not no_ex.lines[1]:find("e.g.") and no_ex.lines[1]:find("8000") ~= nil)
-  local no_def = render.ladder(node, vim.tbl_extend("force", base, { max_width = 24 }))
-  check("ladder drops default second", not no_def.lines[1]:find("8000") and no_def.lines[1]:find("int") ~= nil)
-  local wide_type = model.new({
-    name = "ws",
-    kind = "param",
-    type = { display = "type[asyncio.Protocol] | WSProtocolType", category = "generic" },
+  -- out of room → the detail WRAPS (hanging indent); nothing is dropped
+  local wrapped = render.ladder(node, vim.tbl_extend("force", base, { max_width = 33 }))
+  eq_lines("ladder wraps instead of dropping", wrapped.lines, {
+    "port: int = 8000   e.g. 8080",
+    "         run [2/2]",
   })
-  local cut = render.ladder(wide_type, { show_examples = false, example_kind = "heuristic", max_width = 24 })
-  check("ladder truncates the type last", cut.lines[1]:find("…") ~= nil and cut.width <= 24)
+  check("wrapped lines all map to the param", wrapped.line_to_node[1] == "port" and wrapped.line_to_node[2] == "port")
 
   -- a param with a limited set of valid values presents them (≈ evaluation),
   -- eliding member-by-member with a hidden-count before dropping entirely
@@ -523,9 +518,30 @@ do
   local vbase = { show_examples = true, example_kind = "heuristic", style = styles.get("unicode"), fn_name = "open", badge = "[1/7]" }
   local vfull = render.ladder(mode, vim.tbl_extend("force", vbase, { max_width = 80 }))
   eq_lines("ladder presents valid values", vfull.lines, { "mode: OpenTextMode ≈ Literal['r', 'w', 'x', 'a'] = \"r\"   open [1/7]" })
-  -- the shape elides before the default is sacrificed
-  local velided = render.ladder(mode, vim.tbl_extend("force", vbase, { max_width = 58 }))
-  eq_lines("ladder elides values with a hidden-count", velided.lines, { "mode: OpenTextMode ≈ Literal['r', …+3] = \"r\"   open [1/7]" })
+  -- a modest overflow wraps with the FULL value set intact
+  local vwrapped = render.ladder(mode, vim.tbl_extend("force", vbase, { max_width = 58 }))
+  eq_lines("ladder wraps full valid values", vwrapped.lines, {
+    "mode: OpenTextMode ≈ Literal['r', 'w', 'x', 'a'] = \"r\"",
+    "         open [1/7]",
+  })
+  -- only past the line cap does the shape elide member-by-member
+  local members = {}
+  for i = 1, 20 do
+    members[i] = ("'m%02d'"):format(i)
+  end
+  local big = model.new({
+    name = "mode",
+    kind = "param",
+    type = { display = "OpenTextMode", category = "generic" },
+    evaluated = "Literal[" .. table.concat(members, ", ") .. "]",
+    default = '"r"',
+  })
+  local capped = render.ladder(big, vim.tbl_extend("force", vbase, { max_width = 40 }))
+  local call = table.concat(capped.lines, "\n")
+  check(
+    "ladder caps wrapped lines, then elides the shape",
+    #capped.lines <= 3 and call:find("…%+") ~= nil and not call:find("'m20'")
+  )
 
   -- a resolved class param presents its field shape the same way
   local struct = model.new({

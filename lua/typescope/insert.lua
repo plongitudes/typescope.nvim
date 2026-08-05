@@ -142,7 +142,7 @@ local function ladder_result(st)
   local config = require("typescope.config")
   local cfg = config.get()
   return require("typescope.render").ladder(node, {
-    max_width = math.min(config.resolved_max_width(), vim.o.columns - 6),
+    max_width = math.min(config.resolved_max_width(cfg.insert_mode.max_width), vim.o.columns - 6),
     show_examples = cfg.show_examples and cfg.example_mode ~= "none",
     example_kind = "heuristic", -- LLM values decorate if already cached, never requested
     style = require("typescope.styles").get(cfg.ui.style),

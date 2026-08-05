@@ -33,6 +33,7 @@
 
 ---@class typescope.InsertModeConfig
 ---@field enabled boolean insert-mode typing surface (replaces signature help)
+---@field max_width? number ladder width; >1: absolute columns, <=1: fraction of editor width (defaults to ui.max_width)
 
 ---@class typescope.Config
 ---@field trigger "hover"|"manual"
@@ -54,11 +55,12 @@ local defaults = {
   -- resolve the symbol under a resting cursor into the cache before any
   -- keypress, so the eventual K/open paints warm. No visible effect.
   prefetch = true,
-  -- typing surface (U3): budget-reduced float while the cursor is inside a
-  -- call's parens — header + collapsed tree, heuristics only, never
-  -- focusable. Opt-in while it bakes; turn off blink/core signature help
-  -- when enabling.
-  insert_mode = { enabled = false },
+  -- typing surface (U6 ladder): param-names block + active-param detail
+  -- while the cursor is inside a call's parens — heuristics only, never
+  -- focusable, zero manual controls. Opt-in while it bakes; turn off
+  -- blink/core signature help when enabling. max_width (same units as
+  -- ui.max_width) sizes just this surface; nil inherits ui.max_width.
+  insert_mode = { enabled = false, max_width = nil },
   depth = 2,
   show_examples = true,
   -- "heuristic": pattern-table examples, E generates LLM values on demand
@@ -150,6 +152,9 @@ local function validate(cfg)
   check("prefetch", cfg.prefetch, "boolean")
   check("insert_mode", cfg.insert_mode, "table")
   check("insert_mode.enabled", cfg.insert_mode.enabled, "boolean")
+  if cfg.insert_mode.max_width ~= nil and (type(cfg.insert_mode.max_width) ~= "number" or cfg.insert_mode.max_width <= 0) then
+    error("typescope.setup: `insert_mode.max_width` must be a positive number (<=1 = fraction of editor width)", 0)
+  end
   check("depth", cfg.depth, "positive_integer")
   check("show_examples", cfg.show_examples, "boolean")
   check("example_mode", cfg.example_mode, { "heuristic", "llm", "none" })
@@ -218,11 +223,13 @@ function M.get()
   return options
 end
 
---- ui.max_width resolved to concrete columns (fractions are of the current
---- editor width, floored at 20).
+--- A max_width value resolved to concrete columns (fractions are of the
+--- current editor width, floored at 20). Defaults to ui.max_width; pass
+--- e.g. insert_mode.max_width to size that surface independently.
+---@param mw? number
 ---@return integer
-function M.resolved_max_width()
-  local mw = M.get().ui.max_width
+function M.resolved_max_width(mw)
+  mw = mw or M.get().ui.max_width
   if mw <= 1 then
     return math.max(20, math.floor(vim.o.columns * mw))
   end

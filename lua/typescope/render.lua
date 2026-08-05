@@ -840,6 +840,12 @@ local function elide_members(text, budget)
   return head .. "…" .. tail
 end
 
+-- The active param's detail may take up to this many wrapped lines; only
+-- past the cap does the shape start eliding members (Tony: wrap when out of
+-- room — a short union shows in full, a 53-member Literal still can't eat
+-- the float).
+local LADDER_MAX_LINES = 3
+
 ---@class typescope.LadderOpts
 ---@field max_width integer
 ---@field show_examples boolean
@@ -851,13 +857,12 @@ end
 
 --- Insert-mode ladder (U6): a names block listing EVERY viable parameter of
 --- the signature (wrapped freely — all names always visible, active one
---- highlighted), a rule, then ONE detail line for the active parameter,
---- including the param's SHAPE when it has one — an alias/union evaluation
---- (the legal values of OpenTextMode) or a resolved class's field list. As
---- width shrinks, the detail line's segments drop in a fixed order —
---- example, then default, then the shape elides member-by-member and finally
---- drops, then the type truncates — so it never wraps and never needs manual
---- density controls while the user is mid-call. Pure, like render().
+--- highlighted), a rule, then the active parameter's detail — type, SHAPE
+--- (alias/union evaluation like OpenTextMode's legal values, or a resolved
+--- class's field list), default, example. The detail WRAPS when out of room
+--- (hanging indent, up to LADDER_MAX_LINES); beyond the cap the shape — the
+--- only unbounded segment — elides member-by-member. Zero manual density
+--- controls while the user is mid-call. Pure, like render().
 ---@param node typescope.Node the active param
 ---@param opts typescope.LadderOpts
 ---@return typescope.RenderResult
@@ -883,75 +888,99 @@ function M.ladder(node, opts)
       and (node.example[opts.example_kind] or node.example.heuristic)
     or nil
 
-  ---@param with_example boolean
-  ---@param with_default boolean
-  ---@param shape_budget? integer|boolean true = full shape, number = elide to fit, nil = drop
-  ---@param type_limit? integer truncate the type to this many cells
-  local function build(with_example, with_default, shape_budget, type_limit)
-    local line = new_line()
-    line:add(node.name, "TypeScopeActive")
-    line:add(": ", "TypeScopeChrome")
-    local t = type_text
-    local truncated = false
-    if type_limit and strwidth(t) > type_limit then
-      t = t:sub(1, math.max(4, type_limit - 1)) .. "…"
-      truncated = true
+  ---@param shape_text? string
+  ---@return { [1]: string, [2]: string?, [3]: string?, [4]: boolean? }[]
+  local function segs_for(shape_text)
+    local segs = {}
+    local function seg(text, group, inject, atomic)
+      table.insert(segs, { text, group, inject, atomic })
     end
-    line:add(t, node.evaluated and type_text == node.evaluated and "TypeScopeEvaluated" or "TypeScopeType",
-      not truncated and "replace" or nil)
-    if shape_budget and shape then
-      local shown = shape_budget == true and shape or elide_members(shape, shape_budget)
-      line:add(" " .. eval_glyph, "TypeScopeEvaluated")
+    seg(node.name, "TypeScopeActive")
+    seg(": ", "TypeScopeChrome")
+    seg(type_text, node.evaluated and type_text == node.evaluated and "TypeScopeEvaluated" or "TypeScopeType", "replace")
+    if shape_text then
+      seg(" " .. eval_glyph, "TypeScopeEvaluated")
       -- overlay injection: values keep their real syntax colors (str/int/
       -- Literal strings each their own — Tony's per-piece color direction)
       -- over the dim ≈ base; the parser colors the valid prefix of elided
-      -- text and leaves …+N alone. The {field} shape isn't source — no
-      -- injection there.
-      line:add(shown, "TypeScopeEvaluated", shape == node.evaluated and "overlay" or nil)
+      -- text and leaves …+N alone. The {field} shape isn't source.
+      seg(shape_text, "TypeScopeEvaluated", shape == node.evaluated and "overlay" or nil)
     end
-    if with_default and node.default then
-      line:add(" = ", "TypeScopeChrome")
-      line:add(node.default, "TypeScopeDefault", "replace")
+    if node.default then
+      seg(" = ", "TypeScopeChrome")
+      seg(node.default, "TypeScopeDefault", "replace")
     end
-    if with_example and example then
-      line:add("   e.g. ", "TypeScopeHint")
-      line:add(example, "TypeScopeExample", "overlay")
+    if example then
+      seg("   e.g. ", "TypeScopeHint")
+      seg(example, "TypeScopeExample", "overlay", true)
     end
     if opts.fn_name then
-      line:add("   " .. opts.fn_name, "TypeScopeHint")
+      seg("   " .. opts.fn_name, "TypeScopeHint", nil, true)
       if opts.badge then
-        line:add(" " .. opts.badge, "TypeScopeBadge")
+        seg(" " .. opts.badge, "TypeScopeBadge", nil, true)
       end
     end
-    return line
+    return segs
   end
 
-  -- the shape is the elastic segment: elide its members to fit BEFORE
-  -- sacrificing the default (below ~12 cells the elision stops informing)
-  ---@param with_default boolean
-  local function try_shape(with_default)
-    local probe = build(false, with_default, true)
-    if probe.width <= opts.max_width then
-      return probe
+  -- wrap the detail segments into width-bounded lines with a hanging indent
+  -- (mirrors render()'s flow: injection survives only on unsplit segments,
+  -- atomic segments jump whole to the next line)
+  local cont_indent = math.min(strwidth(node.name) + 2, 12)
+  ---@param shape_text? string
+  ---@return typescope.Line[]
+  local function layout(shape_text)
+    local lines = {}
+    local line = new_line()
+    local function continuation()
+      table.insert(lines, line)
+      line = new_line()
+      line:add(string.rep(" ", cont_indent))
     end
-    if shape then
-      local budget = strwidth(shape) - (probe.width - opts.max_width)
-      if budget >= 12 then
-        probe = build(false, with_default, budget)
-        if probe.width <= opts.max_width then
-          return probe
+    for _, seg in ipairs(segs_for(shape_text)) do
+      local text, group, inject, atomic = seg[1], seg[2], seg[3], seg[4]
+      local whole = text
+      while text ~= "" do
+        local avail = opts.max_width - line.width
+        if strwidth(text) <= avail then
+          line:add(text, group, text == whole and inject or nil)
+          text = ""
+        elseif (atomic or avail < 8) and line.width > cont_indent then
+          continuation()
+        else
+          local cut = math.max(1, find_break_point(text, avail))
+          line:add(text:sub(1, cut), group)
+          text = text:sub(cut + 1):gsub("^%s+", "")
+          continuation()
         end
       end
     end
-    return nil
+    table.insert(lines, line)
+    return lines
   end
 
-  local line = build(true, true, true)
-  if line.width > opts.max_width then
-    line = try_shape(true) or try_shape(false) or build(false, false, nil)
-  end
-  if line.width > opts.max_width then
-    line = build(false, false, nil, strwidth(type_text) - (line.width - opts.max_width))
+  local detail = layout(shape)
+  if #detail > LADDER_MAX_LINES and shape then
+    -- budget = the cap's capacity minus everything that isn't the shape;
+    -- wrapping wastes cells at break points, so shrink in steps before
+    -- giving the shape up entirely
+    local fixed = 3 -- " ≈ " glyph
+    for _, seg in ipairs(segs_for(nil)) do
+      fixed = fixed + strwidth(seg[1])
+    end
+    local capacity = LADDER_MAX_LINES * opts.max_width - cont_indent * (LADDER_MAX_LINES - 1)
+    for _, factor in ipairs({ 1, 0.85, 0.7 }) do
+      local budget = math.floor((capacity - fixed) * factor)
+      if budget >= 12 then
+        detail = layout(elide_members(shape, budget))
+        if #detail <= LADDER_MAX_LINES then
+          break
+        end
+      end
+    end
+    if #detail > LADDER_MAX_LINES then
+      detail = layout(nil)
+    end
   end
 
   local result = { lines = {}, highlights = {}, ts_injections = {}, line_to_node = {}, width = 0 }
@@ -989,7 +1018,9 @@ function M.ladder(node, opts)
     rule_lnum = #result.lines
   end
 
-  push(line, node.id)
+  for _, dline in ipairs(detail) do
+    push(dline, node.id)
+  end
   if rule_lnum then
     local bar = string.rep(opts.style and opts.style.rule or "─", math.max(4, result.width))
     result.lines[rule_lnum] = bar
