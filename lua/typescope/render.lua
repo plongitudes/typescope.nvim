@@ -798,24 +798,81 @@ function M.render(roots, opts)
   return result
 end
 
+--- Shrink a member list — Literal[...], a union, or a {field} shape — to a
+--- display budget by keeping whole leading members and counting the rest:
+--- Literal['auto', 'none', …+2]. A bare "…" carries no information; the
+--- count at least says how much is hidden (density-theory prescription).
+--- NOTE: the separator split is naive — a member containing ", " inside
+--- nested brackets (dict[str, int]) splits wrong, but this only runs on
+--- over-budget text where the elision marker already signals imprecision.
+---@param text string
+---@param budget integer display cells available
+---@return string
+local function elide_members(text, budget)
+  if strwidth(text) <= budget then
+    return text
+  end
+  local sep = ", "
+  local head, body, tail = text:match("^([%w%._]+%[)(.*)(%])$")
+  if not head then
+    if text:sub(1, 1) == "{" then
+      head, body, tail = "{", text:sub(2, -2), "}"
+    elseif text:find(" | ", 1, true) then
+      head, body, tail, sep = "", text, "", " | "
+    else
+      return text:sub(1, math.max(4, budget - 1)) .. "…"
+    end
+  end
+  local members = vim.split(body, sep, { plain = true })
+  for n = #members - 1, 1, -1 do
+    local parts = {}
+    for i = 1, n do
+      parts[i] = members[i]
+    end
+    parts[n + 1] = ("…+%d"):format(#members - n)
+    local candidate = head .. table.concat(parts, sep) .. tail
+    if strwidth(candidate) <= budget then
+      return candidate
+    end
+  end
+  return head .. "…" .. tail
+end
+
 ---@class typescope.LadderOpts
 ---@field max_width integer
 ---@field show_examples boolean
 ---@field example_kind "heuristic"|"llm"
+---@field style? typescope.Charset for the ≈ glyph (defaults to unicode's)
 ---@field fn_name? string callee name shown as trailing context
 ---@field badge? string overload badge, e.g. "[2/2]"
 
---- Insert-mode ladder (U6): ONE line for the active parameter. As width
+--- Insert-mode ladder (U6): ONE line for the active parameter, including the
+--- param's SHAPE when it has one — an alias/union evaluation (the legal
+--- values of OpenTextMode) or a resolved class's field list. As width
 --- shrinks, segments drop in a fixed order — example, then default, then the
---- type truncates — so the surface never wraps and never needs manual density
---- controls while the user is mid-call. Pure, like render().
+--- shape elides member-by-member and finally drops, then the type truncates —
+--- so the surface never wraps and never needs manual density controls while
+--- the user is mid-call. Pure, like render().
 ---@param node typescope.Node the active param
 ---@param opts typescope.LadderOpts
 ---@return typescope.RenderResult
 function M.ladder(node, opts)
+  local eval_glyph = opts.style and opts.style.evaluated or "≈ "
   local type_text = node.type.display or node.type.raw or "?"
   if node.evaluated and type_text == "Any" then
     type_text = node.evaluated
+  end
+  -- the param's shape: what pyright evaluated the annotation to (valid
+  -- values / union expansion), or the resolved class's own fields
+  local shape = nil
+  if node.evaluated and type_text ~= node.evaluated then
+    shape = node.evaluated
+  elseif #node.children > 0 then
+    local names = {}
+    for _, child in ipairs(node.children) do
+      names[#names + 1] = child.name
+    end
+    shape = "{" .. table.concat(names, ", ") .. "}"
   end
   local example = opts.show_examples
       and (node.example[opts.example_kind] or node.example.heuristic)
@@ -823,10 +880,10 @@ function M.ladder(node, opts)
 
   ---@param with_example boolean
   ---@param with_default boolean
+  ---@param shape_budget? integer|boolean true = full shape, number = elide to fit, nil = drop
   ---@param type_limit? integer truncate the type to this many cells
-  local function build(with_example, with_default, type_limit)
+  local function build(with_example, with_default, shape_budget, type_limit)
     local line = new_line()
-    line:add("─ ", "TypeScopeChrome")
     line:add(node.name, "TypeScopeActive")
     line:add(": ", "TypeScopeChrome")
     local t = type_text
@@ -837,6 +894,11 @@ function M.ladder(node, opts)
     end
     line:add(t, node.evaluated and type_text == node.evaluated and "TypeScopeEvaluated" or "TypeScopeType",
       not truncated and "replace" or nil)
+    if shape_budget and shape then
+      local shown = shape_budget == true and shape or elide_members(shape, shape_budget)
+      line:add(" " .. eval_glyph, "TypeScopeEvaluated")
+      line:add(shown, "TypeScopeEvaluated")
+    end
     if with_default and node.default then
       line:add(" = ", "TypeScopeChrome")
       line:add(node.default, "TypeScopeDefault", "replace")
@@ -851,19 +913,35 @@ function M.ladder(node, opts)
         line:add(" " .. opts.badge, "TypeScopeBadge")
       end
     end
-    line:add(" ─", "TypeScopeChrome")
     return line
   end
 
-  local line = build(true, true)
+  -- the shape is the elastic segment: elide its members to fit BEFORE
+  -- sacrificing the default (below ~12 cells the elision stops informing)
+  ---@param with_default boolean
+  local function try_shape(with_default)
+    local probe = build(false, with_default, true)
+    if probe.width <= opts.max_width then
+      return probe
+    end
+    if shape then
+      local budget = strwidth(shape) - (probe.width - opts.max_width)
+      if budget >= 12 then
+        probe = build(false, with_default, budget)
+        if probe.width <= opts.max_width then
+          return probe
+        end
+      end
+    end
+    return nil
+  end
+
+  local line = build(true, true, true)
   if line.width > opts.max_width then
-    line = build(false, true)
+    line = try_shape(true) or try_shape(false) or build(false, false, nil)
   end
   if line.width > opts.max_width then
-    line = build(false, false)
-  end
-  if line.width > opts.max_width then
-    line = build(false, false, strwidth(type_text) - (line.width - opts.max_width))
+    line = build(false, false, nil, strwidth(type_text) - (line.width - opts.max_width))
   end
 
   local result = { lines = { line.text }, highlights = {}, ts_injections = {}, line_to_node = { node.id }, width = line.width }

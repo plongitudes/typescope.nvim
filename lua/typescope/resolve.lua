@@ -581,6 +581,48 @@ end
 --- Lazily resolve a beyond-depth node (the `r` keymap / expanding an
 --- unloaded node). Runs its own coroutine; cb fires on success.
 ---@param client vim.lsp.Client
+--- Light evaluation for the typing surface: fetch pyright's ≈ view of a
+--- _lazy param (alias / typeshed-blocked chase) WITHOUT resolving its
+--- structure — the hook stays attached, so explicit expansion in the reading
+--- float still chases. One hover per ref, first informative answer wins;
+--- same validity filter as run_enrichment. cb(true) when something landed.
+---@param client vim.lsp.Client
+---@param node typescope.Node
+---@param token typescope.CancelToken
+---@param cb fun(filled: boolean)
+function M.evaluate(client, node, token, cb)
+  local lazy = node._lazy
+  if not lazy or node.evaluated or #lazy.refs == 0 then
+    return cb(false)
+  end
+  async.run(function()
+    local bufnr = lsp.load_buf(lazy.uri)
+    for i = 1, math.min(#lazy.refs, 3) do
+      local ref = lazy.refs[i]
+      local err, result = async.await(function(resume)
+        lsp.request_cb(client, "textDocument/hover", lsp.position_params(bufnr, ref.row, ref.col), token, resume)
+      end)
+      if async.stale(token) then
+        return cb(false)
+      end
+      local lines = not err and lsp.hover_result_lines(result) or nil
+      local evaluated = lines and lazy.impl.evaluated_from_hover(lines, ref.name)
+      if
+        evaluated
+        and evaluated ~= node.type.display
+        and evaluated ~= ref.name
+        and evaluated ~= ref.name:match("[%w_]+$")
+        and evaluated ~= "Any"
+      then
+        node.evaluated = evaluated
+        node.evaluated_owner = ref.name:match("[%w_]+$") or ref.name
+        return cb(true)
+      end
+    end
+    cb(false)
+  end)
+end
+
 ---@param node typescope.Node
 ---@param token typescope.CancelToken
 ---@param cb fun()

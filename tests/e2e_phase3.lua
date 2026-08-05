@@ -298,7 +298,9 @@ end
 -- occluded), never focusable, degradation instead of wrapping, closes on
 -- InsertLeave. Overloads never stack — [n/m] badge + silent auto-follow.
 do
-  require("typescope").setup({ insert_mode = { enabled = true } })
+  -- max_width 72: wide enough for the shape segment (headless columns are 80,
+  -- so the default fraction would starve it)
+  require("typescope").setup({ insert_mode = { enabled = true }, ui = { max_width = 72 } })
   local function insert_float()
     for _, w in ipairs(vim.api.nvim_list_wins()) do
       local c = vim.api.nvim_win_get_config(w)
@@ -329,15 +331,20 @@ do
     local ilines = vim.api.nvim_buf_get_lines(ibuf, 0, -1, false)
     check("insert ladder is one line", #ilines == 1)
     check(
-      "ladder shows the active param, not the tree",
-      ilines[1]:find("config") ~= nil and ilines[1]:find("ServerConfig") ~= nil and not ilines[1]:find("host")
+      "ladder shows the active param with its shape",
+      ilines[1]:find("config") ~= nil
+        and ilines[1]:find("ServerConfig") ~= nil
+        and ilines[1]:find("≈", 1, true) ~= nil
+        and ilines[1]:find("{host", 1, true) ~= nil
     )
     check("no docstring while typing", not ilines[1]:find("Spin up"))
-    -- hard rule: the 1-line borderless float sits exactly one screen row
-    -- above the cursor (get_config normalizes row, so compare screen pos)
+    check("ladder wears the shared border", ic.border ~= nil and ic.border ~= "none")
+    -- hard rule: content two rows above the cursor, so the bottom border
+    -- (drawn OUTSIDE the anchor box) lands on the line above — never on the
+    -- cursor line (get_config normalizes row, so compare screen pos)
     local fpos = vim.api.nvim_win_get_position(iw)
     local cursor_screen_row0 = vim.api.nvim_win_get_position(0)[1] + vim.fn.winline() - 1
-    check("ladder sits above the cursor line", ic.anchor == "SW" and fpos[1] == cursor_screen_row0 - 1)
+    check("ladder + border sit above the cursor line", ic.anchor == "SW" and fpos[1] == cursor_screen_row0 - 2)
     -- the param name is the active-param highlight (always, by construction)
     local ns = vim.api.nvim_create_namespace("typescope")
     local has_active = false

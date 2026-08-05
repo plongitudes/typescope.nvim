@@ -135,32 +135,63 @@ local function ladder_result(st)
   local config = require("typescope.config")
   local cfg = config.get()
   return require("typescope.render").ladder(node, {
-    max_width = math.min(config.resolved_max_width(), vim.o.columns - 4),
+    max_width = math.min(config.resolved_max_width(), vim.o.columns - 6),
     show_examples = cfg.show_examples and cfg.example_mode ~= "none",
     example_kind = "heuristic", -- LLM values decorate if already cached, never requested
+    style = require("typescope.styles").get(cfg.ui.style),
     fn_name = st.fn_name,
     badge = st.meta and ("[%d/%d]"):format(st.overload_idx, st.meta.overloads) or nil,
   })
 end
 
 -- Hard rule (density research): the cursor line and the line BELOW it are
--- never occluded. The 1-line borderless float sits on the line above the
--- cursor; when the cursor is on the window's top line, two lines below is
--- the only legal spot.
+-- never occluded. The 1-line bordered float (3 screen rows) sits above the
+-- cursor; when there isn't room, two lines below is the only legal spot.
 ---@return table win config fragment (relative/anchor/row/col)
 local function placement()
-  local above = vim.fn.winline() > 1
+  local above = vim.fn.winline() > 3
   return {
     relative = "cursor",
     anchor = above and "SW" or "NW",
-    -- SW row 0 anchors the bottom edge ON the cursor row — -1 is the line above
-    row = above and -1 or 2,
+    -- the anchor box is the CONTENT box; the border draws outside it
+    -- (probe-verified). SW -2 → content two above, bottom border one above;
+    -- NW 3 → top border two below, content three below.
+    row = above and -2 or 3,
     col = 0,
   }
 end
 
+-- The active param's shape (valid values / union expansion) may be behind a
+-- _lazy hook (typeshed alias — open()'s OpenTextMode). Fetch just the ≈ view
+-- on demand: one hover, cached on the shared node, structure untouched.
+-- Pending state is the token itself, so a cancelled fetch can retry later.
+local repaint
 ---@param st typescope.InsertState
-local function repaint(st)
+local function ensure_shape(st)
+  local node = param_node(st)
+  local async = require("typescope.async")
+  if not node or node.evaluated or not node._lazy then
+    return
+  end
+  if node._eval_pending and not async.stale(node._eval_pending) then
+    return
+  end
+  local client = require("typescope.lsp").client_for(st.srcbuf)
+  if not client then
+    return
+  end
+  node._eval_pending = st.token
+  require("typescope.resolve").evaluate(client, node, st.token, function(filled)
+    node._eval_pending = nil
+    if filled and state == st then
+      repaint(st)
+    end
+  end)
+end
+
+---@param st typescope.InsertState
+repaint = function(st)
+  ensure_shape(st)
   local result = ladder_result(st)
   if not result then
     close_float() -- an overload swap can land on a 0-param signature
@@ -280,17 +311,19 @@ local function open_for(srcbuf, key, frow0, fcol)
       highlights = result.highlights,
       ts_injections = result.ts_injections,
       lang = vim.bo[srcbuf].filetype,
+      title = " typescope ",
       relative = pos.relative,
       anchor = pos.anchor,
       row = pos.row,
       col = pos.col,
       width = result.width,
       height = 1,
-      border = "none", -- the ─ chrome in the line is the frame; a box would triple the height
+      border = require("typescope.config").get().ui.border, -- same frame as the K float (Tony: ui consistency)
       enter = false,
       focusable = false,
     })
     state = st
+    ensure_shape(st)
     refresh_active()
   end)
 end
