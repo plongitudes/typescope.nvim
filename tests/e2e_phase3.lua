@@ -293,9 +293,10 @@ do
   resolve.clear_cache()
 end
 
--- insert-mode typing surface (U3): budget-reduced float inside call parens —
--- header + collapsed roots, no docstring, never focusable, active param
--- follows signatureHelp, closes on InsertLeave
+-- insert-mode typing surface (U6 ladder): ONE line for the active param,
+-- anchored above the cursor (hard rule: cursor line + line below never
+-- occluded), never focusable, degradation instead of wrapping, closes on
+-- InsertLeave. Overloads never stack — [n/m] badge + silent auto-follow.
 do
   require("typescope").setup({ insert_mode = { enabled = true } })
   local function insert_float()
@@ -326,27 +327,31 @@ do
     check("insert float never focusable", ic.focusable == false)
     local ibuf = vim.api.nvim_win_get_buf(iw)
     local ilines = vim.api.nvim_buf_get_lines(ibuf, 0, -1, false)
-    local alli = table.concat(ilines, "\n")
-    check("insert header shows call shape", ilines[1]:find("create_server(config", 1, true) ~= nil)
-    check("insert roots collapsed (no class fields)", not alli:find("host"))
-    check("no docstring while typing", not alli:find("Spin up"))
-    -- active param: mock always reports parameter 0 → config row highlighted
+    check("insert ladder is one line", #ilines == 1)
+    check(
+      "ladder shows the active param, not the tree",
+      ilines[1]:find("config") ~= nil and ilines[1]:find("ServerConfig") ~= nil and not ilines[1]:find("host")
+    )
+    check("no docstring while typing", not ilines[1]:find("Spin up"))
+    -- hard rule: the 1-line borderless float sits exactly one screen row
+    -- above the cursor (get_config normalizes row, so compare screen pos)
+    local fpos = vim.api.nvim_win_get_position(iw)
+    local cursor_screen_row0 = vim.api.nvim_win_get_position(0)[1] + vim.fn.winline() - 1
+    check("ladder sits above the cursor line", ic.anchor == "SW" and fpos[1] == cursor_screen_row0 - 1)
+    -- the param name is the active-param highlight (always, by construction)
     local ns = vim.api.nvim_create_namespace("typescope")
-    local has_active = vim.wait(3000, function()
-      for _, m in ipairs(vim.api.nvim_buf_get_extmarks(ibuf, ns, 0, -1, { details = true })) do
-        if m[4].hl_group == "TypeScopeActive" then
-          return true
-        end
+    local has_active = false
+    for _, m in ipairs(vim.api.nvim_buf_get_extmarks(ibuf, ns, 0, -1, { details = true })) do
+      if m[4].hl_group == "TypeScopeActive" then
+        has_active = true
       end
-      return false
-    end, 100)
-    check("insert active param follows signatureHelp", has_active)
+    end
+    check("ladder highlights the active param", has_active)
     vim.cmd("doautocmd InsertLeave")
     check("insert float closes on InsertLeave", insert_float() == nil)
   end
 
-  -- overloads in the typing surface (U4): never stacked — the active
-  -- overload's params only, [n/m] in the header
+  -- overloads: badge [n/m] on the one line, silent auto-follow on arity
   for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
     if l:find("fetched = fetch") then
       vim.api.nvim_win_set_cursor(0, { i, 16 }) -- inside fetch( parens
@@ -359,16 +364,15 @@ do
   local ow = insert_float()
   check("insert overload float opened", ow ~= nil)
   if ow then
-    local obuf = vim.api.nvim_win_get_buf(ow)
-    local olines = vim.api.nvim_buf_get_lines(obuf, 0, -1, false)
-    local allo = table.concat(olines, "\n")
-    check("insert overload header [1/2]", olines[1]:find("%[1/2%]") ~= nil)
-    check("insert shows single overload, not stacked", not allo:find("%[2/2%]"))
+    local oline = vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(ow), 0, -1, false)[1]
+    check("ladder carries the overload badge [1/2]", oline:find("%[1/2%]") ~= nil)
+    check("ladder shows one overload's active param", oline:find("key") ~= nil and not oline:find("%[2/2%]"))
+    check("ladder keeps the heuristic example at full width", oline:find("e%.g%.") ~= nil)
 
     -- auto-follow: adding a second argument bumps the mock's arity-based
-    -- activeSignature; the display silently swaps to overload 2. The line
-    -- must reach DISK — the mock reads files, not buffers (didChange desync
-    -- is mock-only, same as the cache-buster test above).
+    -- activeSignature; the ladder silently swaps its badge. The line must
+    -- reach DISK — the mock reads files, not buffers (didChange desync is
+    -- mock-only, same as the cache-buster test above).
     local frow
     for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
       if l:find("fetched = fetch") then
@@ -388,16 +392,94 @@ do
       return h:find("%[2/2%]") ~= nil
     end, 100)
     check("insert auto-follows activeSignature to overload 2", followed)
-    local ww = insert_float()
-    if ww then
-      local swapped = table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(ww), 0, -1, false), "\n")
-      check("swapped display shows overload 2's default param", swapped:find("auto") ~= nil)
-    end
     vim.api.nvim_buf_set_lines(bufnr, frow - 1, frow, false, { "fetched = fetch(1)" })
     vim.cmd("silent write")
     vim.cmd("doautocmd InsertLeave")
   end
+
+  -- degradation ladder: a narrow budget drops the example before anything
+  -- else — the line never wraps
+  require("typescope").setup({ insert_mode = { enabled = true }, ui = { max_width = 28 } })
+  for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+    if l:find("fetched = fetch") then
+      vim.api.nvim_win_set_cursor(0, { i, 16 })
+    end
+  end
+  require("typescope.insert")._update()
+  vim.wait(2000, function()
+    return insert_float() ~= nil
+  end)
+  local nw = insert_float()
+  check("insert narrow ladder opened", nw ~= nil)
+  if nw then
+    local nline = vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(nw), 0, -1, false)[1]
+    check(
+      "narrow ladder drops the example, keeps identity",
+      not nline:find("e%.g%.") and nline:find("key") ~= nil and nline:find("int") ~= nil
+    )
+    vim.cmd("doautocmd InsertLeave")
+  end
   require("typescope").setup({}) -- back to defaults for the remaining tests
+end
+
+-- K ledger layout (U6): one-line rows — name | type | short default — with a
+-- detail block that follows the cursor once the float is focused
+do
+  require("typescope").setup({ ui = { layout = "ledger" } })
+  vim.api.nvim_win_set_cursor(0, { call_line, 12 })
+  require("typescope").open()
+  vim.wait(3000, function()
+    return float_lines() ~= nil
+  end)
+  local llines, lw = float_lines()
+  check("ledger float opened", llines ~= nil)
+  if llines then
+    local all = table.concat(llines, "\n")
+    local timeout_row, config_row
+    for i, l in ipairs(llines) do
+      if l:find("timeout") then
+        timeout_row = i
+      end
+      if l:find("config") and not l:find("create_server") then
+        config_row = config_row or i
+      end
+    end
+    check("ledger rows are single lines (timeout: type + inline default)", timeout_row ~= nil and llines[timeout_row]:find("float") ~= nil and llines[timeout_row]:find("=30%.0") ~= nil)
+    check("ledger rows carry no expand hints or examples", not all:find("<CR>") and not all:find("localhost"))
+
+    -- focus, rest on the timeout row: the detail block appears under it
+    vim.api.nvim_set_current_win(lw)
+    vim.api.nvim_win_set_cursor(lw, { timeout_row, 0 })
+    vim.cmd("doautocmd CursorMoved")
+    local detailed = vim.wait(1000, function()
+      local cur = table.concat(float_lines() or {}, "\n")
+      return cur:find("│ = 30%.0") ~= nil
+    end, 50)
+    check("ledger detail block follows the cursor (timeout default)", detailed)
+    if detailed then
+      -- the detail row itself drops its inline default (the block carries it)
+      local cur = float_lines()
+      for _, l in ipairs(cur) do
+        if l:find("timeout") then
+          check("detail row hands its default to the block", not l:find("=30%.0"))
+        end
+      end
+      -- moving to another row swaps the block
+      for i, l in ipairs(cur) do
+        if l:find("config") and not l:find("create_server") then
+          vim.api.nvim_win_set_cursor(lw, { i, 0 })
+          break
+        end
+      end
+      vim.cmd("doautocmd CursorMoved")
+      local swapped = vim.wait(1000, function()
+        return not table.concat(float_lines() or {}, "\n"):find("│ = 30%.0")
+      end, 50)
+      check("ledger detail block leaves the abandoned row", swapped)
+    end
+    require("typescope").close()
+  end
+  require("typescope").setup({})
 end
 
 -- hover() takeover: function symbol → typescope; non-function → plain hover

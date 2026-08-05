@@ -192,6 +192,7 @@ local function show(srcbuf, roots, meta, token, client, sig_result)
   -- trees carry the previous open's flag, so clear before setting.
   local active_name = lsp.active_param(sig_result)
   local header = meta and meta.header or nil
+  local active_id = nil -- ledger: the detail block opens on the active param
   if meta and meta.overloads then
     -- overloads (U4): stacked groups — expand the one basedpyright says
     -- matches the arguments so far, collapse the rest; the active-param
@@ -201,12 +202,14 @@ local function show(srcbuf, roots, meta, token, client, sig_result)
       root.state.expanded = i == idx
       for _, child in ipairs(root.children) do
         child.active = i == idx and child.kind == "param" and child.name == active_name or false
+        active_id = child.active and child.id or active_id
       end
     end
     header = meta.headers[idx] .. (" [%d/%d]"):format(idx, meta.overloads)
   else
     for _, root in ipairs(roots) do
       root.active = root.kind == "param" and root.name == active_name or false
+      active_id = root.active and root.id or active_id
     end
   end
 
@@ -225,6 +228,9 @@ local function show(srcbuf, roots, meta, token, client, sig_result)
     docstring = meta and meta.docstring or nil,
     docstring_expanded = false,
     docstring_pos = cfg.ui.docstring,
+    -- ledger: open with the active param's detail showing; interact's
+    -- CursorMoved wiring takes over once the float is focused
+    detail_id = cfg.ui.layout == "ledger" and active_id or nil,
   }
   local result = render.render(roots, render_opts)
   local width = math.min(max_width, math.max(result.width, 30))

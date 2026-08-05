@@ -19,6 +19,7 @@
 ---@field badge? string e.g. "NotRequired" for TypedDict fields
 ---@field origin? string parent class name for inherited fields (rendered as ↑Parent)
 ---@field evaluated? string pyright's evaluated type for leaves structural resolution couldn't crack (rendered as ≈ T)
+---@field evaluated_owner? string the annotation ref the evaluation came from (named in the ledger detail when it isn't the whole annotation)
 ---@field source? { uri: string, range: table } where the type is declared
 ---@field children typescope.Node[]
 ---@field state typescope.NodeState

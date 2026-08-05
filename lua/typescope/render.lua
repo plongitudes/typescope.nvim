@@ -20,8 +20,9 @@
 ---@class typescope.RenderOpts
 ---@field style typescope.Charset
 ---@field max_width integer resolved columns (callers use config.resolved_max_width)
----@field layout? "tree"|"table" flowing segments (default) vs column grid (U5)
+---@field layout? "tree"|"table"|"ledger" flowing segments (default) vs column grid (U5) vs one-line rows + detail block (U6)
 ---@field align? "left"|"right" name column alignment (default left, tree layout)
+---@field detail_id? string ledger layout: node whose row expands into a detail block
 ---@field show_examples boolean
 ---@field example_kind "heuristic"|"llm"
 ---@field lang? string treesitter language for injected snippet highlighting
@@ -582,8 +583,189 @@ function M.render(roots, opts)
     end
   end
 
+  -- ── ledger layout (U6): one line per node, cursor-follow detail block ──
+  -- Rows carry identity + discriminators only (name, pass mode, type, short
+  -- default); everything read one-at-a-time (≈ evaluation, example, origin,
+  -- long defaults) lives in the detail block under opts.detail_id's row.
+  -- Rows NEVER wrap — the single-line invariant is what keeps the float
+  -- narrow and scanning cheap.
+  local function render_ledger()
+    local NAME_CAP = 24
+    -- middle-ellipsis: identifiers discriminate at both ends
+    -- (ws_per_message_deflate → ws_per_mess…ge_deflate)
+    local function capped_name(name)
+      if strwidth(name) <= NAME_CAP then
+        return name
+      end
+      local keep = NAME_CAP - 1
+      local front = math.ceil(keep / 2)
+      return name:sub(1, front) .. "…" .. name:sub(-(keep - front))
+    end
+
+    -- pass 1: visible rows, tree chrome carried like the other layouts
+    local rows = {}
+    local function collect(node, bars, branch, depth)
+      table.insert(rows, { node = node, bars = bars, branch = branch, depth = depth })
+      if node.state.expanded then
+        for i, child in ipairs(node.children) do
+          local last = i == #node.children
+          collect(
+            child,
+            bars .. (last and string.rep(" ", strwidth(style.vert)) or style.vert),
+            bars .. (last and style.last or style.branch),
+            depth + 1
+          )
+        end
+      end
+    end
+    for _, root in ipairs(roots) do
+      collect(root, string.rep(" ", strwidth(style.expanded)), "", 0)
+    end
+
+    -- pass 2: shared name column (chrome + gutter + capped name); the pass
+    -- gutter exists only when some visible row actually uses it
+    local has_mode = false
+    for _, r in ipairs(rows) do
+      has_mode = has_mode or r.node.pass_mode ~= nil
+    end
+    local marker_w = strwidth(style.expanded) -- all markers share one width
+    local name_col = 0
+    for _, r in ipairs(rows) do
+      local w = (r.depth > 0 and strwidth(r.branch) or 0)
+        + marker_w
+        + (has_mode and 2 or 0)
+        + strwidth(capped_name(r.node.name))
+      name_col = math.max(name_col, w)
+    end
+
+    for _, r in ipairs(rows) do
+      local node = r.node
+      local detail = node.id == opts.detail_id
+      local line = new_line()
+      if r.depth > 0 then
+        line:add(r.branch, "TypeScopeChrome")
+      end
+      local marker = is_expandable(node) and (node.state.expanded and style.expanded or style.collapsed)
+        or style.leaf
+      line:add(marker, "TypeScopeChrome")
+      if has_mode then
+        if node.pass_mode then
+          line:add(node.pass_mode .. " ", "TypeScopeKeyword")
+        else
+          line:add("  ")
+        end
+      end
+      local name_group = node.kind == "return" and "TypeScopeKeyword"
+        or node.kind == "type" and "TypeScopeType"
+        or node.kind == "param" and "TypeScopeParam"
+        or "TypeScopeField"
+      if node.active then
+        name_group = "TypeScopeActive"
+      end
+      line:add(capped_name(node.name), name_group)
+      line:add(string.rep(" ", math.max(0, name_col - line.width)) .. "  ")
+
+      local type_text = node.type.display or node.type.raw or "?"
+      local evaluated_visible = node.evaluated
+        and not (node.evaluated_on_expand and not node.state.expanded)
+      -- an unannotated param's declared type is only implicit Any — show the
+      -- inferred view as the type itself (the detail block then skips it)
+      local type_is_evaluation = evaluated_visible and type_text == "Any"
+      if type_is_evaluation then
+        type_text = node.evaluated
+      end
+      local injectable = not type_is_evaluation
+        and (node.kind ~= "method" and node.kind ~= "type" and node.kind ~= "overload")
+        and "replace"
+        or nil
+      local type_group = type_is_evaluation and "TypeScopeEvaluated" or "TypeScopeType"
+
+      -- indicators that stay whole; the type absorbs any truncation
+      local tail = {}
+      if node.type.category == "unresolved" then
+        table.insert(tail, { " " .. style.unresolved, "TypeScopeUnresolved" })
+      end
+      if node.badge then
+        table.insert(tail, { " " .. node.badge, "TypeScopeBadge" })
+      end
+      local tail_w = 0
+      for _, s in ipairs(tail) do
+        tail_w = tail_w + strwidth(s[1])
+      end
+
+      -- inline default only on non-detail rows (the block carries the full
+      -- value); long defaults elide to `=…` rather than widening every row
+      local default_text = nil
+      if node.default and not detail then
+        default_text = strwidth(node.default) <= 12 and node.default or nil
+      end
+      local budget = opts.max_width - line.width - tail_w
+      local def_w = default_text and (3 + strwidth(default_text)) or (node.default and not detail and 4 or 0)
+      if strwidth(type_text) + def_w > budget then
+        default_text = nil -- degrade the default before touching the type
+        def_w = node.default and not detail and 4 or 0
+      end
+      if strwidth(type_text) + def_w > budget then
+        type_text = type_text:sub(1, math.max(4, budget - def_w - 1)) .. "…"
+        injectable = nil -- a truncated fragment isn't parseable source
+      end
+      line:add(type_text, type_group, injectable)
+      for _, s in ipairs(tail) do
+        line:add(s[1], s[2])
+      end
+      if node.default and not detail then
+        line:add("  =", "TypeScopeChrome")
+        if default_text then
+          line:add(default_text, "TypeScopeDefault", "replace")
+        else
+          line:add("…", "TypeScopeChrome")
+        end
+      end
+      emit(line, node.id)
+
+      -- ── detail block: the focused row's read-one-at-a-time facts ─────────
+      if detail then
+        local dprefix = r.bars .. style.vert
+        local function detail_line(segments)
+          local dline = new_line()
+          dline:add(dprefix, "TypeScopeChrome")
+          flow(dline, dprefix, 2, segments, node.id)
+        end
+        if evaluated_visible and not type_is_evaluation then
+          local segs = { { style.evaluated, "TypeScopeEvaluated" } }
+          local owner = node.evaluated_owner
+          -- name the annotation piece the evaluation belongs to when it
+          -- isn't the whole annotation (multi-ref unions)
+          if owner and owner ~= (node.type.display or node.type.raw) then
+            table.insert(segs, { owner .. " = ", "TypeScopeEvaluated" })
+          end
+          table.insert(segs, { node.evaluated, "TypeScopeEvaluated" })
+          detail_line(segs)
+        end
+        local info = {}
+        if node.default then
+          table.insert(info, { "= ", "TypeScopeChrome" })
+          table.insert(info, { node.default, "TypeScopeDefault", "replace" })
+        end
+        local example = example_for(node, opts)
+        if example then
+          table.insert(info, { (#info > 0 and "   " or "") .. "e.g. ", "TypeScopeHint" })
+          table.insert(info, { example, "TypeScopeExample", "overlay", true })
+        end
+        if node.origin then
+          table.insert(info, { (#info > 0 and "   " or "") .. style.inherit .. node.origin, "TypeScopeHint", nil, true })
+        end
+        if #info > 0 then
+          detail_line(info)
+        end
+      end
+    end
+  end
+
   if opts.layout == "table" then
     render_table()
+  elseif opts.layout == "ledger" then
+    render_ledger()
   else
     local cap = opts.align == "right" and math.huge or 16
     local marker_w = strwidth(style.expanded)
@@ -613,6 +795,84 @@ function M.render(roots, opts)
     table.insert(result.highlights, { line = lnum - 1, col_start = 0, col_end = #bar, group = "TypeScopeChrome" })
   end
 
+  return result
+end
+
+---@class typescope.LadderOpts
+---@field max_width integer
+---@field show_examples boolean
+---@field example_kind "heuristic"|"llm"
+---@field fn_name? string callee name shown as trailing context
+---@field badge? string overload badge, e.g. "[2/2]"
+
+--- Insert-mode ladder (U6): ONE line for the active parameter. As width
+--- shrinks, segments drop in a fixed order — example, then default, then the
+--- type truncates — so the surface never wraps and never needs manual density
+--- controls while the user is mid-call. Pure, like render().
+---@param node typescope.Node the active param
+---@param opts typescope.LadderOpts
+---@return typescope.RenderResult
+function M.ladder(node, opts)
+  local type_text = node.type.display or node.type.raw or "?"
+  if node.evaluated and type_text == "Any" then
+    type_text = node.evaluated
+  end
+  local example = opts.show_examples
+      and (node.example[opts.example_kind] or node.example.heuristic)
+    or nil
+
+  ---@param with_example boolean
+  ---@param with_default boolean
+  ---@param type_limit? integer truncate the type to this many cells
+  local function build(with_example, with_default, type_limit)
+    local line = new_line()
+    line:add("─ ", "TypeScopeChrome")
+    line:add(node.name, "TypeScopeActive")
+    line:add(": ", "TypeScopeChrome")
+    local t = type_text
+    local truncated = false
+    if type_limit and strwidth(t) > type_limit then
+      t = t:sub(1, math.max(4, type_limit - 1)) .. "…"
+      truncated = true
+    end
+    line:add(t, node.evaluated and type_text == node.evaluated and "TypeScopeEvaluated" or "TypeScopeType",
+      not truncated and "replace" or nil)
+    if with_default and node.default then
+      line:add(" = ", "TypeScopeChrome")
+      line:add(node.default, "TypeScopeDefault", "replace")
+    end
+    if with_example and example then
+      line:add("   e.g. ", "TypeScopeHint")
+      line:add(example, "TypeScopeExample", "overlay")
+    end
+    if opts.fn_name then
+      line:add("   " .. opts.fn_name, "TypeScopeHint")
+      if opts.badge then
+        line:add(" " .. opts.badge, "TypeScopeBadge")
+      end
+    end
+    line:add(" ─", "TypeScopeChrome")
+    return line
+  end
+
+  local line = build(true, true)
+  if line.width > opts.max_width then
+    line = build(false, true)
+  end
+  if line.width > opts.max_width then
+    line = build(false, false)
+  end
+  if line.width > opts.max_width then
+    line = build(false, false, strwidth(type_text) - (line.width - opts.max_width))
+  end
+
+  local result = { lines = { line.text }, highlights = {}, ts_injections = {}, line_to_node = { node.id }, width = line.width }
+  for _, hl in ipairs(line.hls) do
+    table.insert(result.highlights, { line = 0, col_start = hl.col_start, col_end = hl.col_end, group = hl.group })
+  end
+  for _, inj in ipairs(line.inj) do
+    table.insert(result.ts_injections, { line = 0, col_start = inj.col_start, text = inj.text, mode = inj.mode })
+  end
   return result
 end
 

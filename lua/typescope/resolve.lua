@@ -162,6 +162,10 @@ local function run_enrichment(ctx)
         and evaluated ~= "Any"
       then
         job.node.evaluated = evaluated
+        -- which annotation piece answered: for a multi-ref union the ≈ view
+        -- belongs to ONE member (WSProtocolType, not the whole union) and
+        -- the ledger detail names it so adjacency isn't mistaken for scope
+        job.node.evaluated_owner = cand.ref.name:match("[%w_]+$") or cand.ref.name
         break
       end
     end

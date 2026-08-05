@@ -402,4 +402,114 @@ do
   )
 end
 
+-- 11. ledger layout (U6): one line per node — name | type | short default —
+-- with a detail block (≈ owner, full default, example, origin) on detail_id
+do
+  local function ledger_tree()
+    local t = {
+      model.new({
+        name = "config",
+        kind = "param",
+        expanded = true,
+        type = { raw = "ServerConfig", display = "ServerConfig", category = "dataclass" },
+        children = {
+          { name = "host", kind = "field", type = { raw = "str", display = "str", category = "builtin" }, example = { heuristic = '"localhost"' } },
+          { name = "port", kind = "field", type = { raw = "int", display = "int", category = "builtin" }, default = "8000" },
+          { name = "env", kind = "field", type = { raw = "str", display = "str", category = "builtin" }, origin = "BaseConfig" },
+        },
+      }),
+      model.new({
+        name = "host",
+        kind = "param",
+        pass_mode = "*",
+        type = { raw = "str", display = "str", category = "builtin" },
+        default = '"127.0.0.1"',
+      }),
+      model.new({
+        name = "ws",
+        kind = "param",
+        pass_mode = "*",
+        type = { raw = "type[Protocol] | WSProtocolType", display = "type[Protocol] | WSProtocolType", category = "generic" },
+        evaluated = 'Literal["auto", "none"]',
+        default = '"auto"',
+        example = { heuristic = '"none"' },
+      }),
+      model.new({ name = "returns", kind = "return", type = { raw = "None", display = "None", category = "builtin" } }),
+    }
+    t[3].evaluated_owner = "WSProtocolType"
+    return t
+  end
+  local lopts = opts({ style = styles.get("rounded"), max_width = 60, layout = "ledger" })
+  local lr = render.render(ledger_tree(), lopts)
+  eq_lines("ledger layout golden (no detail)", lr.lines, {
+    '▾   config     ServerConfig',
+    '  ├─ ·   host  str',
+    '  ├─ ·   port  int  =8000',
+    '  ╰─ ·   env   str',
+    '· * host       str  ="127.0.0.1"',
+    '· * ws         type[Protocol] | WSProtocolType  ="auto"',
+    '·   returns    None',
+  })
+  -- rows carry no examples, no origins, no ≈, no expand hints — detail's job
+  local all = table.concat(lr.lines, "\n")
+  check(
+    "ledger rows stay lean",
+    not all:find("localhost") and not all:find("BaseConfig") and not all:find("≈") and not all:find("<CR>")
+  )
+
+  -- detail on ws: inline default moves into the block; the ≈ line names the
+  -- union member that answered (evaluated_owner), not the whole annotation
+  local dr = render.render(ledger_tree(), opts({ style = styles.get("rounded"), max_width = 60, layout = "ledger", detail_id = "ws" }))
+  eq_lines("ledger detail block golden", dr.lines, {
+    '▾   config     ServerConfig',
+    '  ├─ ·   host  str',
+    '  ├─ ·   port  int  =8000',
+    '  ╰─ ·   env   str',
+    '· * host       str  ="127.0.0.1"',
+    '· * ws         type[Protocol] | WSProtocolType',
+    '  │ ≈ WSProtocolType = Literal["auto", "none"]',
+    '  │ = "auto"   e.g. "none"',
+    '·   returns    None',
+  })
+  check("ledger detail lines map to their owner", dr.line_to_node[7] == "ws" and dr.line_to_node[8] == "ws" and dr.line_to_node[9] == "returns")
+
+  -- detail on an inherited field shows its origin
+  local er = render.render(ledger_tree(), opts({ style = styles.get("rounded"), max_width = 60, layout = "ledger", detail_id = "config.env" }))
+  check("ledger detail shows origin", table.concat(er.lines, "\n"):find("↑BaseConfig") ~= nil)
+
+  -- long identifiers middle-ellipsize at the 24-cell cap
+  local long = render.render(
+    { model.new({ name = "ws_per_message_deflate_enabled", kind = "param", type = { display = "bool", category = "builtin" } }) },
+    lopts
+  )
+  check("ledger caps long names with middle ellipsis", long.lines[1]:find("…") ~= nil and long.lines[1]:find("bool") ~= nil)
+end
+
+-- 12. insert ladder (U6): one line, fixed degradation order
+do
+  local node = model.new({
+    name = "port",
+    kind = "param",
+    type = { raw = "int", display = "int", category = "builtin" },
+    default = "8000",
+    example = { heuristic = "8080" },
+  })
+  local base = { show_examples = true, example_kind = "heuristic", fn_name = "run", badge = "[2/2]" }
+  local full = render.ladder(node, vim.tbl_extend("force", base, { max_width = 60 }))
+  eq_lines("ladder full", full.lines, { "─ port: int = 8000   e.g. 8080   run [2/2] ─" })
+  check("ladder maps to the param", full.line_to_node[1] == "port")
+  -- degradation: example drops first, then the default, then the type cuts
+  local no_ex = render.ladder(node, vim.tbl_extend("force", base, { max_width = 33 }))
+  check("ladder drops example first", not no_ex.lines[1]:find("e.g.") and no_ex.lines[1]:find("8000") ~= nil)
+  local no_def = render.ladder(node, vim.tbl_extend("force", base, { max_width = 26 }))
+  check("ladder drops default second", not no_def.lines[1]:find("8000") and no_def.lines[1]:find("int") ~= nil)
+  local wide_type = model.new({
+    name = "ws",
+    kind = "param",
+    type = { display = "type[asyncio.Protocol] | WSProtocolType", category = "generic" },
+  })
+  local cut = render.ladder(wide_type, { show_examples = false, example_kind = "heuristic", max_width = 24 })
+  check("ladder truncates the type last", cut.lines[1]:find("…") ~= nil and cut.width <= 24)
+end
+
 print(failures == 0 and "RENDER ALL PASS" or ("RENDER " .. failures .. " FAILURES"))

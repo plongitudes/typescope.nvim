@@ -1,8 +1,9 @@
--- Insert-mode typing surface (U3): a budget-reduced unified float following
--- the call under the cursor while typing. The reading surface's rules don't
--- apply here — never focusable, no docstring, no LLM, no tree interaction:
--- header + collapsed roots + heuristic examples, painted from the resolve
--- cache whenever it's warm (prefetch usually made it so).
+-- Insert-mode typing surface (U6 ladder): ONE line for the active parameter,
+-- repositioned every keystroke so the cursor line and the line below it are
+-- never occluded. No tree, no docstring, no LLM, no keymaps — the density
+-- research's insert rule is "zero manual controls": segments drop in a fixed
+-- order (example → default → type truncation) as width shrinks, and the
+-- active param follows signatureHelp silently (overload auto-follow included).
 
 local M = {}
 
@@ -10,13 +11,11 @@ local M = {}
 ---@field handle typescope.FloatHandle
 ---@field key string call identity (buf + call node start)
 ---@field srcbuf integer
----@field display typescope.Node[] shallow root clones (fold/active state stays ours)
 ---@field roots typescope.Node[] full resolve result (all overload groups)
 ---@field meta table? resolve meta (headers/overloads for auto-follow)
----@field overload_idx integer? currently displayed overload
----@field opts table render opts
+---@field overload_idx integer? currently followed overload
+---@field fn_name string? callee name shown as trailing context
 ---@field token typescope.CancelToken
----@field width integer
 ---@field active_name string?
 
 ---@type typescope.InsertState?
@@ -101,42 +100,86 @@ local function call_at_cursor(bufnr, row0, col)
 end
 
 ---@param st typescope.InsertState
+---@return typescope.Node[]
+local function active_params(st)
+  if st.meta then
+    return st.roots[st.overload_idx].children
+  end
+  return st.roots
+end
+
+-- The one param the ladder describes: signatureHelp's active param by name,
+-- else the first param (a fresh `f(` before any answer lands).
+---@param st typescope.InsertState
+---@return typescope.Node?
+local function param_node(st)
+  local first = nil
+  for _, node in ipairs(active_params(st)) do
+    if node.kind == "param" then
+      first = first or node
+      if st.active_name and node.name == st.active_name then
+        return node
+      end
+    end
+  end
+  return first
+end
+
+---@param st typescope.InsertState
+---@return typescope.RenderResult?
+local function ladder_result(st)
+  local node = param_node(st)
+  if not node then
+    return nil
+  end
+  local config = require("typescope.config")
+  local cfg = config.get()
+  return require("typescope.render").ladder(node, {
+    max_width = math.min(config.resolved_max_width(), vim.o.columns - 4),
+    show_examples = cfg.show_examples and cfg.example_mode ~= "none",
+    example_kind = "heuristic", -- LLM values decorate if already cached, never requested
+    fn_name = st.fn_name,
+    badge = st.meta and ("[%d/%d]"):format(st.overload_idx, st.meta.overloads) or nil,
+  })
+end
+
+-- Hard rule (density research): the cursor line and the line BELOW it are
+-- never occluded. The 1-line borderless float sits on the line above the
+-- cursor; when the cursor is on the window's top line, two lines below is
+-- the only legal spot.
+---@return table win config fragment (relative/anchor/row/col)
+local function placement()
+  local above = vim.fn.winline() > 1
+  return {
+    relative = "cursor",
+    anchor = above and "SW" or "NW",
+    -- SW row 0 anchors the bottom edge ON the cursor row — -1 is the line above
+    row = above and -1 or 2,
+    col = 0,
+  }
+end
+
+---@param st typescope.InsertState
 local function repaint(st)
-  local render = require("typescope.render")
-  local result = render.render(st.display, st.opts)
+  local result = ladder_result(st)
+  if not result then
+    close_float() -- an overload swap can land on a 0-param signature
+    return
+  end
   require("typescope.float").update(st.handle, {
     lines = result.lines,
     highlights = result.highlights,
     ts_injections = result.ts_injections,
-    lang = st.opts.lang,
-    width = st.width,
-    height = math.min(require("typescope.config").get().ui.max_height, #result.lines),
+    lang = vim.bo[st.srcbuf].filetype,
+    width = result.width,
+    height = 1,
   })
+  vim.api.nvim_win_set_config(st.handle.win, placement())
 end
 
--- shallow clones with their OWN state tables: the cached tree's fold state
--- belongs to the reading surface; the typing surface always shows collapsed
--- roots and must not clobber K's folds
-local function clone_roots(source)
-  local display = {}
-  for _, root in ipairs(source) do
-    local copy = vim.tbl_extend("force", {}, root)
-    copy.state = { expanded = false, loaded = root.state.loaded, loading = false }
-    copy.active = false
-    table.insert(display, copy)
-  end
-  return display
-end
-
----@param meta table
----@param idx integer
-local function overload_header(meta, idx)
-  return meta.headers[idx] .. (" [%d/%d]"):format(idx, meta.overloads)
-end
-
--- Debounced signatureHelp → active-param row highlight, and (U4) overload
--- auto-follow: when activeSignature changes, the display silently swaps to
--- that overload's params. Repaints only on change; no resolve, no chases.
+-- Debounced signatureHelp → active param + (U4) overload auto-follow: when
+-- activeSignature changes, the ladder silently swaps to that overload.
+-- Repaints only on change; no resolve, no chases.
 local function refresh_active()
   stop_timer()
   sig_timer = vim.uv.new_timer()
@@ -169,18 +212,12 @@ local function refresh_active()
           local idx = math.min((ok_result.activeSignature or 0) + 1, st.meta.overloads)
           if idx ~= st.overload_idx then
             st.overload_idx = idx
-            st.display = clone_roots(st.roots[idx].children)
-            st.opts.header = overload_header(st.meta, idx)
-            st.active_name = nil
             changed = true
           end
         end
         local name = lsp.active_param(ok_result)
         if name ~= st.active_name then
           st.active_name = name
-          for _, root in ipairs(st.display) do
-            root.active = root.kind == "param" and root.name == name or false
-          end
           changed = true
         end
         if changed then
@@ -217,63 +254,43 @@ local function open_for(srcbuf, key, frow0, fcol)
     if not roots then
       return -- typing surface never nags; pending_key stays as negative cache
     end
-    pending_key = nil
 
-    -- overloads (U4): the typing surface never stacks — it shows the active
-    -- overload's params only and swaps silently as activeSignature moves
     local has_overloads = type(meta) == "table" and meta.overloads ~= nil
-    local display = clone_roots(has_overloads and roots[1].children or roots)
-
-    local config = require("typescope.config")
-    local cfg = config.get()
-    local opts = {
-      style = require("typescope.styles").get(cfg.ui.style),
-      max_width = config.resolved_max_width(),
-      layout = cfg.ui.layout,
-      align = cfg.ui.align,
-      show_examples = cfg.show_examples and cfg.example_mode ~= "none",
-      example_kind = "heuristic", -- LLM values decorate if already cached, never requested
-      lang = vim.bo[srcbuf].filetype,
-      header = has_overloads and overload_header(meta, 1) or (type(meta) == "table" and meta.header or nil),
-      docstring = nil, -- no prose while typing
-      docstring_pos = false,
-    }
-    local result = require("typescope.render").render(display, opts)
-    local width = math.min(opts.max_width, math.max(result.width, 30))
-    local height = math.min(cfg.ui.max_height, #result.lines)
-
-    -- signature-help convention: sit above the cursor line when there's
-    -- room (never cover what's being typed), below otherwise
-    local above = vim.fn.winline() - 1 > height + 2
-    local handle = require("typescope.float").open({
-      lines = result.lines,
-      highlights = result.highlights,
-      ts_injections = result.ts_injections,
-      lang = opts.lang,
-      title = " typescope ",
-      relative = "cursor",
-      anchor = above and "SW" or "NW",
-      row = above and 0 or 1,
-      col = 0,
-      width = width,
-      height = height,
-      border = cfg.ui.border,
-      enter = false,
-      focusable = false,
-    })
-    state = {
-      handle = handle,
+    ---@type typescope.InsertState
+    local st = {
+      handle = nil, -- set below; ladder_result doesn't need it
       key = key,
       srcbuf = srcbuf,
-      display = display,
       roots = roots,
       meta = has_overloads and meta or nil,
       overload_idx = has_overloads and 1 or nil,
-      opts = opts,
+      fn_name = type(meta) == "table" and meta.header and meta.header:match("^[%w_]+") or nil,
       token = token,
-      width = width,
       active_name = nil,
     }
+    local result = ladder_result(st)
+    if not result then
+      return -- nothing to describe (0-param call); pending_key stays as negative cache
+    end
+    pending_key = nil
+
+    local pos = placement()
+    st.handle = require("typescope.float").open({
+      lines = result.lines,
+      highlights = result.highlights,
+      ts_injections = result.ts_injections,
+      lang = vim.bo[srcbuf].filetype,
+      relative = pos.relative,
+      anchor = pos.anchor,
+      row = pos.row,
+      col = pos.col,
+      width = result.width,
+      height = 1,
+      border = "none", -- the ─ chrome in the line is the frame; a box would triple the height
+      enter = false,
+      focusable = false,
+    })
+    state = st
     refresh_active()
   end)
 end
@@ -301,6 +318,9 @@ function M._update()
   local srow, scol = call:range()
   local key = ("%d:%d:%d"):format(bufnr, srow, scol)
   if state and state.key == key then
+    -- same call: keep the hard no-occlusion rule true as the cursor moves
+    -- (a wrapped call can walk the cursor toward a below-anchored float)
+    vim.api.nvim_win_set_config(state.handle.win, placement())
     refresh_active()
     return
   end

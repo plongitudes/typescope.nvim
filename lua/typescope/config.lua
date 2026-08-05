@@ -9,7 +9,7 @@
 
 ---@class typescope.UiConfig
 ---@field style "unicode"|"ascii"|"minimal"|"rounded"
----@field layout "tree"|"table" flowing segments vs column grid with alternating rows
+---@field layout "tree"|"table"|"ledger" flowing segments vs column grid vs one-line rows with a cursor-follow detail block
 ---@field animations boolean
 ---@field align "left"|"right" name column alignment (tree layout)
 ---@field max_width number >1: absolute columns; <=1: fraction of editor width
@@ -83,6 +83,9 @@ local defaults = {
     style = "rounded", -- "unicode" | "ascii" | "minimal" | "rounded"
     -- "table" (U5): true columns — name | */ | type | default | example |
     -- origin — with alternating row backgrounds
+    -- "ledger" (U6): one line per param (name + type + short default); the
+    -- row under the cursor expands into a detail block (≈ evaluation,
+    -- example, origin) that follows as the cursor moves
     layout = "tree",
     animations = true,
     align = "left", -- "left" | "right" name column alignment
@@ -162,7 +165,7 @@ local function validate(cfg)
 
   check("ui", cfg.ui, "table")
   check("ui.style", cfg.ui.style, { "unicode", "ascii", "minimal", "rounded" })
-  check("ui.layout", cfg.ui.layout, { "tree", "table" })
+  check("ui.layout", cfg.ui.layout, { "tree", "table", "ledger" })
   check("ui.animations", cfg.ui.animations, "boolean")
   check("ui.align", cfg.ui.align, { "left", "right" })
   if type(cfg.ui.max_width) ~= "number" or cfg.ui.max_width <= 0 then

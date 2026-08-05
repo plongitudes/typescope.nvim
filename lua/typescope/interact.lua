@@ -258,6 +258,29 @@ function M.attach(args)
   map(km.close, args.on_close)
   map("<Esc>", args.on_close)
 
+  -- ledger (U6): the detail block follows the cursor. Re-render only when the
+  -- node under the cursor changes; refresh(id) parks the cursor back on the
+  -- node's primary row, and the id-equality guard turns the CursorMoved that
+  -- move fires into a no-op (detail lines map to their owner, so resting on
+  -- one keeps its block open).
+  if st.opts.layout == "ledger" then
+    vim.api.nvim_create_autocmd("CursorMoved", {
+      buffer = st.handle.buf,
+      desc = "TypeScope: ledger detail block follows the cursor",
+      callback = function()
+        if not st.result or not vim.api.nvim_win_is_valid(st.handle.win) then
+          return
+        end
+        local lnum = vim.api.nvim_win_get_cursor(st.handle.win)[1]
+        local id = st.result.line_to_node[lnum]
+        if id ~= st.opts.detail_id then
+          st.opts.detail_id = id
+          refresh(id)
+        end
+      end,
+    })
+  end
+
   st.result = render.render(st.roots, st.opts)
 
   return { opts = st.opts, refresh = refresh, generate = generate }
