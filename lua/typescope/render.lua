@@ -739,7 +739,9 @@ function M.render(roots, opts)
           if owner and owner ~= (node.type.display or node.type.raw) then
             table.insert(segs, { owner .. " = ", "TypeScopeEvaluated" })
           end
-          table.insert(segs, { node.evaluated, "TypeScopeEvaluated" })
+          -- overlay: real syntax colors over the dim ≈ base (flow drops the
+          -- injection automatically if the value wraps)
+          table.insert(segs, { node.evaluated, "TypeScopeEvaluated", "overlay" })
           detail_line(segs)
         end
         local info = {}
@@ -845,14 +847,17 @@ end
 ---@field style? typescope.Charset for the ≈ glyph (defaults to unicode's)
 ---@field fn_name? string callee name shown as trailing context
 ---@field badge? string overload badge, e.g. "[2/2]"
+---@field params? { name: string, active: boolean }[] the signature's params for the names block
 
---- Insert-mode ladder (U6): ONE line for the active parameter, including the
---- param's SHAPE when it has one — an alias/union evaluation (the legal
---- values of OpenTextMode) or a resolved class's field list. As width
---- shrinks, segments drop in a fixed order — example, then default, then the
---- shape elides member-by-member and finally drops, then the type truncates —
---- so the surface never wraps and never needs manual density controls while
---- the user is mid-call. Pure, like render().
+--- Insert-mode ladder (U6): a names block listing EVERY viable parameter of
+--- the signature (wrapped freely — all names always visible, active one
+--- highlighted), a rule, then ONE detail line for the active parameter,
+--- including the param's SHAPE when it has one — an alias/union evaluation
+--- (the legal values of OpenTextMode) or a resolved class's field list. As
+--- width shrinks, the detail line's segments drop in a fixed order —
+--- example, then default, then the shape elides member-by-member and finally
+--- drops, then the type truncates — so it never wraps and never needs manual
+--- density controls while the user is mid-call. Pure, like render().
 ---@param node typescope.Node the active param
 ---@param opts typescope.LadderOpts
 ---@return typescope.RenderResult
@@ -897,7 +902,12 @@ function M.ladder(node, opts)
     if shape_budget and shape then
       local shown = shape_budget == true and shape or elide_members(shape, shape_budget)
       line:add(" " .. eval_glyph, "TypeScopeEvaluated")
-      line:add(shown, "TypeScopeEvaluated")
+      -- overlay injection: values keep their real syntax colors (str/int/
+      -- Literal strings each their own — Tony's per-piece color direction)
+      -- over the dim ≈ base; the parser colors the valid prefix of elided
+      -- text and leaves …+N alone. The {field} shape isn't source — no
+      -- injection there.
+      line:add(shown, "TypeScopeEvaluated", shape == node.evaluated and "overlay" or nil)
     end
     if with_default and node.default then
       line:add(" = ", "TypeScopeChrome")
@@ -944,12 +954,46 @@ function M.ladder(node, opts)
     line = build(false, false, nil, strwidth(type_text) - (line.width - opts.max_width))
   end
 
-  local result = { lines = { line.text }, highlights = {}, ts_injections = {}, line_to_node = { node.id }, width = line.width }
-  for _, hl in ipairs(line.hls) do
-    table.insert(result.highlights, { line = 0, col_start = hl.col_start, col_end = hl.col_end, group = hl.group })
+  local result = { lines = {}, highlights = {}, ts_injections = {}, line_to_node = {}, width = 0 }
+  local function push(l, node_id)
+    table.insert(result.lines, l.text)
+    result.line_to_node[#result.lines] = node_id
+    for _, hl in ipairs(l.hls) do
+      table.insert(result.highlights, { line = #result.lines - 1, col_start = hl.col_start, col_end = hl.col_end, group = hl.group })
+    end
+    for _, inj in ipairs(l.inj) do
+      table.insert(result.ts_injections, { line = #result.lines - 1, col_start = inj.col_start, text = inj.text, mode = inj.mode })
+    end
+    result.width = math.max(result.width, l.width)
   end
-  for _, inj in ipairs(line.inj) do
-    table.insert(result.ts_injections, { line = 0, col_start = inj.col_start, text = inj.text, mode = inj.mode })
+
+  -- names block: skipped for single-param signatures (the detail line
+  -- already IS the whole list)
+  local rule_lnum = nil
+  if opts.params and #opts.params > 1 then
+    local nline = new_line()
+    for i, p in ipairs(opts.params) do
+      if nline.width > 0 and nline.width + strwidth(p.name) + 1 > opts.max_width then
+        push(nline, nil)
+        nline = new_line()
+      end
+      nline:add(p.name, p.active and "TypeScopeActive" or "TypeScopeParam")
+      if i < #opts.params then
+        nline:add(", ", "TypeScopeChrome")
+      end
+    end
+    if nline.width > 0 then
+      push(nline, nil)
+    end
+    push(new_line(), nil) -- rule placeholder, stretched to width below
+    rule_lnum = #result.lines
+  end
+
+  push(line, node.id)
+  if rule_lnum then
+    local bar = string.rep(opts.style and opts.style.rule or "─", math.max(4, result.width))
+    result.lines[rule_lnum] = bar
+    table.insert(result.highlights, { line = rule_lnum - 1, col_start = 0, col_end = #bar, group = "TypeScopeChrome" })
   end
   return result
 end

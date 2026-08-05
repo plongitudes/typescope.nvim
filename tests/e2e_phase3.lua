@@ -293,10 +293,11 @@ do
   resolve.clear_cache()
 end
 
--- insert-mode typing surface (U6 ladder): ONE line for the active param,
--- anchored above the cursor (hard rule: cursor line + line below never
--- occluded), never focusable, degradation instead of wrapping, closes on
--- InsertLeave. Overloads never stack — [n/m] badge + silent auto-follow.
+-- insert-mode typing surface (U6 ladder): names block listing every param +
+-- ONE detail line for the active one, anchored above the cursor (hard rule:
+-- cursor line + line below never occluded), never focusable, degradation
+-- instead of wrapping, closes on InsertLeave. Overloads never stack — [n/m]
+-- badge + silent auto-follow.
 do
   -- max_width 72: wide enough for the shape segment (headless columns are 80,
   -- so the default fraction would starve it)
@@ -329,22 +330,26 @@ do
     check("insert float never focusable", ic.focusable == false)
     local ibuf = vim.api.nvim_win_get_buf(iw)
     local ilines = vim.api.nvim_buf_get_lines(ibuf, 0, -1, false)
-    check("insert ladder is one line", #ilines == 1)
+    local detail = ilines[#ilines]
+    check("names block lists every param", ilines[1]:find("config") ~= nil and ilines[1]:find("timeout") ~= nil)
     check(
-      "ladder shows the active param with its shape",
-      ilines[1]:find("config") ~= nil
-        and ilines[1]:find("ServerConfig") ~= nil
-        and ilines[1]:find("≈", 1, true) ~= nil
-        and ilines[1]:find("{host", 1, true) ~= nil
+      "detail line shows the active param with its shape",
+      detail:find("config") ~= nil
+        and detail:find("ServerConfig") ~= nil
+        and detail:find("≈", 1, true) ~= nil
+        and detail:find("{host", 1, true) ~= nil
     )
-    check("no docstring while typing", not ilines[1]:find("Spin up"))
+    check("no docstring while typing", not table.concat(ilines, "\n"):find("Spin up"))
     check("ladder wears the shared border", ic.border ~= nil and ic.border ~= "none")
-    -- hard rule: content two rows above the cursor, so the bottom border
-    -- (drawn OUTSIDE the anchor box) lands on the line above — never on the
-    -- cursor line (get_config normalizes row, so compare screen pos)
-    local fpos = vim.api.nvim_win_get_position(iw)
-    local cursor_screen_row0 = vim.api.nvim_win_get_position(0)[1] + vim.fn.winline() - 1
-    check("ladder + border sit above the cursor line", ic.anchor == "SW" and fpos[1] == cursor_screen_row0 - 2)
+    -- hard rule: SW row 0 → in a REAL UI the whole float (border included)
+    -- ends on the line above the cursor. Headless attaches no UI and never
+    -- applies anchor geometry, so screen positions can't be asserted here —
+    -- assert the normalized config instead (get_config rewrites
+    -- relative=cursor to win coords: SW anchored at the cursor's window row)
+    check(
+      "ladder anchors SW at the cursor row (real UI: ends on the line above)",
+      ic.anchor == "SW" and ic.row == vim.fn.winline() - 1
+    )
     -- the param name is the active-param highlight (always, by construction)
     local ns = vim.api.nvim_create_namespace("typescope")
     local has_active = false
@@ -395,10 +400,20 @@ do
       if not ww then
         return false
       end
-      local h = vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(ww), 0, -1, false)[1]
+      -- overload 2 has 4 params, so the badge rides the LAST line under a
+      -- names block
+      local h = table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(ww), 0, -1, false), "\n")
       return h:find("%[2/2%]") ~= nil
     end, 100)
     check("insert auto-follows activeSignature to overload 2", followed)
+    local fw = insert_float()
+    if fw then
+      local flines = vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(fw), 0, -1, false)
+      check(
+        "overload 2's names block lists its params",
+        flines[1]:find("key") ~= nil and flines[1]:find("policy") ~= nil and flines[1]:find("mode") ~= nil
+      )
+    end
     vim.api.nvim_buf_set_lines(bufnr, frow - 1, frow, false, { "fetched = fetch(1)" })
     vim.cmd("silent write")
     vim.cmd("doautocmd InsertLeave")

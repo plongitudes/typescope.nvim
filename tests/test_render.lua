@@ -540,6 +540,32 @@ do
   })
   local sfull = render.ladder(struct, { show_examples = false, example_kind = "heuristic", max_width = 60 })
   eq_lines("ladder presents a class param's shape", sfull.lines, { "config: ServerConfig ≈ {host, port, env}" })
+
+  -- names block: every param of the signature above a rule, active one lit;
+  -- single-param signatures skip it (the detail line IS the list)
+  local pfull = render.ladder(
+    node,
+    vim.tbl_extend("force", base, {
+      max_width = 60,
+      params = { { name = "app", active = false }, { name = "host", active = false }, { name = "port", active = true } },
+    })
+  )
+  eq_lines("ladder names block + rule + detail", pfull.lines, {
+    "app, host, port",
+    string.rep("─", 40),
+    "port: int = 8000   e.g. 8080   run [2/2]",
+  })
+  check("names lines carry no node mapping; detail does", pfull.line_to_node[1] == nil and pfull.line_to_node[3] == "port")
+  local wrap_params = {}
+  for _, n in ipairs({ "app", "host", "port", "ws_max_size", "lifespan", "reload" }) do
+    table.insert(wrap_params, { name = n, active = n == "port" })
+  end
+  local pwrap = render.ladder(node, vim.tbl_extend("force", base, { max_width = 24, params = wrap_params }))
+  local wall = table.concat(pwrap.lines, "\n")
+  check(
+    "names block wraps so every name stays visible",
+    #pwrap.lines > 3 and wall:find("ws_max_size") ~= nil and wall:find("lifespan") ~= nil and wall:find("reload") ~= nil
+  )
 end
 
 print(failures == 0 and "RENDER ALL PASS" or ("RENDER " .. failures .. " FAILURES"))

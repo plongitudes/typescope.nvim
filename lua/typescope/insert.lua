@@ -132,6 +132,13 @@ local function ladder_result(st)
   if not node then
     return nil
   end
+  -- names block: every viable param of the active overload, current one lit
+  local params = {}
+  for _, p in ipairs(active_params(st)) do
+    if p.kind == "param" then
+      table.insert(params, { name = p.name, active = p == node })
+    end
+  end
   local config = require("typescope.config")
   local cfg = config.get()
   return require("typescope.render").ladder(node, {
@@ -141,22 +148,28 @@ local function ladder_result(st)
     style = require("typescope.styles").get(cfg.ui.style),
     fn_name = st.fn_name,
     badge = st.meta and ("[%d/%d]"):format(st.overload_idx, st.meta.overloads) or nil,
+    params = params,
   })
 end
 
 -- Hard rule (density research): the cursor line and the line BELOW it are
--- never occluded. The 1-line bordered float (3 screen rows) sits above the
--- cursor; when there isn't room, two lines below is the only legal spot.
+-- never occluded. The bordered float sits above the cursor, growing UPWARD
+-- as the names block wraps (SW anchor pins the bottom edge); when there
+-- isn't room, below the line under the cursor is the only legal spot.
+---@param height integer content rows
 ---@return table win config fragment (relative/anchor/row/col)
-local function placement()
-  local above = vim.fn.winline() > 3
+local function placement(height)
+  local above = vim.fn.winline() > height + 2
   return {
     relative = "cursor",
     anchor = above and "SW" or "NW",
-    -- the anchor box is the CONTENT box; the border draws outside it
-    -- (probe-verified). SW -2 → content two above, bottom border one above;
-    -- NW 3 → top border two below, content three below.
-    row = above and -2 or 3,
+    -- REAL-UI semantics (hard-won: headless nvim attaches no UI and never
+    -- applies anchor geometry, so headless position probes LIE — they show
+    -- raw NW placement; Tony's screenshots were the ground truth): the
+    -- anchored extent INCLUDES the border. SW row 0 → bottom border on the
+    -- line above the cursor, growing upward; NW row 2 → top border on
+    -- cursor+2, keeping the line below the cursor clear.
+    row = above and 0 or 2,
     col = 0,
   }
 end
@@ -189,6 +202,14 @@ local function ensure_shape(st)
   end)
 end
 
+-- Re-pin the open float to the current cursor screen position (cursor-
+-- relative floats anchor once; they don't follow view changes on their own).
+local function reanchor()
+  if state and vim.api.nvim_win_is_valid(state.handle.win) then
+    vim.api.nvim_win_set_config(state.handle.win, placement(vim.api.nvim_win_get_height(state.handle.win)))
+  end
+end
+
 ---@param st typescope.InsertState
 repaint = function(st)
   ensure_shape(st)
@@ -203,9 +224,9 @@ repaint = function(st)
     ts_injections = result.ts_injections,
     lang = vim.bo[st.srcbuf].filetype,
     width = result.width,
-    height = 1,
+    height = #result.lines,
   })
-  vim.api.nvim_win_set_config(st.handle.win, placement())
+  vim.api.nvim_win_set_config(st.handle.win, placement(#result.lines))
 end
 
 -- Debounced signatureHelp → active param + (U4) overload auto-follow: when
@@ -305,7 +326,7 @@ local function open_for(srcbuf, key, frow0, fcol)
     end
     pending_key = nil
 
-    local pos = placement()
+    local pos = placement(#result.lines)
     st.handle = require("typescope.float").open({
       lines = result.lines,
       highlights = result.highlights,
@@ -317,7 +338,7 @@ local function open_for(srcbuf, key, frow0, fcol)
       row = pos.row,
       col = pos.col,
       width = result.width,
-      height = 1,
+      height = #result.lines,
       border = require("typescope.config").get().ui.border, -- same frame as the K float (Tony: ui consistency)
       enter = false,
       focusable = false,
@@ -353,7 +374,7 @@ function M._update()
   if state and state.key == key then
     -- same call: keep the hard no-occlusion rule true as the cursor moves
     -- (a wrapped call can walk the cursor toward a below-anchored float)
-    vim.api.nvim_win_set_config(state.handle.win, placement())
+    reanchor()
     refresh_active()
     return
   end
@@ -379,6 +400,14 @@ function M.enable()
     callback = function()
       M.close()
     end,
+  })
+  -- a view scroll without a cursor move (autopairs growing the file at the
+  -- window edge, scrolloff shifts) fires no CursorMovedI — re-pin so the
+  -- float never drifts away from (or onto) the cursor line
+  vim.api.nvim_create_autocmd("WinScrolled", {
+    group = group,
+    desc = "TypeScope: typing surface follows view scrolls",
+    callback = reanchor,
   })
 end
 
