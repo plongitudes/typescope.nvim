@@ -197,4 +197,57 @@ do
   package.loaded["typescope.examples.ollama"] = real_ollama
 end
 
+-- warmup residency (typescope.nvim-4sr): every open fires one empty-prompt
+-- generate — it loads a cold model AND refreshes keep_alive on a warm one
+-- (sliding-window residency), so no stale client-side flag can suppress
+-- re-warming after an unload. Transport faked at vim.system.
+do
+  local real_system = vim.system
+  local generates = 0
+  local deferred_cb = nil -- when set-able, the request stays in flight
+  local defer = false
+  ---@diagnostic disable-next-line: duplicate-set-field
+  vim.system = function(_, _, cb)
+    generates = generates + 1
+    if defer then
+      deferred_cb = cb
+    else
+      cb({ code = 0, stdout = "{}" })
+    end
+    return { wait = function() end }
+  end
+
+  local cfg = { host = "127.0.0.1", port = 9999, model = "testmodel", autostart = false, timeout_ms = 1000 }
+
+  -- the stub responds synchronously but the module's callback is
+  -- schedule_wrap'd, so each phase needs an unconditional wait to spin the
+  -- event loop and let `warming` reset before the next open
+  ollama.warmup(cfg)
+  vim.wait(100)
+  check("warmup fires the load", generates == 1, generates)
+
+  -- a later open fires again — refreshes keep_alive when warm, re-warms
+  -- when unloaded; the old sticky-flag code would no-op here
+  ollama.warmup(cfg)
+  vim.wait(100)
+  check("every open re-fires (refresh / re-warm)", generates == 2, generates)
+
+  -- overlapping opens while a request is in flight don't stack curls
+  defer = true
+  ollama.warmup(cfg)
+  ollama.warmup(cfg)
+  vim.wait(100)
+  check("in-flight warmup dedups overlapping opens", generates == 3, generates)
+  deferred_cb({ code = 0, stdout = "{}" })
+  vim.wait(100)
+
+  -- and once that flight lands, the next open fires again
+  defer = false
+  ollama.warmup(cfg)
+  vim.wait(100)
+  check("dedup releases after flight lands", generates == 4, generates)
+
+  vim.system = real_system
+end
+
 print(failures == 0 and "EXAMPLES ALL PASS" or ("EXAMPLES " .. failures .. " FAILURES"))

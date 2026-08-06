@@ -119,7 +119,7 @@ function M.ensure_server(cfg, cb)
   end)
 end
 
-local warmed = false
+local warming = false
 
 --- Fire the actual model-load request (empty prompt loads without
 --- generating). cb(ok) on the main loop.
@@ -137,35 +137,32 @@ local function load_model(cfg, cb)
   )
 end
 
---- Fire-and-forget model load so the first E press doesn't pay the cold
---- start. `warmed` flips optimistically (so overlapping calls don't stack
---- curls) but resets on failure — a server started later still gets warmed
---- by the next float open. With autostart, an unreachable server is spawned
---- and the warmup retried once it answers.
+--- Fire-and-forget empty-prompt generate on every float open. One request
+--- does three jobs: answers residency, loads the model if keep_alive already
+--- unloaded it, and resets the keep_alive clock — sliding-window residency
+--- (unload N after you stop working, not N after the last real generation)
+--- with the server as the only source of truth. No cached client-side state:
+--- `warming` just stops overlapping calls from stacking curls. With
+--- autostart, an unreachable server is spawned and the warmup retried once
+--- it answers.
 ---@param cfg typescope.OllamaConfig
 function M.warmup(cfg)
-  if warmed then
+  if warming then
     return
   end
-  warmed = true
+  warming = true
+  local function done()
+    warming = false
+  end
   load_model(cfg, function(ok)
-    if ok then
-      return
-    end
-    warmed = false
-    if not cfg.autostart then
-      return
+    if ok or not cfg.autostart then
+      return done()
     end
     M.ensure_server(cfg, function(ready)
       if not ready then
-        return
+        return done()
       end
-      warmed = true
-      load_model(cfg, function(ok2)
-        if not ok2 then
-          warmed = false
-        end
-      end)
+      load_model(cfg, done)
     end)
   end)
 end
