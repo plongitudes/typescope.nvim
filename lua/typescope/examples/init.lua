@@ -8,12 +8,38 @@ local heuristic = require("typescope.examples.heuristic")
 
 local M = {}
 
--- session-lifetime LLM cache: model.hash(node) -> literal
+-- session-lifetime LLM cache: hash#name -> literal, or false — a MISS
+-- sentinel meaning "asked, model returned nothing usable". Auto-generation
+-- runs on every open; without the sentinel it would re-ask the model about
+-- the same whiffed leaves forever (Tony's repeated-generation report).
 local llm_cache = {}
+-- keys with a request currently in flight. Batches outlive a closed float on
+-- purpose (they pay for the next open) — a reopen mid-generation must reuse
+-- them, not duplicate them.
+local in_flight = {}
+
+---@param node typescope.Node
+---@return string
+local function cache_key(node)
+  return model.hash(node) .. "#" .. node.name
+end
 
 --- Test seam: drop cached LLM values so failure paths can be exercised.
 function M._clear_llm_cache()
   llm_cache = {}
+  in_flight = {}
+end
+
+--- Forget MISS sentinels for this forest — an explicit E press is permission
+--- to re-ask leaves the model whiffed on (the auto-run on open never does).
+---@param roots typescope.Node[]
+function M.retry_misses(roots)
+  model.walk(roots, function(node)
+    local key = cache_key(node)
+    if llm_cache[key] == false then
+      llm_cache[key] = nil
+    end
+  end)
 end
 
 --- Annotate every leaf in the forest with a heuristic example. Structs,
@@ -100,10 +126,13 @@ function M.llm(roots, token, done, on_progress)
   local leaves = visible_leaves(roots)
   local pending = {}
   for _, node in ipairs(leaves) do
-    local cached = llm_cache[model.hash(node) .. "#" .. node.name]
+    local key = cache_key(node)
+    local cached = llm_cache[key]
     if cached then
       node.example.llm = cached
-    else
+    elseif cached == nil and not in_flight[key] then
+      -- false = MISS sentinel (heuristic stands); in_flight = a still-running
+      -- batch from a previous open will cache it — don't ask twice
       table.insert(pending, node)
     end
   end
@@ -128,12 +157,19 @@ function M.llm(roots, token, done, on_progress)
     index = index + LLM_BATCH
 
     local specs = {}
+    local keys = {}
     for _, node in ipairs(batch) do
       table.insert(specs, { id = node.id, name = node.name, display = node.type.display or "Any" })
+      keys[node.id] = cache_key(node)
+      in_flight[keys[node.id]] = true
     end
     ollama.generate(ollama.prompt(specs), cfg.ollama, function(response, err)
+      for _, node in ipairs(batch) do
+        in_flight[keys[node.id]] = nil
+      end
       if not response then
-        -- abort the chain but report partial success: earlier batches landed
+        -- abort the chain but report partial success: earlier batches
+        -- landed. Transport failures leave no sentinel — retry is fine.
         return done(any_filled, err)
       end
       local values = ollama.parse(response)
@@ -142,8 +178,12 @@ function M.llm(roots, token, done, on_progress)
         local value = values[node.id]
         if value then
           node.example.llm = value
-          llm_cache[model.hash(node) .. "#" .. node.name] = value
+          llm_cache[keys[node.id]] = value
           filled = filled + 1
+        else
+          -- asked and answered nothing usable: MISS — the heuristic stands
+          -- and this session won't auto-ask again (E retries explicitly)
+          llm_cache[keys[node.id]] = false
         end
       end
       batches_done = batches_done + 1

@@ -104,4 +104,97 @@ check("parse tolerates prose and fences", parsed["config.host"] == '"api.interna
 check("parse handles ints and nested paths", parsed["config.port"] == "8443" and parsed["config.retry.backoff"] == "1.5")
 check("parse skips non-matching lines", parsed["not"] == nil)
 
+-- LLM caching discipline: misses get a sentinel (auto-run never re-asks),
+-- E's retry_misses lifts it, and in-flight batches are never duplicated by
+-- a reopen. Ollama's transport is faked at the module boundary.
+do
+  local examples = require("typescope.examples")
+  local real_ollama = package.loaded["typescope.examples.ollama"]
+  require("typescope.config").setup({ ollama = { enabled = true } })
+
+  local calls = {} -- each entry: the ids asked for in that generate() call
+  local respond -- set per-phase: fn(ids) -> response text (nil = defer)
+  local deferred = nil
+  package.loaded["typescope.examples.ollama"] = {
+    prompt = function(specs)
+      local ids = {}
+      for _, s in ipairs(specs) do
+        table.insert(ids, s.id)
+      end
+      return ids
+    end,
+    parse = real_ollama.parse,
+    generate = function(ids, _, cb)
+      table.insert(calls, ids)
+      if respond then
+        cb(respond(ids))
+      else
+        deferred = { ids = ids, cb = cb }
+      end
+    end,
+  }
+
+  local function forest()
+    return {
+      model.new({ name = "a", kind = "param", type = { display = "int", category = "builtin" } }),
+      model.new({ name = "b", kind = "param", type = { display = "str", category = "builtin" } }),
+    }
+  end
+  local token = require("typescope.async").token()
+
+  -- phase 1: the model answers for `a` only → `b` is a MISS
+  examples._clear_llm_cache()
+  respond = function()
+    return "a = 42"
+  end
+  local f1 = forest()
+  examples.llm(f1, token, function() end)
+  check("miss run: one request, a filled, b empty", #calls == 1 and f1[1].example.llm == "42" and f1[2].example.llm == nil)
+
+  -- phase 2: a fresh open (same shapes) issues NO request — a from cache,
+  -- b's sentinel stands
+  local f2 = forest()
+  local done_ok
+  examples.llm(f2, token, function(ok)
+    done_ok = ok
+  end)
+  check(
+    "reopen run: served from cache + sentinel, zero requests",
+    #calls == 1 and done_ok == true and f2[1].example.llm == "42" and f2[2].example.llm == nil
+  )
+
+  -- phase 3: retry_misses (the E press) lifts the sentinel — exactly the
+  -- missed leaf is re-asked
+  examples.retry_misses(f2)
+  respond = function()
+    return 'b = "beta"'
+  end
+  examples.llm(f2, token, function() end)
+  check(
+    "retry run: only the miss is re-asked",
+    #calls == 2 and #calls[2] == 1 and calls[2][1] == "b" and f2[2].example.llm == '"beta"'
+  )
+
+  -- phase 4: a reopen while a batch is in flight does not duplicate it
+  examples._clear_llm_cache()
+  respond = nil -- defer: the batch stays in flight
+  local f4 = forest()
+  examples.llm(f4, token, function() end)
+  local f5 = forest()
+  examples.llm(f5, token, function() end)
+  check("in-flight batch not duplicated by reopen", #calls == 3 and deferred ~= nil)
+  deferred.cb('a = 7\nb = "late"')
+  local f6 = forest()
+  respond = function()
+    return ""
+  end
+  examples.llm(f6, token, function() end)
+  check(
+    "late batch cached for the next open",
+    #calls == 3 and f6[1].example.llm == "7" and f6[2].example.llm == '"late"'
+  )
+
+  package.loaded["typescope.examples.ollama"] = real_ollama
+end
+
 print(failures == 0 and "EXAMPLES ALL PASS" or ("EXAMPLES " .. failures .. " FAILURES"))

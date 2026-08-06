@@ -244,6 +244,10 @@ function M.attach(args)
       vim.notify("typescope: LLM examples need a live LSP session (not available in the spike)", vim.log.levels.INFO)
       return
     end
+    -- an explicit press is permission to re-ask leaves the model whiffed on;
+    -- the auto-run on open skips them (MISS sentinels) to avoid regenerating
+    -- on every reopen
+    require("typescope.examples").retry_misses(st.roots)
     generate()
   end)
   map(km.recurse, function()
