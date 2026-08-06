@@ -334,6 +334,10 @@ local function open_for(srcbuf, key, frow0, fcol)
     end
     pending_key = nil
 
+    -- same as the reading float's show(): the TypeScope* groups only exist
+    -- after apply() — without this, an insert float opened before any K
+    -- press painted colorless
+    require("typescope.highlights").apply()
     local pos = placement(#result.lines)
     st.handle = require("typescope.float").open({
       lines = result.lines,
