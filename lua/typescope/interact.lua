@@ -61,22 +61,26 @@ function M.attach(args)
   }
 
   local function refresh(focus_id)
+    -- help (?) replaces the view entirely: content routinely exceeds
+    -- max_height, so an appended panel lands below the fold and is never seen
+    if st.show_help then
+      local lines = help_lines(st.width, st.extra_help)
+      local highlights = {}
+      for i, text in ipairs(lines) do
+        highlights[i] = { line = i - 1, col_start = 0, col_end = #text, group = "TypeScopeHint" }
+      end
+      float.update(st.handle, {
+        lines = lines,
+        highlights = highlights,
+        width = st.width,
+        height = math.min(st.max_height, #lines),
+      })
+      vim.api.nvim_win_set_cursor(st.handle.win, { 1, 0 })
+      return
+    end
     st.result = render.render(st.roots, st.opts)
     local lines = vim.list_extend({}, st.result.lines)
     local highlights = st.result.highlights
-    if st.show_help then
-      local extra = help_lines(st.width, st.extra_help)
-      highlights = vim.list_extend({}, highlights)
-      for i, text in ipairs(extra) do
-        table.insert(lines, text)
-        table.insert(highlights, {
-          line = #lines - 1,
-          col_start = 0,
-          col_end = #text,
-          group = "TypeScopeHint",
-        })
-      end
-    end
     -- expanding deep subtrees produces wider content than the float opened
     -- with — grow the window (never shrink; up to max_width) or lines clip
     st.width = math.max(st.width, math.min(st.opts.max_width, st.result.width))
@@ -99,7 +103,9 @@ function M.attach(args)
   end
 
   local function node_under_cursor()
-    if not st.result then
+    -- while help covers the view, st.result's line map is stale — node
+    -- keymaps become no-ops instead of acting on invisible rows
+    if not st.result or st.show_help then
       return nil
     end
     local lnum = vim.api.nvim_win_get_cursor(st.handle.win)[1]
@@ -190,8 +196,14 @@ function M.attach(args)
     refresh()
   end)
   map(km.help, function()
+    local node = node_under_cursor()
     st.show_help = not st.show_help
-    refresh()
+    if st.show_help then
+      st.help_return_id = node and node.id or nil
+      refresh()
+    else
+      refresh(st.help_return_id)
+    end
   end)
   map(km.docstring, function()
     if st.opts.docstring and st.opts.docstring_pos then
@@ -279,6 +291,10 @@ function M.attach(args)
   -- header/rule). Past the last node they fall back to plain movement so
   -- the docstring section stays reachable and scrollable.
   local function jump(dir)
+    if st.show_help then
+      vim.cmd("normal! " .. (dir == 1 and "j" or "k"))
+      return
+    end
     local win = st.handle.win
     local lnum = vim.api.nvim_win_get_cursor(win)[1]
     local cur = st.result.line_to_node[lnum]
@@ -321,7 +337,7 @@ function M.attach(args)
       buffer = st.handle.buf,
       desc = "TypeScope: ledger detail block follows the cursor",
       callback = function()
-        if not st.result or not vim.api.nvim_win_is_valid(st.handle.win) then
+        if not st.result or st.show_help or not vim.api.nvim_win_is_valid(st.handle.win) then
           return
         end
         local lnum = vim.api.nvim_win_get_cursor(st.handle.win)[1]
