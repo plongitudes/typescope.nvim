@@ -700,10 +700,10 @@ function M.render(roots, opts)
         default_text = strwidth(node.default) <= 12 and node.default or nil
       end
       local budget = opts.max_width - line.width - tail_w
-      local def_w = default_text and (3 + strwidth(default_text)) or (node.default and not detail and 4 or 0)
+      local def_w = default_text and (4 + strwidth(default_text)) or (node.default and not detail and 5 or 0)
       if strwidth(type_text) + def_w > budget then
         default_text = nil -- degrade the default before touching the type
-        def_w = node.default and not detail and 4 or 0
+        def_w = node.default and not detail and 5 or 0
       end
       if strwidth(type_text) + def_w > budget then
         type_text = type_text:sub(1, math.max(4, budget - def_w - 1)) .. "…"
@@ -714,7 +714,7 @@ function M.render(roots, opts)
         line:add(s[1], s[2])
       end
       if node.default and not detail then
-        line:add("  =", "TypeScopeChrome")
+        line:add("  = ", "TypeScopeChrome")
         if default_text then
           line:add(default_text, "TypeScopeDefault", "replace")
         else

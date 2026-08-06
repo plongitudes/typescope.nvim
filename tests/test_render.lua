@@ -444,10 +444,10 @@ do
   eq_lines("ledger layout golden (no detail)", lr.lines, {
     '▾   config     ServerConfig',
     '  ├─ ·   host  str',
-    '  ├─ ·   port  int  =8000',
+    '  ├─ ·   port  int  = 8000',
     '  ╰─ ·   env   str',
-    '· * host       str  ="127.0.0.1"',
-    '· * ws         type[Protocol] | WSProtocolType  ="auto"',
+    '· * host       str  = "127.0.0.1"',
+    '· * ws         type[Protocol] | WSProtocolType  = "auto"',
     '·   returns    None',
   })
   -- rows carry no examples, no origins, no ≈, no expand hints — detail's job
@@ -463,9 +463,9 @@ do
   eq_lines("ledger detail block golden", dr.lines, {
     '▾   config     ServerConfig',
     '  ├─ ·   host  str',
-    '  ├─ ·   port  int  =8000',
+    '  ├─ ·   port  int  = 8000',
     '  ╰─ ·   env   str',
-    '· * host       str  ="127.0.0.1"',
+    '· * host       str  = "127.0.0.1"',
     '· * ws         type[Protocol] | WSProtocolType',
     '  │ ≈ WSProtocolType = Literal["auto", "none"]',
     '  │ = "auto"   e.g. "none"',

@@ -494,7 +494,7 @@ do
         config_row = config_row or i
       end
     end
-    check("ledger rows are single lines (timeout: type + inline default)", timeout_row ~= nil and llines[timeout_row]:find("float") ~= nil and llines[timeout_row]:find("=30%.0") ~= nil)
+    check("ledger rows are single lines (timeout: type + inline default)", timeout_row ~= nil and llines[timeout_row]:find("float") ~= nil and llines[timeout_row]:find("= 30%.0") ~= nil)
     check("ledger rows carry no expand hints or examples", not all:find("<CR>") and not all:find("localhost"))
 
     -- focus, rest on the timeout row: the detail block appears under it

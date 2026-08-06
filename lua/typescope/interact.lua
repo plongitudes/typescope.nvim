@@ -213,10 +213,22 @@ function M.attach(args)
     -- each batch swaps its rows in as it arrives
     st.opts.example_kind = "llm"
     st.opts.show_examples = true
-    local spinner = require("typescope.anim").title_spinner(st.handle.win, "generating")
+    -- the spinner starts only if generation is still running after a beat:
+    -- a cache-served run (every reopen) finishes synchronously, and its
+    -- one-frame "generating…" title flash read as real regeneration
+    local spinner = nil
+    local finished = false
+    vim.defer_fn(function()
+      if not finished and vim.api.nvim_win_is_valid(st.handle.win) then
+        spinner = require("typescope.anim").title_spinner(st.handle.win, "generating")
+      end
+    end, 80)
     args.on_llm(st.roots, function(ok, err)
       st.generating = false
-      spinner.stop()
+      finished = true
+      if spinner then
+        spinner.stop()
+      end
       if not vim.api.nvim_win_is_valid(st.handle.win) then
         return
       end
@@ -230,7 +242,7 @@ function M.attach(args)
         end
       end
     end, function(batches_done, batches_total)
-      if batches_total and batches_total > 1 then
+      if spinner and batches_total and batches_total > 1 then
         spinner.set_label(("generating %d/%d"):format(math.min(batches_done + 1, batches_total), batches_total))
       end
       if vim.api.nvim_win_is_valid(st.handle.win) then
