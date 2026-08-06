@@ -231,6 +231,7 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
     -- unified float (U1): call-shape header + docstring section, absorbing
     -- the retired anchor float's content
     header = header,
+    header_active = active_name,
     docstring = meta and meta.docstring or nil,
     docstring_expanded = false,
     docstring_pos = cfg.ui.docstring,

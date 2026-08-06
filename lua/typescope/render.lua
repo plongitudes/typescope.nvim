@@ -27,6 +27,7 @@
 ---@field example_kind "heuristic"|"llm"
 ---@field lang? string treesitter language for injected snippet highlighting
 ---@field header? string one-line call shape shown above the tree
+---@field header_active? string param name lit as active in the header (matches insert's signature block)
 ---@field docstring? string full docstring text (render decides how much shows)
 ---@field docstring_expanded? boolean full text vs first paragraph
 ---@field docstring_pos? "top"|"bottom"|false where the docstring section sits
@@ -341,22 +342,54 @@ function M.render(roots, opts)
       -- drop the final (possibly cut-in-half) token so only whole params show
       header = body:sub(1, cut):gsub(",%s*[^,]*$", "") .. ", " .. suffix
     end
-    -- elision marks (`=…`, trailing `…`) carry no information beyond
-    -- "something was here"; at full header brightness they blend into the
-    -- names, so they render dimmed at the same hue (Tony, 2026-08-01)
+    -- colors align with the insert ladder's signature block (Tony,
+    -- 2026-08-06): yellow reserved for the callable + parens, params in
+    -- param color with the active one lit, the return as a real type with
+    -- syntax injection. Elision marks (`=…`, trailing `…`) render as chrome
+    -- — same as ledger rows' default marks — superseding the 2026-08-01
+    -- dim-at-header-hue call, which assumed a single-hue header.
     local hline = new_line()
-    local hi = 1
-    while hi <= #header do
-      local s, e = header:find("=?…", hi)
-      if not s then
-        hline:add(header:sub(hi), "TypeScopeHeader")
-        break
+    -- we authored the format in resolve (name(tok, tok) -> ret [i/n]), so
+    -- this parse can't miss; the plain fallback is pure defense
+    local badge = header:match("%s(%[%d+/%d+%])$")
+    local sig = badge and header:sub(1, #header - #badge - 1) or header
+    -- non-greedy params: the FIRST `) -> ` closes the call, so a callable
+    -- return like `(int) -> str` stays whole (tokens never contain parens)
+    local fn_name, params, ret = sig:match("^([^(]+)%((.-)%) %-> (.*)$")
+    if not fn_name then
+      fn_name, params = sig:match("^([^(]+)%((.-)%)$")
+    end
+    if fn_name then
+      hline:add(fn_name, "TypeScopeHeader")
+      hline:add("(", "TypeScopeHeader")
+      local toks = params ~= "" and vim.split(params, ", ", { plain = true }) or {}
+      for i, tok in ipairs(toks) do
+        if tok == "*" or tok == "/" then
+          hline:add(tok, "TypeScopeKeyword")
+        elseif tok == "…" then
+          hline:add(tok, "TypeScopeChrome")
+        else
+          local name, mark = tok:match("^(.-)(=…)$")
+          name = name or tok
+          hline:add(name, name == opts.header_active and "TypeScopeActive" or "TypeScopeParam")
+          if mark then
+            hline:add(mark, "TypeScopeChrome")
+          end
+        end
+        if i < #toks then
+          hline:add(", ", "TypeScopeChrome")
+        end
       end
-      if s > hi then
-        hline:add(header:sub(hi, s - 1), "TypeScopeHeader")
+      hline:add(")", "TypeScopeHeader")
+      if ret then
+        hline:add(" -> ", "TypeScopeChrome")
+        hline:add(ret, "TypeScopeType", "replace")
       end
-      hline:add(header:sub(s, e), "TypeScopeHeaderDim")
-      hi = e + 1
+      if badge then
+        hline:add(" " .. badge, "TypeScopeBadge")
+      end
+    else
+      hline:add(header, "TypeScopeHeader")
     end
     emit(hline, nil)
   end
