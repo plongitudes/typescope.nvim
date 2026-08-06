@@ -494,15 +494,17 @@ do
     default = "8000",
     example = { heuristic = "8080" },
   })
+  -- fn/badge/ret render only in the signature block; without params the
+  -- ladder is the bare detail
   local base = { show_examples = true, example_kind = "heuristic", fn_name = "run", badge = "[2/2]" }
   local full = render.ladder(node, vim.tbl_extend("force", base, { max_width = 60 }))
-  eq_lines("ladder full", full.lines, { "port: int = 8000   e.g. 8080   run [2/2]" })
+  eq_lines("ladder full", full.lines, { "port: int = 8000   e.g. 8080" })
   check("ladder maps to the param", full.line_to_node[1] == "port")
   -- out of room → the detail WRAPS (hanging indent); nothing is dropped
-  local wrapped = render.ladder(node, vim.tbl_extend("force", base, { max_width = 33 }))
+  local wrapped = render.ladder(node, vim.tbl_extend("force", base, { max_width = 20 }))
   eq_lines("ladder wraps instead of dropping", wrapped.lines, {
-    "port: int = 8000   e.g. 8080",
-    "         run [2/2]",
+    "port: int = 8000",
+    "         e.g. 8080",
   })
   check("wrapped lines all map to the param", wrapped.line_to_node[1] == "port" and wrapped.line_to_node[2] == "port")
 
@@ -517,12 +519,12 @@ do
   })
   local vbase = { show_examples = true, example_kind = "heuristic", style = styles.get("unicode"), fn_name = "open", badge = "[1/7]" }
   local vfull = render.ladder(mode, vim.tbl_extend("force", vbase, { max_width = 80 }))
-  eq_lines("ladder presents valid values", vfull.lines, { "mode: OpenTextMode ≈ Literal['r', 'w', 'x', 'a'] = \"r\"   open [1/7]" })
+  eq_lines("ladder presents valid values", vfull.lines, { "mode: OpenTextMode ≈ Literal['r', 'w', 'x', 'a'] = \"r\"" })
   -- a modest overflow wraps with the FULL value set intact
-  local vwrapped = render.ladder(mode, vim.tbl_extend("force", vbase, { max_width = 58 }))
+  local vwrapped = render.ladder(mode, vim.tbl_extend("force", vbase, { max_width = 40 }))
   eq_lines("ladder wraps full valid values", vwrapped.lines, {
-    "mode: OpenTextMode ≈ Literal['r', 'w', 'x', 'a'] = \"r\"",
-    "         open [1/7]",
+    "mode: OpenTextMode ≈ Literal['r', 'w',",
+    "      'x', 'a'] = \"r\"",
   })
   -- only past the line cap does the shape elide member-by-member
   local members = {}
@@ -557,21 +559,22 @@ do
   local sfull = render.ladder(struct, { show_examples = false, example_kind = "heuristic", max_width = 60 })
   eq_lines("ladder presents a class param's shape", sfull.lines, { "config: ServerConfig ≈ {host, port, env}" })
 
-  -- names block: every param of the signature above a rule, active one lit;
-  -- single-param signatures skip it (the detail line IS the list)
+  -- signature block: K-consistent header — name(params) -> ret [i/m] — with
+  -- the active param lit, above a rule
   local pfull = render.ladder(
     node,
     vim.tbl_extend("force", base, {
       max_width = 60,
+      ret = "None",
       params = { { name = "app", active = false }, { name = "host", active = false }, { name = "port", active = true } },
     })
   )
-  eq_lines("ladder names block + rule + detail", pfull.lines, {
-    "app, host, port",
-    string.rep("─", 40),
-    "port: int = 8000   e.g. 8080   run [2/2]",
+  eq_lines("ladder signature block + rule + detail", pfull.lines, {
+    "run(app, host, port) -> None [2/2]",
+    string.rep("─", 34),
+    "port: int = 8000   e.g. 8080",
   })
-  check("names lines carry no node mapping; detail does", pfull.line_to_node[1] == nil and pfull.line_to_node[3] == "port")
+  check("signature lines carry no node mapping; detail does", pfull.line_to_node[1] == nil and pfull.line_to_node[3] == "port")
   local wrap_params = {}
   for _, n in ipairs({ "app", "host", "port", "ws_max_size", "lifespan", "reload" }) do
     table.insert(wrap_params, { name = n, active = n == "port" })
@@ -579,7 +582,7 @@ do
   local pwrap = render.ladder(node, vim.tbl_extend("force", base, { max_width = 24, params = wrap_params }))
   local wall = table.concat(pwrap.lines, "\n")
   check(
-    "names block wraps so every name stays visible",
+    "signature block wraps so every name stays visible",
     #pwrap.lines > 3 and wall:find("ws_max_size") ~= nil and wall:find("lifespan") ~= nil and wall:find("reload") ~= nil
   )
 end

@@ -851,17 +851,19 @@ local LADDER_MAX_LINES = 3
 ---@field show_examples boolean
 ---@field example_kind "heuristic"|"llm"
 ---@field style? typescope.Charset for the ≈ glyph (defaults to unicode's)
----@field fn_name? string callee name shown as trailing context
----@field badge? string overload badge, e.g. "[2/2]"
----@field params? { name: string, active: boolean }[] the signature's params for the names block
+---@field fn_name? string callee name — heads the signature block
+---@field ret? string return type shown as `-> ret` in the signature block
+---@field badge? string overload badge, e.g. "[2/2]" (signature block tail)
+---@field params? { name: string, active: boolean }[] the signature's params
 
---- Insert-mode ladder (U6): a names block listing EVERY viable parameter of
---- the signature (wrapped freely — all names always visible, active one
---- highlighted), a rule, then the active parameter's detail — type, SHAPE
---- (alias/union evaluation like OpenTextMode's legal values, or a resolved
---- class's field list), default, example. The detail WRAPS when out of room
---- (hanging indent, up to LADDER_MAX_LINES); beyond the cap the shape — the
---- only unbounded segment — elides member-by-member. Zero manual density
+--- Insert-mode ladder (U6): a K-consistent signature block —
+--- `open(file, mode, …) -> TextIOWrapper [1/7]` with EVERY param name (no
+--- `=…`, wrapped freely so all names stay visible, active one highlighted) —
+--- a rule, then the active parameter's detail: type, SHAPE (alias/union
+--- evaluation like OpenTextMode's legal values, or a resolved class's field
+--- list), default, example. The detail WRAPS when out of room (hanging
+--- indent, up to LADDER_MAX_LINES); beyond the cap the shape — the only
+--- unbounded segment — elides member-by-member. Zero manual density
 --- controls while the user is mid-call. Pure, like render().
 ---@param node typescope.Node the active param
 ---@param opts typescope.LadderOpts
@@ -914,22 +916,15 @@ function M.ladder(node, opts)
       seg("   e.g. ", "TypeScopeHint")
       seg(example, "TypeScopeExample", "overlay", true)
     end
-    if opts.fn_name then
-      seg("   " .. opts.fn_name, "TypeScopeHint", nil, true)
-      if opts.badge then
-        seg(" " .. opts.badge, "TypeScopeBadge", nil, true)
-      end
-    end
     return segs
   end
 
-  -- wrap the detail segments into width-bounded lines with a hanging indent
-  -- (mirrors render()'s flow: injection survives only on unsplit segments,
-  -- atomic segments jump whole to the next line)
-  local cont_indent = math.min(strwidth(node.name) + 2, 12)
-  ---@param shape_text? string
-  ---@return typescope.Line[]
-  local function layout(shape_text)
+  -- wrap segments into width-bounded lines with a hanging indent (mirrors
+  -- render()'s flow: injection survives only on unsplit segments, atomic
+  -- segments jump whole to the next line)
+  ---@param segs { [1]: string, [2]: string?, [3]: string?, [4]: boolean? }[]
+  ---@param cont_indent integer
+  local function wrap_segs(segs, cont_indent)
     local lines = {}
     local line = new_line()
     local function continuation()
@@ -937,7 +932,7 @@ function M.ladder(node, opts)
       line = new_line()
       line:add(string.rep(" ", cont_indent))
     end
-    for _, seg in ipairs(segs_for(shape_text)) do
+    for _, seg in ipairs(segs) do
       local text, group, inject, atomic = seg[1], seg[2], seg[3], seg[4]
       local whole = text
       while text ~= "" do
@@ -957,6 +952,12 @@ function M.ladder(node, opts)
     end
     table.insert(lines, line)
     return lines
+  end
+
+  local cont_indent = math.min(strwidth(node.name) + 2, 12)
+  ---@param shape_text? string
+  local function layout(shape_text)
+    return wrap_segs(segs_for(shape_text), cont_indent)
   end
 
   local detail = layout(shape)
@@ -996,23 +997,35 @@ function M.ladder(node, opts)
     result.width = math.max(result.width, l.width)
   end
 
-  -- names block: skipped for single-param signatures (the detail line
-  -- already IS the whole list)
+  -- signature block: K-consistent header — name(params) -> ret [i/m] — with
+  -- every param name (defaults elided entirely, not marked), the active one
+  -- highlighted, wrapped freely so all names stay visible
   local rule_lnum = nil
-  if opts.params and #opts.params > 1 then
-    local nline = new_line()
+  if opts.fn_name and opts.params and #opts.params > 0 then
+    local hsegs = {}
+    local function hseg(text, group, inject, atomic)
+      table.insert(hsegs, { text, group, inject, atomic })
+    end
+    hseg(opts.fn_name, "TypeScopeHeader")
+    hseg("(", "TypeScopeHeader")
     for i, p in ipairs(opts.params) do
-      if nline.width > 0 and nline.width + strwidth(p.name) + 1 > opts.max_width then
-        push(nline, nil)
-        nline = new_line()
-      end
-      nline:add(p.name, p.active and "TypeScopeActive" or "TypeScopeParam")
+      -- atomic: a name never splits mid-word; its comma stays behind on the
+      -- previous line, so no line ever starts with ", "
+      hseg(p.name, p.active and "TypeScopeActive" or "TypeScopeParam", nil, true)
       if i < #opts.params then
-        nline:add(", ", "TypeScopeChrome")
+        hseg(", ", "TypeScopeChrome")
       end
     end
-    if nline.width > 0 then
-      push(nline, nil)
+    hseg(")", "TypeScopeHeader")
+    if opts.ret then
+      hseg(" -> ", "TypeScopeChrome")
+      hseg(opts.ret, "TypeScopeType", "replace", true)
+    end
+    if opts.badge then
+      hseg(" " .. opts.badge, "TypeScopeBadge", nil, true)
+    end
+    for _, hline in ipairs(wrap_segs(hsegs, math.min(strwidth(opts.fn_name) + 1, 12))) do
+      push(hline, nil)
     end
     push(new_line(), nil) -- rule placeholder, stretched to width below
     rule_lnum = #result.lines

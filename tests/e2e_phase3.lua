@@ -338,7 +338,10 @@ do
       end
     end
     local detail = table.concat(ilines, "\n", rule_at + 1)
-    check("names block lists every param", ilines[1]:find("config") ~= nil and ilines[1]:find("timeout") ~= nil)
+    check(
+      "signature block is K-header shaped (name, parens, params, return type)",
+      ilines[1]:find("create_server(config, timeout)", 1, true) ~= nil and ilines[1]:find("-> Response", 1, true) ~= nil
+    )
     check(
       "detail shows the active param with its shape",
       detail:find("config") ~= nil
@@ -383,10 +386,10 @@ do
   local ow = insert_float()
   check("insert overload float opened", ow ~= nil)
   if ow then
-    local oline = vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(ow), 0, -1, false)[1]
-    check("ladder carries the overload badge [1/2]", oline:find("%[1/2%]") ~= nil)
-    check("ladder shows one overload's active param", oline:find("key") ~= nil and not oline:find("%[2/2%]"))
-    check("ladder keeps the heuristic example at full width", oline:find("e%.g%.") ~= nil)
+    local oall = table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(ow), 0, -1, false), "\n")
+    check("ladder carries the overload badge [1/2]", oall:find("%[1/2%]") ~= nil)
+    check("ladder shows one overload only", oall:find("key") ~= nil and not oall:find("%[2/2%]"))
+    check("ladder keeps the heuristic example at full width", oall:find("e%.g%.") ~= nil)
 
     -- auto-follow: adding a second argument bumps the mock's arity-based
     -- activeSignature; the ladder silently swaps its badge. The line must
@@ -453,6 +456,19 @@ do
     )
     vim.cmd("doautocmd InsertLeave")
   end
+
+  -- an insert cursor just RIGHT of the closing paren is OUTSIDE the call —
+  -- the surface must not fire (ve=onemore lets a headless cursor sit there)
+  vim.opt.virtualedit = "onemore"
+  for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+    if l:find("handle = create_server") then
+      vim.api.nvim_win_set_cursor(0, { i, #l }) -- one past the ')'
+    end
+  end
+  require("typescope.insert")._update()
+  vim.wait(500)
+  check("no surface outside the closing paren", insert_float() == nil)
+  vim.opt.virtualedit = ""
   require("typescope").setup({}) -- back to defaults for the remaining tests
 end
 

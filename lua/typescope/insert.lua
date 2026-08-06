@@ -82,7 +82,10 @@ local function call_at_cursor(bufnr, row0, col)
       if args then
         local srow, scol, erow, ecol = args:range()
         local after_open = row0 > srow or (row0 == srow and col > scol)
-        local before_close = row0 < erow or (row0 == erow and col <= ecol)
+        -- strictly < ecol: ecol is the position AFTER the closing paren, and
+        -- an insert cursor sitting there is OUTSIDE the call — the surface
+        -- must not fire (Tony's report); the walk continues to any outer call
+        local before_close = row0 < erow or (row0 == erow and col < ecol)
         if after_open and before_close then
           local fn = node:field("function")[1]
           if fn then
@@ -132,11 +135,15 @@ local function ladder_result(st)
   if not node then
     return nil
   end
-  -- names block: every viable param of the active overload, current one lit
+  -- signature block: every viable param of the active overload (current one
+  -- lit) plus its return type, K-header style
   local params = {}
+  local ret = nil
   for _, p in ipairs(active_params(st)) do
     if p.kind == "param" then
       table.insert(params, { name = p.name, active = p == node })
+    elseif p.kind == "return" then
+      ret = p.type.display
     end
   end
   local config = require("typescope.config")
@@ -147,6 +154,7 @@ local function ladder_result(st)
     example_kind = "heuristic", -- LLM values decorate if already cached, never requested
     style = require("typescope.styles").get(cfg.ui.style),
     fn_name = st.fn_name,
+    ret = ret,
     badge = st.meta and ("[%d/%d]"):format(st.overload_idx, st.meta.overloads) or nil,
     params = params,
   })
