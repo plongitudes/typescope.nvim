@@ -245,7 +245,7 @@ populate_from_class = function(ctx, target, cls, tbuf, depth, sub_ancestry)
           return
         end
       else
-        -- beyond depth: leave a lazy hook for `r` / expand
+        -- beyond depth: leave a lazy hook for expand (<CR>/l)
         child.state.loaded = false
         child.source = {
           uri = vim.uri_from_bufnr(fbuf),
@@ -578,8 +578,8 @@ function M.function_scope(client, bufnr, win, token, pos)
   return roots, meta
 end
 
---- Lazily resolve a beyond-depth node (the `r` keymap / expanding an
---- unloaded node). Runs its own coroutine; cb fires on success.
+--- Lazily resolve a beyond-depth node (expanding an unloaded node).
+--- Runs its own coroutine; cb fires on success.
 ---@param client vim.lsp.Client
 --- Light evaluation for the typing surface: fetch pyright's ≈ view of a
 --- _lazy param (alias / typeshed-blocked chase) WITHOUT resolving its

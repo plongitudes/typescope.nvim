@@ -28,7 +28,6 @@
 ---@field collapse_all string
 ---@field toggle_examples string
 ---@field llm_generate string
----@field recurse string
 ---@field close string
 ---@field help string
 
@@ -114,7 +113,6 @@ local defaults = {
     toggle_examples = "e",
     docstring = "d",
     llm_generate = "E",
-    recurse = "r",
     close = "q",
     help = "?",
   },
@@ -204,7 +202,6 @@ local function validate(cfg)
     "toggle_examples",
     "docstring",
     "llm_generate",
-    "recurse",
     "close",
     "help",
   }) do

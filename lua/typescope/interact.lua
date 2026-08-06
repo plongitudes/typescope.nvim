@@ -30,7 +30,6 @@ local function help_lines(width, extra)
     { km.collapse_all .. " / " .. km.expand_all, "collapse / expand all" },
     { km.toggle_examples, "toggle examples" },
     { km.llm_generate, "llm examples (ollama)" },
-    { km.recurse, "recurse deeper" },
     { km.docstring, "toggle full docstring" },
     { km.close .. " / <Esc>", "close" },
     { km.help, "toggle this help" },
@@ -273,15 +272,6 @@ function M.attach(args)
     -- on every reopen
     require("typescope.examples").retry_misses(st.roots)
     generate()
-  end)
-  map(km.recurse, function()
-    local node = node_under_cursor()
-    if not node then
-      return
-    end
-    if not recurse_into(node) and not args.on_recurse then
-      vim.notify("typescope: recursion needs a live LSP session (not available in the spike)", vim.log.levels.INFO)
-    end
   end)
   map(km.close, args.on_close)
   map("<Esc>", args.on_close)
