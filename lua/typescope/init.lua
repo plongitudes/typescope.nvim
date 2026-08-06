@@ -33,7 +33,9 @@ function M._enable_hover()
         return
       end
       last_hover_key = key
-      M.open({ silent = true })
+      -- auto-open must never yank the cursor out of the code, whatever
+      -- ui.focus says; K on the open float is the focus gesture
+      M.open({ silent = true, focus = false })
     end,
   })
 end
@@ -178,8 +180,12 @@ end
 ---@param token typescope.CancelToken
 ---@param client vim.lsp.Client
 ---@param sig_result table? signatureHelp result (activeParameter only)
-local function show(srcbuf, roots, meta, token, client, sig_result)
+---@param focus boolean enter the float on open (ui.focus for explicit opens; always false for the CursorHold auto-open)
+local function show(srcbuf, roots, meta, token, client, sig_result, focus)
   local cfg = require("typescope.config").get()
+  -- captured before the float can take focus: with ui.focus the current
+  -- window is the float once open, and the hint must mark the source line
+  local srccursor = vim.api.nvim_win_get_cursor(0)
   local float = require("typescope.float")
   local render = require("typescope.render")
   local styles = require("typescope.styles")
@@ -249,8 +255,19 @@ local function show(srcbuf, roots, meta, token, client, sig_result)
     width = width,
     height = height,
     border = cfg.ui.border,
-    enter = false, -- first trigger opens unfocused; second focuses (hover convention)
+    enter = focus,
   })
+
+  -- land on the active param's primary row: with ui.focus the tree keys are
+  -- live immediately, so the cursor should start where the user is typing
+  if active_id then
+    for lnum = 1, #result.lines do
+      if result.line_to_node[lnum] == active_id then
+        vim.api.nvim_win_set_cursor(handle.win, { lnum, 0 })
+        break
+      end
+    end
+  end
 
   local ctrl = interact.attach({
     handle = handle,
@@ -282,8 +299,7 @@ local function show(srcbuf, roots, meta, token, client, sig_result)
   }
 
   -- quiet marker on the call line: TypeScope has data here
-  local cursor = vim.api.nvim_win_get_cursor(0)
-  require("typescope.hint").place(srcbuf, cursor[1] - 1)
+  require("typescope.hint").place(srcbuf, srccursor[1] - 1)
 
   -- pre-load the model in the background so the first E press is warm
   if cfg.ollama.enabled then
@@ -339,10 +355,12 @@ local function show(srcbuf, roots, meta, token, client, sig_result)
 end
 
 --- K-takeover entry: TypeScope when the symbol under the cursor is a
---- function, plain builtin hover otherwise. Pressing again focuses the float
---- (same double-K convention as builtin hover).
+--- function, plain builtin hover otherwise. With ui.focus (default) the
+--- float opens already focused; with focus = false this keeps the builtin
+--- double-K convention (first K opens, second K focuses).
 function M.hover()
   if session and vim.api.nvim_win_is_valid(session.handle.win) then
+    vim.wo[session.handle.win].cursorline = true
     vim.api.nvim_set_current_win(session.handle.win)
     return
   end
@@ -356,10 +374,11 @@ end
 
 --- Open the TypeScope float for the function under the cursor; if already
 --- open, focus it (arming the tree keymaps).
----@param opts? { silent?: boolean, on_unresolved?: fun() } silent: no notifications (hover trigger); on_unresolved: called instead when the pipeline can't produce a tree
+---@param opts? { silent?: boolean, on_unresolved?: fun(), focus?: boolean } silent: no notifications (hover trigger); on_unresolved: called instead when the pipeline can't produce a tree; focus: override ui.focus for this open
 function M.open(opts)
   opts = opts or {}
   if session and vim.api.nvim_win_is_valid(session.handle.win) then
+    vim.wo[session.handle.win].cursorline = true
     vim.api.nvim_set_current_win(session.handle.win)
     return
   end
@@ -404,7 +423,11 @@ function M.open(opts)
     if async.stale(token) then
       return
     end
-    show(bufnr, roots, meta_or_err, token, client, sig_result)
+    local focus = opts.focus
+    if focus == nil then
+      focus = require("typescope.config").get().ui.focus
+    end
+    show(bufnr, roots, meta_or_err, token, client, sig_result, focus)
     if open_token == token then
       open_token = nil -- pipeline done; the session owns the token now
     end

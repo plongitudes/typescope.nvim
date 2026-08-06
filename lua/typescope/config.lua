@@ -17,6 +17,7 @@
 ---@field border string|string[] any nvim float border value
 ---@field docstring "bottom"|"top"|false docstring section placement in the float
 ---@field hint boolean virtual-text "▸ typescope" marker on resolved call lines
+---@field focus boolean explicit opens enter the float; false = momentary hover convention (second K focuses)
 
 ---@class typescope.KeymapConfig
 ---@field docstring string toggle full docstring section
@@ -96,6 +97,12 @@ local defaults = {
     border = "rounded",
     docstring = "bottom", -- "bottom" | "top" | false (structure first, prose last)
     hint = true,
+    -- true: an explicit open (K / :TypeScope) enters the float — cursor
+    -- inside, tree keys live immediately. false: momentary hover convention —
+    -- the float opens unfocused (any cursor move dismisses it) and a second
+    -- K focuses it. The CursorHold auto-open (trigger = "hover") never
+    -- steals focus in either mode.
+    focus = true,
   },
   highlights = {},
   keymaps = {
@@ -184,6 +191,7 @@ local function validate(cfg)
     check("ui.docstring", cfg.ui.docstring, { "bottom", "top" })
   end
   check("ui.hint", cfg.ui.hint, "boolean")
+  check("ui.focus", cfg.ui.focus, "boolean")
 
   check("highlights", cfg.highlights, "table")
   check("keymaps", cfg.keymaps, "table")

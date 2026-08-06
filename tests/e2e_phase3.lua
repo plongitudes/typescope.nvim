@@ -584,6 +584,42 @@ for _, w in ipairs(all_floats()) do
   pcall(vim.api.nvim_win_close, w, true)
 end
 
+-- ui.focus: explicit opens enter the float by default; focus = false (per
+-- call or via config) restores the momentary hover convention
+local focus_srcwin = vim.api.nvim_get_current_win()
+local function focus_open(opts)
+  require("typescope").close()
+  vim.api.nvim_set_current_win(focus_srcwin)
+  for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+    if l:find("handle = create_server") then
+      vim.api.nvim_win_set_cursor(focus_srcwin, { i, 12 })
+    end
+  end
+  require("typescope").open(opts)
+  vim.wait(2000, function()
+    return float_lines() ~= nil
+  end)
+  local _, w = float_lines()
+  return w
+end
+
+local fw = focus_open()
+check("ui.focus default: float opens focused", fw ~= nil and vim.api.nvim_get_current_win() == fw)
+check("ui.focus default: cursorline armed", fw ~= nil and vim.wo[fw].cursorline)
+
+fw = focus_open({ focus = false })
+check("focus=false: source window keeps focus", fw ~= nil and vim.api.nvim_get_current_win() == focus_srcwin)
+
+require("typescope").open() -- second open focuses the momentary float
+check("focus=false: second open() focuses the float", fw ~= nil and vim.api.nvim_get_current_win() == fw)
+check("focus=false: cursorline armed on focus", fw ~= nil and vim.wo[fw].cursorline)
+
+require("typescope").setup({ ui = { focus = false } })
+fw = focus_open()
+check("ui.focus=false config: open() stays momentary", fw ~= nil and vim.api.nvim_get_current_win() == focus_srcwin)
+require("typescope").close()
+require("typescope").setup({})
+
 -- hover-backed evaluated leaves: alias annotations decorate with the
 -- evaluated type; unannotated params show pyright's inference
 for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
