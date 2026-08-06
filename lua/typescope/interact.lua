@@ -262,6 +262,43 @@ function M.attach(args)
   map(km.close, args.on_close)
   map("<Esc>", args.on_close)
 
+  -- j/k jump between interactive rows — params and expandable sub-items —
+  -- skipping display-only lines (detail blocks, wrapped continuations,
+  -- header/rule). Past the last node they fall back to plain movement so
+  -- the docstring section stays reachable and scrollable.
+  local function jump(dir)
+    local win = st.handle.win
+    local lnum = vim.api.nvim_win_get_cursor(win)[1]
+    local cur = st.result.line_to_node[lnum]
+    local target
+    local i = lnum + dir
+    while i >= 1 and i <= vim.api.nvim_buf_line_count(st.handle.buf) do
+      local id = st.result.line_to_node[i]
+      if id and id ~= cur then
+        target = i
+        break
+      end
+      i = i + dir
+    end
+    if target then
+      -- land on the node's PRIMARY line (a k arriving from below first hits
+      -- the last line of a wrapped/detailed run)
+      local id = st.result.line_to_node[target]
+      while target > 1 and st.result.line_to_node[target - 1] == id do
+        target = target - 1
+      end
+      vim.api.nvim_win_set_cursor(win, { target, 0 })
+    else
+      vim.cmd("normal! " .. (dir == 1 and "j" or "k"))
+    end
+  end
+  map("j", function()
+    jump(1)
+  end)
+  map("k", function()
+    jump(-1)
+  end)
+
   -- ledger (U6): the detail block follows the cursor. Re-render only when the
   -- node under the cursor changes; refresh(id) parks the cursor back on the
   -- node's primary row, and the id-equality guard turns the CursorMoved that

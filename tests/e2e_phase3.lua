@@ -526,6 +526,34 @@ do
         return not table.concat(float_lines() or {}, "\n"):find("│ = 30%.0")
       end, 50)
       check("ledger detail block leaves the abandoned row", swapped)
+
+      -- j/k are node motions: from timeout (detail block open under it) j
+      -- skips the block's info lines straight to returns; k jumps back to
+      -- timeout's primary row
+      -- last match: the header line also says "timeout"; the param row wins
+      local t2
+      for i, l in ipairs(float_lines()) do
+        if l:find("timeout") then
+          t2 = i
+        end
+      end
+      vim.api.nvim_win_set_cursor(lw, { t2, 0 })
+      vim.cmd("doautocmd CursorMoved")
+      vim.wait(500, function()
+        return table.concat(float_lines() or {}, "\n"):find("│ = 30%.0") ~= nil
+      end, 50)
+      local function cursor_line()
+        return vim.api.nvim_buf_get_lines(
+          vim.api.nvim_win_get_buf(lw),
+          vim.api.nvim_win_get_cursor(lw)[1] - 1,
+          vim.api.nvim_win_get_cursor(lw)[1],
+          false
+        )[1] or ""
+      end
+      vim.api.nvim_feedkeys("j", "x", false)
+      check("j skips info lines to the next node", cursor_line():find("returns") ~= nil)
+      vim.api.nvim_feedkeys("k", "x", false)
+      check("k jumps back to the previous node's primary row", cursor_line():find("timeout") ~= nil)
     end
     require("typescope").close()
   end
