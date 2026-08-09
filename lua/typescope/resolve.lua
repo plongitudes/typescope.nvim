@@ -82,6 +82,23 @@ local function class_at_location(ctx, loc, hops)
   return nil
 end
 
+--- True when a parsed signature carries no annotations at all — the tell for
+--- stub-typed packages (l24): the runtime .py pyright's source mapper prefers
+--- is untyped, and the real signatures live in a handwritten .pyi.
+---@param info { params: table[], return_type: TSNode? }
+---@return boolean
+local function unannotated(info)
+  if info.return_type then
+    return false
+  end
+  for _, p in ipairs(info.params) do
+    if p.type_node then
+      return false
+    end
+  end
+  return true
+end
+
 ---@param refs table[] annotation refs
 ---@return table type info for a node whose annotation these refs came from
 local function type_info(display, refs)
@@ -429,19 +446,31 @@ function M.function_scope(client, bufnr, win, token, pos)
         return roots, meta
       end
     end
+  end
 
-    -- Definition is a *runtime* question and may land on an alias assignment
-    -- (stdlib getpass = unix_getpass). Declaration asks the static universe:
-    -- for basedpyright that's the typeshed stub, whose annotated `def` parses
-    -- through the exact same path.
+  -- Definition is a *runtime* question and may land on an alias assignment
+  -- (stdlib getpass = unix_getpass, parses to nothing) or on untyped runtime
+  -- code shadowing a handwritten stub (loguru's add — pyright's source mapper
+  -- prefers the .py, so the parse sees zero annotations: l24). Declaration
+  -- asks the static universe instead: the stub's annotated `def` — or its
+  -- first @overload sibling, which the U4 scan below expands to the full
+  -- set — parses through the exact same path.
+  if not info or unannotated(info) then
     local decl = lsp.locate(client, bufnr, pos[1] - 1, pos[2], token, "textDocument/declaration")
     if async.stale(token) then
       return nil, "stale"
     end
     if decl and loc_key(decl) ~= loc_key(loc) then
-      fbuf = lsp.load_buf(decl.uri)
-      frow, fcol = lsp.range_start(fbuf, decl.range)
-      info = impl.function_info(fbuf, frow, fcol)
+      local dbuf = lsp.load_buf(decl.uri)
+      local drow, dcol = lsp.range_start(dbuf, decl.range)
+      local dinfo = impl.function_info(dbuf, drow, dcol)
+      -- an unannotated definition parse is only abandoned for a BETTER one:
+      -- declaration answering with another bare signature proves nothing
+      if dinfo and (not info or not unannotated(dinfo)) then
+        -- stub bodies are `...` — the runtime docstring rides along
+        dinfo.docstring = dinfo.docstring or (info and info.docstring)
+        fbuf, frow, fcol, info = dbuf, drow, dcol, dinfo
+      end
     end
   end
   if not info then
@@ -456,7 +485,9 @@ function M.function_scope(client, bufnr, win, token, pos)
   local overload_locs = impl.overloads and impl.overloads(fbuf, frow, fcol)
   if overload_locs then
     local uri = vim.uri_from_bufnr(fbuf)
-    local groups, headers, docstring = {}, {}, nil
+    -- seeded from info: after a declaration hop the @overload defs have `...`
+    -- bodies and the docstring lives on the runtime def that info carried over
+    local groups, headers, docstring = {}, {}, info.docstring
     local function shallow_child(name, kind, ann, default, mode)
       local child = model.new({
         name = name,

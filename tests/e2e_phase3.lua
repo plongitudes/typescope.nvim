@@ -142,6 +142,77 @@ if lines5 then
 end
 require("typescope").close()
 
+-- stub-typed package (l24): `attach` resolves (definition) to the untyped
+-- runtime def in sinks.py; the fully unannotated parse triggers the
+-- declaration hop into sinks_stub.py, where the U4 scan finds the @overload
+-- set — the loguru case (log.add showed one def with sink: Any)
+for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+  if l:find("attached = attach") then
+    vim.api.nvim_win_set_cursor(0, { i, 12 })
+  end
+end
+require("typescope").open()
+vim.wait(2000, function()
+  return float_lines() ~= nil
+end)
+local lines_l24 = float_lines()
+check("stub-typed package float opened via declaration hop", lines_l24 ~= nil)
+if lines_l24 then
+  local all_l24 = table.concat(lines_l24, "\n")
+  check("stub overload set surfaced", all_l24:find("%[1/2%]") ~= nil and all_l24:find("%[2/2%]") ~= nil)
+  -- client-side matching (h8h): the mock reports activeSignature=0 here
+  -- (no commas before the cursor), so the string literal "app.log" picks
+  -- the sink: str overload over sink: TextIO
+  check("client pick expands the str overload [2/2]", lines_l24[1]:find("%[2/2%]") ~= nil)
+  check("stub annotations replace Any", all_l24:find("sink") ~= nil and not all_l24:find("Any"))
+  check("runtime docstring rides the hop", all_l24:find("Register a sink") ~= nil)
+
+  -- d on an overload group's param (loguru's log.add case, 082): the group
+  -- root is the callable, not a param, so the jump must resolve one level
+  -- down — and land on sink's DEFINITION, not its prose mention in the
+  -- first paragraph ("Register a sink for…")
+  local ov_win = (function()
+    for _, w in ipairs(vim.api.nvim_list_wins()) do
+      if vim.api.nvim_win_get_config(w).relative ~= "" then
+        return w
+      end
+    end
+  end)()
+  vim.api.nvim_set_current_win(ov_win)
+  local ov_buf = vim.api.nvim_win_get_buf(ov_win)
+  for i, l in ipairs(vim.api.nvim_buf_get_lines(ov_buf, 0, -1, false)) do
+    if l:find("· sink ", 1, true) then
+      vim.api.nvim_win_set_cursor(ov_win, { i, 0 })
+      break
+    end
+  end
+  vim.api.nvim_feedkeys("d", "x", false)
+  local ov_l = vim.api.nvim_win_get_cursor(ov_win)[1]
+  local ov_text = vim.api.nvim_buf_get_lines(ov_buf, ov_l - 1, ov_l, false)[1] or ""
+  check("d on overload param lands on its docstring definition", ov_text:find("sink : file-like", 1, true) ~= nil)
+  vim.api.nvim_feedkeys("d", "x", false)
+end
+require("typescope").close()
+
+-- client-side matching (h8h) against scalar-only overloads: fetch("x") gets
+-- activeSignature=0 from the mock (no commas), and key: int can never take a
+-- string — the str overload wins
+for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+  if l:find("fetch2 = fetch") then
+    vim.api.nvim_win_set_cursor(0, { i, 10 })
+  end
+end
+require("typescope").open()
+vim.wait(2000, function()
+  return float_lines() ~= nil
+end)
+local lines_h8h = float_lines()
+check("client-match float opened", lines_h8h ~= nil)
+if lines_h8h then
+  check("string literal disqualifies key: int, picks [2/2]", lines_h8h[1]:find("%[2/2%]") ~= nil)
+end
+require("typescope").close()
+
 -- unified float (U1): single window with header + tree + docstring sections
 local function all_floats()
   local out = {}
@@ -181,6 +252,33 @@ if ulines then
   check("d expands full docstring", expanded:find("considerable length") ~= nil)
   vim.api.nvim_feedkeys("d", "x", false)
   check("d collapses again", not table.concat(float_lines(), "\n"):find("considerable length"))
+
+  -- d from a param row jumps to that param's definition in the docstring,
+  -- movement inside the section is plain (k = one line, no ledger bounce),
+  -- and a second d folds the section and returns to the row it left
+  local ts_buf2 = vim.api.nvim_win_get_buf(ts_win)
+  local function cursor_text()
+    local l = vim.api.nvim_win_get_cursor(ts_win)[1]
+    return l, vim.api.nvim_buf_get_lines(ts_buf2, l - 1, l, false)[1] or ""
+  end
+  for i, l in ipairs(vim.api.nvim_buf_get_lines(ts_buf2, 0, -1, false)) do
+    -- the exact row ("· timeout  float"): plain "timeout" also hits the
+    -- header and config's timeout_ms child
+    if l:find("· timeout ", 1, true) then
+      vim.api.nvim_win_set_cursor(ts_win, { i, 0 })
+      break
+    end
+  end
+  vim.api.nvim_feedkeys("d", "x", false)
+  local dl, dtext = cursor_text()
+  check("d jumps to the hovered param's docstring definition", dtext:find("timeout : float", 1, true) ~= nil)
+  vim.api.nvim_feedkeys("k", "x", false)
+  local kl = vim.api.nvim_win_get_cursor(ts_win)[1]
+  check("k inside the docstring moves exactly one line", kl == dl - 1)
+  vim.api.nvim_feedkeys("d", "x", false)
+  local _, back = cursor_text()
+  check("d returns to the param row it left", back:find("timeout", 1, true) ~= nil)
+  check("return trip folds the docstring", not table.concat(float_lines(), "\n"):find("Seconds to wait"))
 
   -- active param (mock always reports 0 → config) renders TypeScopeActive
   local ts_buf = vim.api.nvim_win_get_buf(ts_win)
@@ -426,6 +524,27 @@ do
     end
     vim.api.nvim_buf_set_lines(bufnr, frow - 1, frow, false, { "fetched = fetch(1)" })
     vim.cmd("silent write")
+    vim.cmd("doautocmd InsertLeave")
+
+    -- client-side matching (h8h) in the ladder: cursor inside a string arg,
+    -- where the mock's word-at answer yields no signatureHelp signal worth
+    -- trusting (activeSignature=0 via the callee fallback) — the literal
+    -- kind still picks the sink: str overload
+    for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+      if l:find("attached = attach") then
+        vim.api.nvim_win_set_cursor(0, { i, 20 }) -- inside "app.log"
+      end
+    end
+    require("typescope.insert")._update()
+    local str_matched = vim.wait(3000, function()
+      local ww = insert_float()
+      if not ww then
+        return false
+      end
+      local h = table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(ww), 0, -1, false), "\n")
+      return h:find("%[2/2%]") ~= nil
+    end, 100)
+    check("ladder client-matches the str overload inside a string arg", str_matched)
     vim.cmd("doautocmd InsertLeave")
   end
 

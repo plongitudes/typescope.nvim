@@ -72,6 +72,7 @@ local roots = {
       { name = "mystery", type = { display = "?", category = "unresolved" } },
       { name = "port", type = { display = "int", category = "builtin" }, default = "8000" },
       { name = "uds", type = { display = "str | None", category = "generic" }, default = "None" },
+      { name = "level", type = { display = "int", category = "builtin" }, default = "..." },
     },
   }),
 }
@@ -82,6 +83,7 @@ check("method skipped", roots[1].children[2].example.heuristic == nil)
 check("unresolved skipped", roots[1].children[3].example.heuristic == nil)
 check("real default suppresses example", roots[1].children[4].example.heuristic == nil)
 check("None default still gets example", roots[1].children[5].example.heuristic == '"example"')
+check("stub ... default still gets example", roots[1].children[6].example.heuristic == "42")
 
 -- ollama prompt/parse round trip
 local ollama = require("typescope.examples.ollama")
@@ -183,7 +185,21 @@ do
   local f5 = forest()
   examples.llm(f5, token, function() end)
   check("in-flight batch not duplicated by reopen", #calls == 3 and deferred ~= nil)
+  -- 40u: the float open at landing time hears about the late batch through
+  -- the landed subscription, and apply_cache copies the values onto its
+  -- (fresh, unshared) tree — f5 was skipped by the dedup and got nothing
+  local landed = 0
+  examples.on_landed(function()
+    landed = landed + 1
+  end)
   deferred.cb('a = 7\nb = "late"')
+  check("late batch notifies the subscriber", landed == 1)
+  check(
+    "apply_cache copies late values onto the reopened tree",
+    examples.apply_cache(f5) == true and f5[1].example.llm == "7" and f5[2].example.llm == '"late"'
+  )
+  check("apply_cache no-ops when the tree already has the values", examples.apply_cache(f5) == false)
+  examples.on_landed(nil)
   local f6 = forest()
   respond = function()
     return ""

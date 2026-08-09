@@ -17,6 +17,12 @@ local llm_cache = {}
 -- purpose (they pay for the next open) — a reopen mid-generation must reuse
 -- them, not duplicate them.
 local in_flight = {}
+-- the one open float subscribes here (40u): a reopen mid-generation skips
+-- in-flight keys, so when those batches land there is no on_progress aimed
+-- at the new float — this callback is how it hears about them. It fires for
+-- every landed batch (the current float's own included), making it the
+-- single repaint path for arriving values.
+local landed_cb = nil
 
 ---@param node typescope.Node
 ---@return string
@@ -28,6 +34,31 @@ end
 function M._clear_llm_cache()
   llm_cache = {}
   in_flight = {}
+end
+
+--- Subscribe the current float to batch landings; nil unsubscribes. One
+--- subscriber only: floats are single-instance and re-subscribe on open.
+---@param cb? fun()
+function M.on_landed(cb)
+  landed_cb = cb
+end
+
+--- Fill node.example.llm from the session cache across the forest (MISS
+--- sentinels excluded). Returns true when anything NEW landed — false when
+--- the nodes already carry the values, as they do when a late batch wrote
+--- straight into a tree the resolve cache shares with the current float.
+---@param roots typescope.Node[]
+---@return boolean
+function M.apply_cache(roots)
+  local filled = false
+  model.walk(roots, function(node)
+    local cached = llm_cache[cache_key(node)]
+    if cached and node.example.llm ~= cached then
+      node.example.llm = cached
+      filled = true
+    end
+  end)
+  return filled
 end
 
 --- Forget MISS sentinels for this forest — an explicit E press is permission
@@ -46,12 +77,14 @@ end
 --- methods, and unresolved types get none — examples belong on concrete
 --- fields. Fields with a real default are also skipped: the default is
 --- already the best possible example (a `None` default doesn't count — a
---- concrete example still adds information there).
+--- concrete example still adds information there, and neither does a stub's
+--- `...`, which only says "has a default, not telling": every param of a
+--- stub-only package like loguru carries one).
 ---@param roots typescope.Node[]
 ---@param node typescope.Node
 ---@return boolean
 local function eligible(node)
-  local has_real_default = node.default ~= nil and node.default ~= "None"
+  local has_real_default = node.default ~= nil and node.default ~= "None" and node.default ~= "..."
   -- _lazy placeholders are unresolved structure (an alias name standing in
   -- for a type nobody has chased yet) — an example for one is speculation,
   -- and prompting a slow local model for speculation is what made K on
@@ -191,6 +224,9 @@ function M.llm(roots, token, done, on_progress)
         any_filled = true
         if on_progress then
           on_progress(batches_done, batches_total)
+        end
+        if landed_cb then
+          landed_cb()
         end
       end
       next_batch()

@@ -327,6 +327,33 @@ eq_lines(
   }
 )
 
+-- the docstring section's line range rides the result so interact can give
+-- it plain-movement semantics and jump `d` presses into it
+do
+  local bottom = render.render(section_tree, opts({
+    style = styles.get("rounded"),
+    max_width = 40,
+    show_examples = false,
+    header = "f(x, *, y=…) -> str",
+    docstring = "First line of prose.\n\nSecond paragraph here.",
+    docstring_expanded = false,
+    docstring_pos = "bottom",
+  }))
+  check("doc range: collapsed bottom section is the last line", bottom.doc_start == 5 and bottom.doc_end == 5)
+  local top = render.render(section_tree, opts({
+    style = styles.get("rounded"),
+    max_width = 40,
+    show_examples = false,
+    header = "f(x) -> str",
+    docstring = "First line of prose.\n\nSecond paragraph here.",
+    docstring_expanded = true,
+    docstring_pos = "top",
+  }))
+  check("doc range: expanded top section spans lines 2-4", top.doc_start == 2 and top.doc_end == 4)
+  local none = render.render(section_tree, opts({ show_examples = false }))
+  check("doc range: absent without a docstring", none.doc_start == nil and none.doc_end == nil)
+end
+
 -- 10. table layout (U5): column grid — name | */ | type | default | example |
 -- origin — alternating row backgrounds, wrapped cells continue in-column
 do

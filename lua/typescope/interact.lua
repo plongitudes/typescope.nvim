@@ -30,7 +30,7 @@ local function help_lines(width, extra)
     { km.collapse_all .. " / " .. km.expand_all, "collapse / expand all" },
     { km.toggle_examples, "toggle examples" },
     { km.llm_generate, "llm examples (ollama)" },
-    { km.docstring, "toggle full docstring" },
+    { km.docstring, "docstring: jump in / collapse back" },
     { km.close .. " / <Esc>", "close" },
     { km.help, "toggle this help" },
   }
@@ -204,10 +204,89 @@ function M.attach(args)
       refresh(st.help_return_id)
     end
   end)
+  ---@param lnum integer
+  local function in_docstring(lnum)
+    local res = st.result
+    return res and res.doc_start ~= nil and lnum >= res.doc_start and lnum <= res.doc_end
+  end
+
+  -- Locate a param's definition line inside the rendered docstring section.
+  -- Docstring formats vary — numpy/loguru ("name : type"), google
+  -- ("name: desc" / "name (type):"), sphinx (":param name:") — so try
+  -- definition-shaped patterns across the whole section first and only then
+  -- settle for a whole-word mention (prose references the param long before
+  -- the Parameters block defines it).
+  ---@param name string
+  ---@return integer? lnum
+  local function find_param_line(name)
+    local res = st.result
+    if not res.doc_start then
+      return nil
+    end
+    local esc = vim.pesc(name)
+    local patterns = {
+      "^%s*%*?%*?" .. esc .. "%s*[:(]", -- name : type / name(type): / **kwargs :
+      "^%s*:param%s+[^:]-" .. esc .. "%s*:", -- :param name: / :param type name:
+      "^%s*%*?%*?" .. esc .. "%f[%W]", -- line opens with the bare name
+      "%f[%w]" .. esc .. "%f[%W]", -- any whole-word mention
+    }
+    for _, pat in ipairs(patterns) do
+      for lnum = res.doc_start, res.doc_end do
+        if res.lines[lnum]:find(pat) then
+          return lnum
+        end
+      end
+    end
+    return nil
+  end
+
   map(km.docstring, function()
-    if st.opts.docstring and st.opts.docstring_pos then
-      st.opts.docstring_expanded = not st.opts.docstring_expanded
-      refresh()
+    if st.show_help then
+      return
+    end
+    local doc = st.opts.docstring
+    if not doc or doc == "" then
+      vim.notify("typescope: no docstring available", vim.log.levels.INFO)
+      return
+    end
+    if not st.opts.docstring_pos then
+      vim.notify("typescope: docstring section disabled (ui.docstring = false)", vim.log.levels.INFO)
+      return
+    end
+    local lnum = vim.api.nvim_win_get_cursor(st.handle.win)[1]
+    if in_docstring(lnum) then
+      -- second press from inside: fold back to the first paragraph and
+      -- return to the row we came from (mirrors the help overlay's round trip)
+      st.opts.docstring_expanded = false
+      refresh(st.doc_return_id)
+      return
+    end
+    local node = node_under_cursor()
+    st.doc_return_id = node and node.id or nil
+    st.opts.docstring_expanded = true
+    -- ledger: fold the detail block before measuring, or the CursorMoved
+    -- that our jump fires re-renders without it and shifts every doc line
+    st.opts.detail_id = nil
+    refresh()
+    -- hovering a param jumps to where the docstring defines it; sub-items
+    -- resolve upward since the docstring documents top-level params. That
+    -- param is the first param-kind node on the id path — the root for
+    -- plain calls, but one level down for overload groups ("overloadN.sink"
+    -- — the group row is the callable itself, not a param)
+    local target = st.result.doc_start
+    if node then
+      local prefix
+      for seg in node.id:gmatch("[^.]+") do
+        prefix = prefix and (prefix .. "." .. seg) or seg
+        local n = model.find(st.roots, prefix)
+        if n and n.kind == "param" then
+          target = find_param_line(n.name) or target
+          break
+        end
+      end
+    end
+    if target then
+      vim.api.nvim_win_set_cursor(st.handle.win, { target, 0 })
     end
   end)
   -- Single-flight LLM generation, shared by the E keymap and the auto-open
@@ -256,9 +335,9 @@ function M.attach(args)
       if spinner and batches_total and batches_total > 1 then
         spinner.set_label(("generating %d/%d"):format(math.min(batches_done + 1, batches_total), batches_total))
       end
-      if vim.api.nvim_win_is_valid(st.handle.win) then
-        refresh()
-      end
+      -- no refresh here: batch repaints ride the examples module's landed
+      -- subscription (40u) — one path for this float's own batches and a
+      -- previous open's late ones alike
     end)
   end
 
@@ -279,7 +358,9 @@ function M.attach(args)
   -- j/k jump between interactive rows — params and expandable sub-items —
   -- skipping display-only lines (detail blocks, wrapped continuations,
   -- header/rule). Past the last node they fall back to plain movement so
-  -- the docstring section stays reachable and scrollable.
+  -- the docstring section stays reachable and scrollable. Inside the
+  -- docstring it's all plain movement: node-jumping there made k bounce
+  -- from mid-prose back to the ledger (every doc line is "skippable").
   local function jump(dir)
     if st.show_help then
       vim.cmd("normal! " .. (dir == 1 and "j" or "k"))
@@ -287,6 +368,10 @@ function M.attach(args)
     end
     local win = st.handle.win
     local lnum = vim.api.nvim_win_get_cursor(win)[1]
+    if in_docstring(lnum) then
+      vim.cmd("normal! " .. (dir == 1 and "j" or "k"))
+      return
+    end
     local cur = st.result.line_to_node[lnum]
     local target
     local i = lnum + dir

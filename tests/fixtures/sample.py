@@ -38,6 +38,13 @@ def create_server(config: ServerConfig, timeout: float = 30.0) -> Response:
     """Spin up the demo service.
 
     Prose continues at considerable length in the second paragraph.
+
+    Parameters
+    ----------
+    config : ServerConfig
+        Connection settings for the demo service.
+    timeout : float
+        Seconds to wait before giving up on startup.
     """
     ...
 
@@ -72,7 +79,9 @@ def fetch(key, default=None):
 
 handle = create_server(None, 1.0)
 fetched = fetch(1)
+fetch2 = fetch("x")
 result = update_user(None)
 secret = ask("token: ")
+attached = attach("app.log")
 configured = configure("auto", 1)
 sent = send(None)

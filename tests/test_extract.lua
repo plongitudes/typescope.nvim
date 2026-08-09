@@ -301,4 +301,35 @@ local cls_doc = py.type_at('class D:\n    """Class doc."""\n\n    x: int\n', 0, 
 check("class docstring extracted", cls_doc.docstring == "Class doc.")
 check("class docstring does not eat fields", #cls_doc.fields == 1)
 
+---------------------------------------------------------------- call_args
+local call_src = [[
+value = process("txt", 3, -2.5, flag=True, mode=None, extra=obj)
+empty = process()
+spread = process(*parts)
+]]
+local ca = py.call_args(call_src, 0, 17) -- inside "txt"
+check(
+  "call_args positional literal kinds",
+  ca ~= nil
+    and #ca.positional == 3
+    and ca.positional[1].kind == "string"
+    and ca.positional[2].kind == "integer"
+    and ca.positional[3].kind == "float"
+)
+check(
+  "call_args keyword kinds (unjudgeable = other)",
+  ca ~= nil
+    and #ca.keywords == 3
+    and ca.keywords[1].name == "flag"
+    and ca.keywords[1].kind == "bool"
+    and ca.keywords[2].kind == "none"
+    and ca.keywords[3].kind == "other"
+)
+local ca_callee = py.call_args(call_src, 0, 9) -- on the callee name itself
+check("call_args from the callee position", ca_callee ~= nil and #ca_callee.positional == 3)
+local ca_empty = py.call_args(call_src, 1, 9)
+check("call_args empty call", ca_empty ~= nil and #ca_empty.positional == 0 and #ca_empty.keywords == 0)
+check("call_args splat defeats positional counting", py.call_args(call_src, 2, 10) == nil)
+check("call_args not-a-call", py.call_args("x = 1\n", 0, 0) == nil)
+
 print(failures == 0 and "EXTRACT ALL PASS" or ("EXTRACT " .. failures .. " FAILURES"))

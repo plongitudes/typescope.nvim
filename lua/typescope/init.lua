@@ -170,6 +170,7 @@ function M.close()
   local s = session
   session = nil
   require("typescope.async").cancel(s.token)
+  require("typescope.examples").on_landed(nil)
   pcall(vim.api.nvim_del_augroup_by_id, s.augroup)
   require("typescope.float").close(s.handle)
 end
@@ -200,10 +201,21 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
   local header = meta and meta.header or nil
   local active_id = nil -- ledger: the detail block opens on the active param
   if meta and meta.overloads then
-    -- overloads (U4): stacked groups — expand the one basedpyright says
-    -- matches the arguments so far, collapse the rest; the active-param
-    -- flag lives on that group's children. Header follows the same choice.
-    local idx = math.min((sig_result and sig_result.activeSignature or 0) + 1, meta.overloads)
+    -- overloads (U4): stacked groups — expand the one that matches the
+    -- arguments so far, collapse the rest; the active-param flag lives on
+    -- that group's children. Header follows the same choice. The server's
+    -- activeSignature wins when it says something; 0 is ambiguous
+    -- (basedpyright's constant answer), so the written args break the tie
+    -- client-side (h8h).
+    local server_idx = sig_result and sig_result.activeSignature or 0
+    local idx
+    if server_idx > 0 then
+      idx = math.min(server_idx + 1, meta.overloads)
+    else
+      local impl = require("typescope.extract").get(vim.bo[srcbuf].filetype)
+      local args = impl and impl.call_args and impl.call_args(srcbuf, srccursor[1] - 1, srccursor[2])
+      idx = require("typescope.match").pick(roots, args) or 1
+    end
     for i, root in ipairs(roots) do
       root.state.expanded = i == idx
       for _, child in ipairs(root.children) do
@@ -298,6 +310,19 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
     augroup = augroup,
     srcbuf = srcbuf,
   }
+
+  -- LLM batches land asynchronously — this float's own AND late ones from a
+  -- previous open whose keys the in-flight dedup skipped (40u). Subscribe as
+  -- the single repaint path: copy cached values onto this tree (a fresh-tree
+  -- reopen needs the copy; a resolve-cache-shared tree already has them) and
+  -- re-render.
+  local examples = require("typescope.examples")
+  examples.on_landed(function()
+    if session and session.handle.win == handle.win and vim.api.nvim_win_is_valid(handle.win) then
+      examples.apply_cache(roots)
+      ctrl.refresh()
+    end
+  end)
 
   -- quiet marker on the call line: TypeScope has data here
   require("typescope.hint").place(srcbuf, srccursor[1] - 1)

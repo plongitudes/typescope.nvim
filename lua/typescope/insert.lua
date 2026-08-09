@@ -265,11 +265,20 @@ local function refresh_active()
         end
         local ok_result = result and result.signatures and #result.signatures > 0 and result or nil
         local changed = false
-        -- follow only on a real answer: servers return nil at some positions
-        -- (basedpyright: inside string arguments) and that must not snap the
-        -- display back to overload 1
-        if st.meta and st.meta.overloads and ok_result then
-          local idx = math.min((ok_result.activeSignature or 0) + 1, st.meta.overloads)
+        if st.meta and st.meta.overloads then
+          -- a nonzero activeSignature is a real server answer and wins; 0 or
+          -- no answer at all (basedpyright: inside string arguments) are both
+          -- ambiguous — match the written args client-side (h8h). A nil pick
+          -- keeps the current overload, so the display never snaps back to 1.
+          local server_idx = ok_result and ok_result.activeSignature or 0
+          local idx
+          if server_idx > 0 then
+            idx = math.min(server_idx + 1, st.meta.overloads)
+          else
+            local impl = require("typescope.extract").get(vim.bo[st.srcbuf].filetype)
+            local args = impl and impl.call_args and impl.call_args(st.srcbuf, pos[1] - 1, pos[2])
+            idx = require("typescope.match").pick(st.roots, args) or st.overload_idx
+          end
           if idx ~= st.overload_idx then
             st.overload_idx = idx
             changed = true

@@ -26,10 +26,25 @@ function M.cmd(fixture_dir)
     end
   end
 
-  local function find_by_patterns(word, patterns)
+  -- pyright's source mapper in miniature: definition answers from runtime
+  -- files even when a stub exists; declaration prefers the stub universe.
+  -- Fixtures mark their stub role with "_stub" in the filename.
+  local function ordered(stub_first)
+    local sorted = vim.list_slice(files)
+    table.sort(sorted, function(a, b)
+      local astub, bstub = a:find("_stub") ~= nil, b:find("_stub") ~= nil
+      if astub ~= bstub then
+        return astub == stub_first
+      end
+      return a < b
+    end)
+    return sorted
+  end
+
+  local function find_by_patterns(word, patterns, search_files)
     for _, pat_tpl in ipairs(patterns) do
       local pat = pat_tpl:gsub("WORD", word)
-      for _, file in ipairs(files) do
+      for _, file in ipairs(search_files) do
         for lnum, line in ipairs(vim.fn.readfile(file)) do
           if line:match(pat) then
             local col = line:find(word, 1, true) - 1
@@ -50,10 +65,10 @@ function M.cmd(fixture_dir)
   -- alias assignment wins over the def it aliases. declaration is the static
   -- answer: class/def sites only (the "stub" universe).
   local function find_definition(word)
-    return find_by_patterns(word, { "^WORD%s*=", "^%s*class%s+WORD%f[%W]", "^%s*def%s+WORD%f[%W]" })
+    return find_by_patterns(word, { "^WORD%s*=", "^%s*class%s+WORD%f[%W]", "^%s*def%s+WORD%f[%W]" }, ordered(false))
   end
   local function find_declaration(word)
-    return find_by_patterns(word, { "^%s*class%s+WORD%f[%W]", "^%s*def%s+WORD%f[%W]" })
+    return find_by_patterns(word, { "^%s*class%s+WORD%f[%W]", "^%s*def%s+WORD%f[%W]" }, ordered(true))
   end
 
   -- naive signatureHelp: every single-line def of the word becomes one

@@ -242,6 +242,54 @@ function M.overloads(src, row, col)
   return sigs
 end
 
+--- Written arguments of the call whose node contains (row, col) — the callee
+--- name and anywhere inside the argument list both land inside the call node.
+--- Classifies each argument's LITERAL kind for client-side overload matching
+--- (h8h); any expression the parse can't judge (a variable, a call, a
+--- container) is kind "other" and never disqualifies a candidate. Splat
+--- arguments (*xs / **kw) defeat positional counting entirely → nil.
+---@param src integer|string
+---@param row integer 0-based
+---@param col integer 0-based byte
+---@return { positional: { kind: string }[], keywords: { name: string, kind: string }[] }?
+function M.call_args(src, row, col)
+  local call = walk_up(node_at(src, row, col), "call")
+  local args = call and field1(call, "arguments")
+  if not args then
+    return nil
+  end
+  local function kind_of(n)
+    local t = n and n:type()
+    if t == "string" or t == "concatenated_string" then
+      return "string"
+    elseif t == "true" or t == "false" then
+      return "bool"
+    elseif t == "none" then
+      return "none"
+    elseif t == "integer" or t == "float" then
+      return t
+    elseif t == "unary_operator" then
+      -- -3 / +2.5 keep their numeric kind
+      local inner = kind_of(field1(n, "argument"))
+      return (inner == "integer" or inner == "float") and inner or "other"
+    end
+    return "other"
+  end
+  local out = { positional = {}, keywords = {} }
+  for i = 0, args:named_child_count() - 1 do
+    local a = args:named_child(i)
+    local t = a:type()
+    if t == "keyword_argument" then
+      table.insert(out.keywords, { name = text(field1(a, "name"), src), kind = kind_of(field1(a, "value")) })
+    elseif t == "list_splat" or t == "dictionary_splat" then
+      return nil
+    elseif t ~= "comment" then
+      table.insert(out.positional, { kind = kind_of(a) })
+    end
+  end
+  return out
+end
+
 --- When (row, col) sits on the NAME of a type-alias definition, return the
 --- RHS node to be parsed as an annotation. Recognized shapes:
 ---   X = SomeClass          X = A | B          X = Optional[Thing]

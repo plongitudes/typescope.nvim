@@ -16,6 +16,8 @@
 ---@field ts_injections typescope.Injection[] annotation/default/example spans for real syntax highlighting
 ---@field line_to_node table<integer, string> 1-indexed line -> node id (continuation lines included)
 ---@field width integer display width of the widest line
+---@field doc_start? integer first line of the docstring section (1-indexed, content only)
+---@field doc_end? integer last line of the docstring section
 
 ---@class typescope.RenderOpts
 ---@field style typescope.Charset
@@ -318,6 +320,7 @@ function M.render(roots, opts)
     if not opts.docstring_expanded then
       text = text:match("^(.-)\n%s*\n") or text -- first paragraph
     end
+    result.doc_start = #result.lines + 1
     for _, doc_line in ipairs(vim.split(vim.trim(text), "\n")) do
       if doc_line == "" then
         emit(new_line(), nil)
@@ -325,6 +328,7 @@ function M.render(roots, opts)
         emit_prose(doc_line, "TypeScopeDocstring")
       end
     end
+    result.doc_end = #result.lines
   end
 
   local has_doc = opts.docstring ~= nil and opts.docstring ~= "" and opts.docstring_pos ~= nil and opts.docstring_pos ~= false
