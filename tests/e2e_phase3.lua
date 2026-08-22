@@ -974,9 +974,13 @@ do
     server:accept(sock)
     sock:read_start(function(_, chunk)
       if chunk then
+        -- streamed transport: JSON-lines, one object per chunk, done=true
+        -- last. The literal newlines in the text are escaped by json.encode,
+        -- so each object still occupies exactly one line of the framing.
         local body = vim.json.encode({
           response = 'config.host = "llm-host.example.io"\nconfig.port = 8443\nconfig.timeout_ms = 250\ntimeout = 12.5',
-        })
+          done = false,
+        }) .. "\n" .. vim.json.encode({ response = "", done = true }) .. "\n"
         sock:write(
           "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " .. #body .. "\r\n\r\n" .. body
         )
@@ -1002,8 +1006,11 @@ check("float for LLM test opened", llm_win ~= nil)
 if llm_win then
   vim.api.nvim_set_current_win(llm_win)
   vim.api.nvim_feedkeys("E", "x", false)
+  -- wait for BOTH: values uncover progressively as the reveal's blocks fall
+  -- (38c), so the first one on screen doesn't mean the row has settled
   vim.wait(4000, function()
-    return table.concat(float_lines() or {}, "\n"):find("llm%-host") ~= nil
+    local now = table.concat(float_lines() or {}, "\n")
+    return now:find("llm%-host") ~= nil and now:find("8443") ~= nil
   end)
   local all9 = table.concat(float_lines() or {}, "\n")
   check("LLM values rendered after E", all9:find("llm%-host") ~= nil and all9:find("8443") ~= nil)
@@ -1016,9 +1023,13 @@ if llm_win then
 end
 require("typescope").close()
 
--- silent ollama (accepts, never answers): timeout → auto-retry → honest
--- timeout message, not "unreachable". Cache cleared first or the E press is
--- served from the previous test's values and no request ever fires.
+-- silent ollama (accepts, never answers): stall → auto-retry → honest stall
+-- message, not "unreachable". Cache cleared first or the E press is served
+-- from the previous test's values and no request ever fires.
+--
+-- Timing: curl's low-speed check trips at --speed-time + ~2.1s fixed overhead
+-- (measured), so timeout_ms=1000 is ~4.1s per attempt and ~8.2s across the
+-- retry. The wait below has to clear that, not the nominal 1s.
 require("typescope.examples")._clear_llm_cache()
 local silent_port
 do
@@ -1049,13 +1060,17 @@ if slow_win then
   end
   vim.api.nvim_set_current_win(slow_win)
   vim.api.nvim_feedkeys("E", "x", false)
-  vim.wait(6000, function()
+  -- Generous on purpose: ~1s warmup probe, then 4.1s + 4.1s across the retry,
+  -- and the whole thing shifts under load. A tight window here fails by
+  -- arriving late, not by being wrong, which is the worst kind of red.
+  vim.wait(30000, function()
     return captured ~= nil
   end)
   vim.notify = orig_notify
   check(
-    "timeout reported as timeout (after one retry), not unreachable",
-    captured ~= nil and captured:find("timed out twice") ~= nil
+    "stall reported as a stall (after one retry), not unreachable",
+    captured ~= nil and captured:find("went silent") ~= nil and captured:find("twice") ~= nil,
+    tostring(captured)
   )
 end
 require("typescope").close()

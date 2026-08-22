@@ -4,7 +4,7 @@
 ---@field host string
 ---@field port integer
 ---@field model string
----@field timeout_ms integer
+---@field timeout_ms integer stall timeout: how long ollama may go SILENT, not a total budget
 ---@field keep_alive string how long ollama keeps the model resident after a request (RAM tradeoff)
 
 ---@class typescope.UiConfig
@@ -76,10 +76,22 @@ local defaults = {
     host = "localhost",
     port = 11434,
     model = "qwen2.5-coder:3b",
+    -- How long the server may go completely quiet before we give up -- a
+    -- stall timeout, not a total budget. The reply is streamed, so a slow
+    -- machine keeps bytes flowing and simply fills in slower; only a wedged
+    -- server trips this. Sizing it by tokens/sec is therefore unnecessary
+    -- (an 8GB M1 measured 8-12 tok/s, which a total budget could not fit).
+    -- curl's low-speed check adds ~2s of fixed overhead before it engages,
+    -- and one retry follows, so a wedged server is reported at roughly
+    -- 2*(timeout_ms + 2s).
     timeout_ms = 8000,
     -- model residency after a request: longer = warm E presses all session,
-    -- shorter = the ~2GB comes back sooner on small-RAM machines
-    keep_alive = "30m",
+    -- shorter = the ~2GB comes back sooner on small-RAM machines. Matches
+    -- ollama's own OLLAMA_KEEP_ALIVE default. This is also the ONLY thing
+    -- that reclaims the model on a server we borrowed rather than spawned —
+    -- see M.shutdown — so the default stays conservative; raise it in your
+    -- own config if you have the RAM.
+    keep_alive = "5m",
   },
   ui = {
     style = "rounded", -- "unicode" | "ascii" | "minimal" | "rounded"

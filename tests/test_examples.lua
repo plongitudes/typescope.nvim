@@ -210,6 +210,68 @@ do
     #calls == 3 and f6[1].example.llm == "7" and f6[2].example.llm == '"late"'
   )
 
+  -- 38c: the pending set a run claims is the WHOLE queue, not just the eight
+  -- leaves in the air. Two things ride on it: a reopen mid-run must skip
+  -- leaves the run hasn't dispatched yet, and every not-yet-landed leaf
+  -- breathes (render asks through opts.example_pending).
+  examples._clear_llm_cache()
+  respond = nil
+  local function wide()
+    local nodes = {}
+    for i = 1, 10 do
+      table.insert(nodes, model.new({ name = "p" .. i, kind = "param", type = { display = "int", category = "builtin" } }))
+    end
+    return nodes
+  end
+  local w1 = wide()
+  local before = #calls
+  examples.llm(w1, token, function() end)
+  check("wide run dispatches one batch of 8", #calls == before + 1 and #calls[#calls] == 8)
+  check("dispatched leaf is awaiting", examples.awaiting(w1[1]))
+  check("queued-but-undispatched leaf is awaiting too", examples.awaiting(w1[10]))
+  check("any_awaiting true while values are coming", examples.any_awaiting())
+
+  examples.llm(wide(), token, function() end)
+  check("reopen mid-run re-asks nothing, queue tail included", #calls == before + 1)
+
+  local batch1 = deferred
+  deferred = nil
+  batch1.cb("p1 = 1\np2 = 2\np3 = 3\np4 = 4\np5 = 5\np6 = 6\np7 = 7\np8 = 8")
+  check("landed leaf stops being pending", not examples.awaiting(w1[1]) and w1[1].example.llm == "1")
+  check("the queue tail is still pending", examples.awaiting(w1[10]) and examples.any_awaiting())
+
+  -- a transport failure aborts the chain: leaves nobody will ever ask about
+  -- must be released, or they stay unaskable (and breathing) all session
+  deferred.cb(nil)
+  check("aborted chain releases the whole queue", not examples.any_awaiting() and not examples.awaiting(w1[10]))
+  respond = function()
+    return ""
+  end
+  examples.llm(wide(), token, function() end)
+  check("transport failure leaves no sentinel — the tail is re-asked", #calls == before + 3)
+
+  -- a batch that fills NOTHING still has to reach the float: its leaves
+  -- stopped being pending, so the placeholder bars 38c painted for them are
+  -- stale the moment it resolves. The retry path makes this the ordinary
+  -- case, not a corner — E re-asks only the leaves that already whiffed.
+  examples._clear_llm_cache()
+  local empty_landings = 0
+  examples.on_landed(function()
+    empty_landings = empty_landings + 1
+  end)
+  respond = function()
+    return "" -- asked, answered nothing usable: every leaf a MISS
+  end
+  local m1 = forest()
+  local miss_ok, miss_err
+  examples.llm(m1, token, function(ok, err)
+    miss_ok, miss_err = ok, err
+  end)
+  check("an all-miss batch still notifies the subscriber", empty_landings == 1)
+  check("...and still reports the failure", miss_ok == false and miss_err ~= nil)
+  check("...leaving nothing pending", not examples.any_awaiting())
+  examples.on_landed(nil)
+
   package.loaded["typescope.examples.ollama"] = real_ollama
 end
 
@@ -220,10 +282,27 @@ end
 do
   local real_system = vim.system
   local generates = 0
+  local probes = 0
   local deferred_cb = nil -- when set-able, the request stays in flight
   local defer = false
+  -- warmup probes /api/version for liveness before it sends the load, so the
+  -- stub has to tell the two apart: counting every subprocess would count the
+  -- probe as a load. What this block asserts is the number of LOADS — one per
+  -- open, no client-side flag suppressing a re-warm — which is unchanged by
+  -- the probe existing.
   ---@diagnostic disable-next-line: duplicate-set-field
-  vim.system = function(_, _, cb)
+  vim.system = function(cmd, _, cb)
+    local is_probe = false
+    for _, arg in ipairs(cmd) do
+      if type(arg) == "string" and arg:find("/api/version", 1, true) then
+        is_probe = true
+      end
+    end
+    if is_probe then
+      probes = probes + 1
+      cb({ code = 0, stdout = "{}" }) -- server alive; warmup proceeds to load
+      return { wait = function() end }
+    end
     generates = generates + 1
     if defer then
       deferred_cb = cb
@@ -262,6 +341,74 @@ do
   ollama.warmup(cfg)
   vim.wait(100)
   check("dedup releases after flight lands", generates == 4, generates)
+
+  -- and the liveness probe really did run ahead of each of those loads
+  check("each warmup probes before loading", probes == generates, probes)
+
+  vim.system = real_system
+end
+
+-- Streamed transport: /api/generate replies as JSON-lines, one object per
+-- token, done=true on the last. The whole point is that a slow generation is
+-- indistinguishable from a fast one here -- only silence fails -- so these
+-- assert assembly and truncation, not timing.
+do
+  local ollama = require("typescope.examples.ollama")
+  local real_system = vim.system
+  local cfg = { host = "127.0.0.1", port = 9999, model = "testmodel", autostart = false, timeout_ms = 1000 }
+
+  local function stub(out)
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.system = function(_, _, cb)
+      cb(out)
+      return { wait = function() end }
+    end
+  end
+
+  local function gen()
+    local got, err, fired = nil, nil, false
+    ollama.generate("p", cfg, function(r, e)
+      got, err, fired = r, e, true
+    end)
+    vim.wait(200, function()
+      return fired
+    end)
+    return got, err, fired
+  end
+
+  -- happy path: many chunks concatenate in order
+  stub({
+    code = 0,
+    stdout = table.concat({
+      '{"response":"Wid","done":false}',
+      '{"response":"get","done":false}',
+      '{"response":"(1)","done":false}',
+      '{"response":"","done":true}',
+    }, "\n"),
+  })
+  local got, err = gen()
+  check("streamed chunks assemble in order", got == "Widget(1)" and err == nil, tostring(got) .. "/" .. tostring(err))
+
+  -- a stream cut before done= is a truncated answer, not a short one
+  stub({ code = 0, stdout = '{"response":"Wid","done":false}\n{"response":"get","done":false}' })
+  local tgot, terr = gen()
+  check("truncated stream is an error, not a fragment", tgot == nil and terr ~= nil, tostring(tgot))
+
+  -- a single trailing newline / blank lines must not break assembly
+  stub({ code = 0, stdout = '{"response":"ok","done":false}\n\n{"response":"","done":true}\n' })
+  local bgot = gen()
+  check("blank lines in the stream are skipped", bgot == "ok", tostring(bgot))
+
+  -- silence (curl 28) retries once, then reports
+  local attempts = 0
+  ---@diagnostic disable-next-line: duplicate-set-field
+  vim.system = function(_, _, cb)
+    attempts = attempts + 1
+    cb({ code = 28, stdout = "" })
+    return { wait = function() end }
+  end
+  local sgot, serr, sfired = gen()
+  check("stall retries exactly once then errors", sfired and sgot == nil and serr ~= nil and attempts == 2, attempts)
 
   vim.system = real_system
 end
