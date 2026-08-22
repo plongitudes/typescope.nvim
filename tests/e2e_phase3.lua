@@ -102,6 +102,29 @@ end
 require("typescope").close()
 check("closed cleanly", float_lines() == nil)
 
+-- L must RESOLVE lazy nodes, not just flip `expanded`: `returns` is
+-- cross-file lazy, and before this it came out marked open with nothing
+-- underneath while <CR> on the same node resolved it fine.
+-- the reopen must start cold: the resolve cache still holds the tree the
+-- <CR> above already expanded, which would make this test vacuous
+require("typescope.resolve").clear_cache()
+vim.api.nvim_win_set_cursor(0, { call_line, 12 })
+require("typescope").open()
+vim.wait(2000, function()
+  return float_lines() ~= nil
+end)
+do
+  local before, lw = float_lines()
+  check("reopened collapsed (status not yet resolved)", not table.concat(before, "\n"):find("status"))
+  vim.api.nvim_set_current_win(lw)
+  vim.api.nvim_feedkeys("L", "x", false)
+  vim.wait(2000, function()
+    return table.concat(float_lines() or {}, "\n"):find("status") ~= nil
+  end)
+  check("L resolves lazy nodes (returns expands to Response fields)", table.concat(float_lines(), "\n"):find("status") ~= nil)
+end
+require("typescope").close()
+
 -- TypedDict path: badges from total=False
 for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
   if l:find("result = update_user") then

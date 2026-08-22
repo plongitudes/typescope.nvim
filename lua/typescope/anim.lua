@@ -74,4 +74,12 @@ function M.title_spinner(win, label)
   return handle
 end
 
+-- NOTE: the pending-example animation used to live here as a per-frame
+-- nvim_set_hl into a window-local highlight namespace, plus an nvim__redraw to
+-- force the paint (namespace highlight changes schedule no redraw of their
+-- own). Tony's travelling-wave design retired all of it: brightness tracks
+-- block height, so the groups are static and only the TEXT moves — and text
+-- repaints itself. What's left is a frame clock in interact.lua and pure
+-- geometry in render.lua (jit).
+
 return M

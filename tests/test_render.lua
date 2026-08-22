@@ -15,6 +15,20 @@ local function check(desc, cond)
   end
 end
 
+-- Distinct ladder rungs present in a line. Plain find per rung, NOT a pattern
+-- class: Lua patterns are byte-based and "[▁▂▃]" matches individual UTF-8
+-- bytes rather than characters.
+local RUNGS = { "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█" }
+local function rung_count(line)
+  local n = 0
+  for _, ch in ipairs(RUNGS) do
+    if line:find(ch, 1, true) then
+      n = n + 1
+    end
+  end
+  return n
+end
+
 local function eq_lines(desc, got, want)
   local ok = #got == #want
   if ok then
@@ -612,6 +626,221 @@ do
     "signature block wraps so every name stays visible",
     #pwrap.lines > 3 and wall:find("ws_max_size") ~= nil and wall:find("lifespan") ~= nil and wall:find("reload") ~= nil
   )
+end
+
+-- 38c: pending examples render in their own group so one timer can breathe
+-- them. Render stays pure — it never asks the examples module anything, it
+-- consults the predicate handed to it through opts.
+do
+  ---@param llm string? the LLM value, if it has landed
+  local function groups_for(over, llm)
+    local node = model.new({ name = "host", kind = "param", type = { display = "str", category = "builtin" } })
+    -- the heuristic always stands underneath: that's what a pending row shows
+    -- while it waits, and what a MISS leaves behind
+    node.example.heuristic = '"localhost"'
+    node.example.llm = llm
+    local r = render.render({ node }, opts(over))
+    local found = {}
+    for _, h in ipairs(r.highlights) do
+      found[h.group] = true
+    end
+    found.injected = false
+    for _, ij in ipairs(r.ts_injections) do
+      if ij.text == (llm or '"localhost"') then
+        found.injected = true
+      end
+    end
+    return found
+  end
+
+  local pending = function()
+    return true
+  end
+  local function any_pending_group(found)
+    for name in pairs(found) do
+      if type(name) == "string" and name:find("^TypeScopeExamplePending") then
+        return true
+      end
+    end
+    return false
+  end
+  check(
+    "llm mode: a still-coming example takes a pending group",
+    any_pending_group(groups_for({ example_kind = "llm", example_pending = pending }))
+  )
+  check(
+    "llm mode: a landed example takes the normal group",
+    groups_for({ example_kind = "llm", example_pending = function()
+      return false
+    end }, '"example.com"')["TypeScopeExample"] == true
+  )
+  -- a heuristic value is final the moment it exists: nothing to wait for, so
+  -- nothing to breathe even if a stale predicate says otherwise
+  check(
+    "heuristic mode never renders pending",
+    groups_for({ example_pending = pending })["TypeScopeExamplePending"] == nil
+  )
+  check("no predicate (spike, tests) renders normally", groups_for({ example_kind = "llm" })["TypeScopeExample"] == true)
+
+  -- a leaf no heuristic matches has no example line at all; while its value
+  -- is coming, a bar holds the line open so the block doesn't grow one later
+  do
+    local bare = model.new({ name = "object", kind = "param", type = { display = "_T", category = "typevar" } })
+    local waiting = render.render({ bare }, opts({ example_kind = "llm", example_pending = pending }))
+    local settled = render.render({ bare }, opts({ example_kind = "llm" }))
+    -- one full wavelength, so every rung of the ladder is on screen at once
+    check(
+      "pending leaf with no heuristic shows the wave bar",
+      waiting.lines[1]:find("▁") and waiting.lines[1]:find("▇") and waiting.lines[1]:find("▅")
+    )
+    local ascii = render.render({ bare }, opts({
+      style = styles.get("ascii"),
+      example_kind = "llm",
+      example_pending = pending,
+    })).lines[1]
+    check("bar uses the charset ladder", ascii:find("%.") and ascii:find("#") and not ascii:find("▇"))
+    check("nothing pending, nothing shown", settled.lines[1]:find("▇") == nil)
+    -- the type annotation always injects; the bar must not — it isn't code
+    local bar_injected = false
+    for _, ij in ipairs(waiting.ts_injections) do
+      if ij.text:find("▇") then
+        bar_injected = true
+      end
+    end
+    check("the bar is not syntax-highlighted as a value", not bar_injected)
+  end
+
+  -- 38c: the reveal wave. A landed value sweeps left to right — lit prefix in
+  -- real syntax colors, bar over the rest — at a constant cell count, so the
+  -- line never reflows mid-animation.
+  do
+    local value = '{"name": "John Doe"}'
+    local node = model.new({ name = "object", kind = "param", type = { display = "_T", category = "typevar" } })
+    node.example.llm = value
+    local progress
+    local function frame(over)
+      return render.render({ node }, opts(vim.tbl_extend("force", {
+        example_kind = "llm",
+        example_pending = function()
+          return false
+        end,
+        -- pin the frozen phase: which cells uncover first is a function of
+        -- where the wave stood, so an unpinned phase makes this test drift
+        example_reveal = function()
+          return progress, 0.3
+        end,
+      }, over or {})))
+    end
+
+    progress = 0
+    local start = frame()
+    -- the wave freezes where it stood: it does NOT snap to a full-height bar
+    check("the fall starts from the frozen wave", rung_count(start.lines[1]) >= 3)
+    check("no value text visible yet", not start.lines[1]:find("John"))
+
+    progress = 0.75
+    local mid = frame()
+    check("mid-fall uncovers some of the value", mid.lines[1]:find('name', 1, true) ~= nil)
+    check("mid-fall still has blocks standing", mid.lines[1]:find("[▁▂▃▅▇]") ~= nil)
+    check("mid-fall has not uncovered all of it", not mid.lines[1]:find(value, 1, true))
+
+    progress = nil
+    local done = frame()
+    check("settled shows the whole value", done.lines[1]:find(value, 1, true) ~= nil)
+    -- the bar holds a space wider than most values, so the reveal only ever
+    -- narrows the row — the value is uncovered inside room already reserved,
+    -- never shoved into place
+    local w_start = vim.api.nvim_strwidth(start.lines[1])
+    local w_mid = vim.api.nvim_strwidth(mid.lines[1])
+    local w_done = vim.api.nvim_strwidth(done.lines[1])
+    check("the reveal never widens the row", w_start >= w_mid and w_mid >= w_done)
+    check("the bar reserves more room than this value needs", w_start > w_done)
+    -- uncovered runs are real code again, blocks never are
+    local lit_injected, bar_injected = false, false
+    for _, ij in ipairs(mid.ts_injections) do
+      if ij.text:find("name", 1, true) then
+        lit_injected = true
+      end
+      if ij.text:find("[▁▂▃▅▇]") then
+        bar_injected = true
+      end
+    end
+    check("uncovered runs get syntax colors back", lit_injected)
+    check("blocks never do", not bar_injected)
+
+    -- a MISS has nothing underneath, so the bar drains off the line instead of
+    -- disappearing between two frames
+    local missed = model.new({ name = "kwargs", kind = "param", type = { display = "T", category = "builtin" } })
+    local function miss_frame(pr)
+      return render.render({ missed }, opts({
+        example_kind = "llm",
+        example_pending = function()
+          return false
+        end,
+        example_reveal = function()
+          return pr, 0.3
+        end,
+      })).lines[1]
+    end
+    check("a MISS still falls away rather than popping", miss_frame(0.1):find("[▁▂▃▅▇]") ~= nil)
+    check("...and leaves nothing behind", not miss_frame(nil):find("[▁▂▃▅▇]"))
+
+    -- a pending node has no value yet, so a stale reveal must not fire
+    progress = 0.5
+    local bare = model.new({ name = "x", kind = "param", type = { display = "_T", category = "typevar" } })
+    local waiting = render.render({ bare }, opts({
+      example_kind = "llm",
+      example_pending = function()
+        return true
+      end,
+      example_reveal = function()
+        return progress
+      end,
+    }))
+    check(
+      "pending beats reveal: the placeholder stays whole",
+      rung_count(waiting.lines[1]) >= 3 and not waiting.lines[1]:find("John")
+    )
+  end
+
+  -- syntax colors are painted OVER the base extmark, so an overlaid example
+  -- can't show the group breathing underneath: pending examples drop the
+  -- injection and go flat until their value lands
+  check(
+    "pending example drops the syntax overlay",
+    groups_for({ example_kind = "llm", example_pending = pending }).injected == false
+  )
+  check(
+    "landed example keeps it",
+    groups_for({ example_kind = "llm", example_pending = function()
+      return false
+    end }, '"example.com"').injected == true
+  )
+end
+
+-- d1x: L's transient peek opens every ledger detail block at once. Without it
+-- only the cursor's row carries one, so an expanded tree still shows exactly
+-- one example — which made 38c's animation impossible to watch across rows.
+do
+  local roots = {
+    model.new({ name = "host", kind = "param", type = { display = "str", category = "builtin" } }),
+    model.new({ name = "port", kind = "param", type = { display = "int", category = "builtin" } }),
+    model.new({ name = "timeout", kind = "param", type = { display = "float", category = "builtin" } }),
+  }
+  require("typescope.examples").annotate(roots)
+  local base = opts({ layout = "ledger" })
+  local function example_lines(over)
+    local n = 0
+    for _, line in ipairs(render.render(roots, vim.tbl_extend("force", base, over)).lines) do
+      if line:find("e%.g%.") then
+        n = n + 1
+      end
+    end
+    return n
+  end
+  check("cursor-follow ledger shows one example", example_lines({ detail_id = roots[1].id }) == 1)
+  check("detail_all opens every one", example_lines({ detail_all = true }) == 3)
+  check("no detail, no examples", example_lines({}) == 0)
 end
 
 print(failures == 0 and "RENDER ALL PASS" or ("RENDER " .. failures .. " FAILURES"))

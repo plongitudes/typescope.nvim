@@ -25,8 +25,12 @@
 ---@field layout? "tree"|"table"|"ledger" flowing segments (default) vs column grid (U5) vs one-line rows + detail block (U6)
 ---@field align? "left"|"right" name column alignment (default left, tree layout)
 ---@field detail_id? string ledger layout: node whose row expands into a detail block
+---@field detail_all? boolean ledger layout: open EVERY row's detail block (L's transient peek, d1x)
 ---@field show_examples boolean
 ---@field example_kind "heuristic"|"llm"
+---@field example_pending? fun(node: typescope.Node): boolean leaves whose LLM value is still coming (38c); injected so render stays pure
+---@field example_reveal? fun(node: typescope.Node): number?, number? 0..1 through the fall, plus the wave phase it froze at (38c)
+---@field example_phase? number 0..1 position of the travelling wave through the pending bar (38c)
 ---@field lang? string treesitter language for injected snippet highlighting
 ---@field header? string one-line call shape shown above the tree
 ---@field header_active? string param name lit as active in the header (matches insert's signature block)
@@ -99,14 +103,289 @@ end
 
 local is_expandable = require("typescope.model").is_expandable
 
+-- LuaJIT compiles these to machine instructions once localised; the wave calls
+-- them per cell per frame, so this is the one place in the file where hoisting
+-- them off the `math` table is worth the two lines.
+local sin, cos = math.sin, math.cos
+local floor = math.floor
+-- separate statements ON PURPOSE: `local floor, round = math.floor, ... floor`
+-- binds the closure's `floor` to the GLOBAL (nil), because Lua evaluates the
+-- whole rhs before either local exists
+local function round(v)
+  return floor(v + 0.5)
+end
+local PI = math.pi
+
+-- The shape that travels through the placeholder bar while a leaf waits, and
+-- that the landed value emerges from under. A Tukey-windowed sine: position is
+-- NORMALISED (t = cell/(count-1)), so WAVE_FREQ oscillations span whatever
+-- width the bar happens to be, and the cosine taper at each end fades it to
+-- nothing instead of chopping it off mid-crest.
+--
+-- This replaced a fixed 14-entry lookup table, which had two faults the shape
+-- of the value exposed. It TILED: a 98-char value got seven wavelengths and
+-- came out in seven chunks. And it could only move in whole cells — one step
+-- per WAVE_PERIOD_MS/#WAVE = 100ms, measured at 11 changed frames per 60,
+-- which read as judder. A continuous wave changes some cell's level every
+-- frame: 60 of 60.
+--
+-- Brightness tracks height (see highlights.lua), so a cell rising through the
+-- wave lights up as it grows and the highlight groups stay static.
+local WAVE_FREQ = 3.0 -- oscillations across the bar, at ANY width
+local WAVE_ALPHA = 0.4 -- fraction of total width spent tapering, split per end
+local WAVE_STEPS = 8 -- ladder rungs; 8 reads as a curve where 5 read as steps
+-- Minimum bar width. Below this the taper eats the whole wave (at 5 cells,
+-- alpha 0.4 leaves two visible rungs), so a narrow float still gets a bar
+-- worth looking at.
+local PENDING_CELLS = 28
+-- charset fallback matching the ladder's own `opts.style and ... or` idiom —
+-- LadderOpts.style is optional
+local DEFAULT_BAR = { "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█" }
+
+---@param opts typescope.RenderOpts|typescope.LadderOpts
+local function ladder_of(opts)
+  return opts.style and opts.style.bar or DEFAULT_BAR
+end
+
+--- Group for a bar cell at ladder rung `i`. Named here like every other group
+--- in this file; highlights.lua defines one per rung, dim → bright.
+---@param i integer
+local function rung_group(i)
+  return "TypeScopeExamplePending" .. math.max(1, math.min(#DEFAULT_BAR, i))
+end
+
+--- Collapse a per-cell height list into segments, merging runs of equal height
+--- so a 14-cell bar costs ~6 highlights rather than 14.
+---@param heights integer[]
+---@param ladder string[]
+---@param atomic boolean?
+---@return { [1]: string, [2]: string?, [3]: string?, [4]: boolean? }[]
+local function bar_segments(heights, ladder, atomic)
+  local segs, run, run_h = {}, {}, nil
+  local function flush()
+    if #run > 0 then
+      table.insert(segs, { table.concat(run), rung_group(run_h), nil, atomic })
+      run = {}
+    end
+  end
+  for _, h in ipairs(heights) do
+    if h ~= run_h then
+      flush()
+    end
+    run_h = h
+    -- height 0 is empty space, not the shortest rung: it is what lets the
+    -- taper fade to nothing at the ends and separates crest from crest
+    table.insert(run, h >= 1 and ladder[math.min(#ladder, h)] or " ")
+  end
+  flush()
+  return segs
+end
+
+--- The wave's heights (0..WAVE_STEPS) across `count` cells at this phase.
+--- Normalised in position, so the same shape fills any width.
+---@param phase number 0..1, one full scroll
+---@param count integer
+---@param alpha number? taper fraction, defaults to WAVE_ALPHA
+---@return integer[]
+local function wave_heights(phase, count, alpha)
+  alpha = alpha or WAVE_ALPHA
+  local half = alpha / 2
+  local turns = phase * 2 * PI
+  local heights = {}
+  for i = 1, count do
+    local t = count > 1 and (i - 1) / (count - 1) or 0
+    local envelope = 1.0
+    if t < half then
+      envelope = 0.5 * (1 + cos(PI * ((2 * t) / alpha - 1)))
+    elseif t > (1 - half) then
+      envelope = 0.5 * (1 + cos(PI * ((2 * t - 2) / alpha + 1)))
+    end
+    -- unipolar: 0..1 rather than -1..1, so the trough is empty and the crest
+    -- is full rather than the bar sitting at half height at rest
+    local unipolar = 0.5 * (1 + sin(2 * PI * WAVE_FREQ * t + turns))
+    heights[i] = round(unipolar * envelope * WAVE_STEPS)
+  end
+  return heights
+end
+
+--- Is this leaf's LLM value still coming? Only llm mode has a pending state;
+--- a heuristic value is final the moment it exists.
 ---@param node typescope.Node
----@param opts typescope.RenderOpts
+---@param opts typescope.RenderOpts|typescope.LadderOpts
+---@return boolean
+local function is_pending(node, opts)
+  return opts.example_kind == "llm" and opts.example_pending ~= nil and opts.example_pending(node)
+end
+
+--- The value a node's example shows, if it has one at all.
+---@param node typescope.Node
+---@param opts typescope.RenderOpts|typescope.LadderOpts
 ---@return string?
 local function example_for(node, opts)
   if not opts.show_examples then
     return nil
   end
   return node.example[opts.example_kind] or node.example.heuristic
+end
+
+--- How an example renders: its highlight group, and whether treesitter paints
+--- real syntax colors over it. A settled example overlays — the value keeps
+--- str/int/dict colors like code anywhere else. A still-coming one drops the
+--- injection and shows flat in the pending group: syntax colors sit ON TOP of
+--- the base extmark, so breathing underneath them would be invisible (38c —
+--- Tony saw only the pop-in). Flat-and-dim while waiting, full color the
+--- instant it lands, is also the louder affordance.
+--- Only llm mode has a pending state; a heuristic value is final on arrival.
+---@param node typescope.Node
+---@param opts typescope.RenderOpts|typescope.LadderOpts
+---@return string group, string? inject
+local function example_style(node, opts)
+  if is_pending(node, opts) then
+    return "TypeScopeExamplePending", nil
+  end
+  return "TypeScopeExample", "overlay"
+end
+
+-- How far the blocks have fallen at the end of the reveal: a full-height cell
+-- has to reach zero exactly as the animation finishes.
+local FALL_DISTANCE = #DEFAULT_BAR
+
+--- The landed value emerging from under the travelling wave. The wave FREEZES
+--- where it stood when the value arrived, then every block falls — like the
+--- peak dots on an equalizer, accelerating under gravity, all released at
+--- once. A cell that reaches zero uncovers the character beneath it, so the
+--- value surfaces in the wave's own shape: troughs first, crests last.
+---
+--- Cells run to max(value, one wavelength) so nothing jumps at the moment of
+--- landing; blocks past the end of the value simply fall away and leave
+--- nothing. That also makes a MISS graceful — no value at all just means the
+--- bar drains off the line instead of vanishing between frames.
+---
+--- The wave covers only the ground the BAR held, never the tail of a value
+--- longer than it. Tiling it across the whole value instead put a hole every
+--- 14 cells — a 98-char `returns` example came out in seven chunks, illegible
+--- for the whole 675ms — and it bought nothing: the "nothing jumps" bargain
+--- above only pays when the value fits inside the bar. When it does not, the
+--- line jumps wider the instant the value lands no matter what the wave does,
+--- so occluding the tail adds unreadability on top of a jump it cannot
+--- prevent.
+---@param value string? nil for a MISS: bar falls, nothing underneath
+---@param progress number 0..1
+---@param phase number the wave phase this froze at
+---@param ladder string[]
+---@param atomic boolean?
+---@return { [1]: string, [2]: string?, [3]: string?, [4]: boolean? }[]
+local function reveal_segments(value, progress, phase, ladder, atomic)
+  local chars, cells = {}, 0
+  if value then
+    local at = vim.str_utf_pos(value)
+    cells = #at
+    for i = 1, cells do
+      chars[i] = value:sub(at[i], (at[i + 1] or #value + 1) - 1)
+    end
+  end
+  -- keep the bar's own width until the blocks drain it away: the value never
+  -- has to shove the line wider, it's uncovered inside a space already held
+  local total = math.max(cells, PENDING_CELLS)
+  -- the frozen wave, over the bar's width only — the same heights the pending
+  -- bar was showing the frame before this one, so the fall starts from exactly
+  -- where the eye left it
+  local frozen = wave_heights(phase, PENDING_CELLS)
+  -- Released with a little initial velocity rather than from rest. Pure
+  -- gravity (progress²) spends its first 40% moving less than one rung, and
+  -- with only eight rungs to quantise into that reads as nothing happening at
+  -- all; this keeps the brief peak-hold an equalizer has, then accelerates.
+  local fallen = FALL_DISTANCE * progress * (0.6 + 0.4 * progress)
+
+  -- merge neighbours that render the same way: a run of text, or a run of
+  -- blocks at one rung
+  local segs, run, run_key, run_rung = {}, {}, nil, nil
+  local function flush()
+    if #run == 0 then
+      return
+    end
+    if run_key == "text" then
+      -- a fragment injects as the parser's valid prefix, the same bargain the
+      -- ladder's elided values already make
+      table.insert(segs, { table.concat(run), "TypeScopeExample", "overlay", atomic })
+    else
+      table.insert(segs, { table.concat(run), rung_group(run_rung), nil, atomic })
+    end
+    run = {}
+  end
+  for i = 1, total do
+    -- past the bar's width the value is simply itself (see the note above);
+    -- for a value that fits, i never gets here and the behaviour is unchanged
+    local height = -1
+    if i <= PENDING_CELLS then
+      height = frozen[i] - fallen
+    end
+    local key, rung, text
+    if height <= 0 then
+      key, text = "text", chars[i] -- nil past the end of the value: cell empties
+    else
+      rung = math.max(1, math.min(#ladder, math.ceil(height)))
+      key, text = "bar", ladder[rung]
+    end
+    if text then
+      if key ~= run_key or rung ~= run_rung then
+        flush()
+      end
+      run_key, run_rung = key, rung
+      table.insert(run, text)
+    else
+      flush()
+      run_key, run_rung = nil, nil
+    end
+  end
+  flush()
+  return segs
+end
+
+--- Segments for a node's example: none when there's nothing to show, one for a
+--- settled or still-pending value, two mid-wave — the lit prefix in real
+--- syntax colors, the bar in the pending group. Two is the point: one group
+--- can't carry both, and keeping the whole thing dim until the wave finished
+--- would just move the pop-in to the end of it.
+---@param node typescope.Node
+---@param opts typescope.RenderOpts|typescope.LadderOpts
+---@param atomic boolean? example jumps whole to the next line rather than splitting mid-word
+---@return { [1]: string, [2]: string?, [3]: string?, [4]: boolean? }[]
+local function example_segments(node, opts, atomic)
+  local value = example_for(node, opts)
+  local ladder = ladder_of(opts)
+  local phase = opts.example_phase or 0
+
+  if is_pending(node, opts) then
+    if not value then
+      -- Nothing to show yet, but something IS coming: hold the line open with
+      -- the bar. Otherwise the row has no example line at all and the value
+      -- doesn't so much arrive as make the block grow a line under the cursor
+      -- — what Tony saw on `object: _T`, a leaf no heuristic matches.
+      return bar_segments(wave_heights(phase, PENDING_CELLS), ladder, atomic)
+    end
+    -- A heuristic stands in while we wait: real information, and it means a
+    -- MISS changes nothing on screen instead of visibly reverting. It pulses
+    -- as one piece rather than per character — splitting it into runs would
+    -- change where the value is allowed to wrap, mid-animation.
+    -- no envelope here: this is one brightness for the whole value, not a
+    -- shape across cells, so there is no width to taper over
+    local h = round(0.5 * (1 + sin(2 * PI * (phase % 1))) * WAVE_STEPS)
+    return { { value, rung_group(h), nil, atomic } }
+  end
+
+  local progress, frozen = nil, 0
+  if opts.example_reveal then
+    progress, frozen = opts.example_reveal(node)
+  end
+  if progress and progress < 1 then
+    return reveal_segments(value, progress, frozen or 0, ladder, atomic)
+  end
+  if not value then
+    return {}
+  end
+  local group, inject = example_style(node, opts)
+  return { { value, group, inject, atomic } }
 end
 
 --- Render a forest of nodes into lines + highlights. Pure: no window or
@@ -253,14 +532,14 @@ function M.render(roots, opts)
       table.insert(segments, { " = ", "TypeScopeChrome" })
       table.insert(segments, { node.default, "TypeScopeDefault", "replace" })
     end
-    local example = example_for(node, opts)
-    if example then
+    local example_segs = example_segments(node, opts, true)
+    if #example_segs > 0 then
       table.insert(segments, { "  ", nil })
       -- overlay: examples are hypothetical values, they keep their dim
       -- TypeScopeExample styling underneath the syntax colors. Atomic: an
       -- example jumps whole to the next line rather than splitting mid-word
       -- (still splits if longer than a full line).
-      table.insert(segments, { example, "TypeScopeExample", "overlay", true })
+      vim.list_extend(segments, example_segs)
     end
     if is_expandable(node) and not node.state.expanded and depth == 0 then
       table.insert(segments, { "  (<CR> to expand)", "TypeScopeHint" })
@@ -467,11 +746,7 @@ function M.render(roots, opts)
         table.insert(default_segs, { node.default, "TypeScopeDefault", "replace" })
       end
 
-      local example_segs = {}
-      local example = example_for(node, opts)
-      if example then
-        table.insert(example_segs, { example, "TypeScopeExample", "overlay" })
-      end
+      local example_segs = example_segments(node, opts)
 
       local origin_segs = {}
       if node.origin then
@@ -677,7 +952,7 @@ function M.render(roots, opts)
 
     for _, r in ipairs(rows) do
       local node = r.node
-      local detail = node.id == opts.detail_id
+      local detail = opts.detail_all or node.id == opts.detail_id
       local line = new_line()
       if r.depth > 0 then
         line:add(r.branch, "TypeScopeChrome")
@@ -786,10 +1061,10 @@ function M.render(roots, opts)
           table.insert(info, { "= ", "TypeScopeChrome" })
           table.insert(info, { node.default, "TypeScopeDefault", "replace" })
         end
-        local example = example_for(node, opts)
-        if example then
+        local example_segs = example_segments(node, opts, true)
+        if #example_segs > 0 then
           table.insert(info, { (#info > 0 and "   " or "") .. "e.g. ", "TypeScopeHint" })
-          table.insert(info, { example, "TypeScopeExample", "overlay", true })
+          vim.list_extend(info, example_segs)
         end
         if node.origin then
           table.insert(info, { (#info > 0 and "   " or "") .. style.inherit .. node.origin, "TypeScopeHint", nil, true })
@@ -887,6 +1162,9 @@ local LADDER_MAX_LINES = 3
 ---@field max_width integer
 ---@field show_examples boolean
 ---@field example_kind "heuristic"|"llm"
+---@field example_pending? fun(node: typescope.Node): boolean leaves whose LLM value is still coming (38c); injected so render stays pure
+---@field example_reveal? fun(node: typescope.Node): number?, number? 0..1 through the fall, plus the wave phase it froze at (38c)
+---@field example_phase? number 0..1 position of the travelling wave through the pending bar (38c)
 ---@field style? typescope.Charset for the ≈ glyph (defaults to unicode's)
 ---@field fn_name? string callee name — heads the signature block
 ---@field ret? string return type shown as `-> ret` in the signature block
@@ -923,10 +1201,6 @@ function M.ladder(node, opts)
     end
     shape = "{" .. table.concat(names, ", ") .. "}"
   end
-  local example = opts.show_examples
-      and (node.example[opts.example_kind] or node.example.heuristic)
-    or nil
-
   ---@param shape_text? string
   ---@return { [1]: string, [2]: string?, [3]: string?, [4]: boolean? }[]
   local function segs_for(shape_text)
@@ -949,9 +1223,12 @@ function M.ladder(node, opts)
       seg(" = ", "TypeScopeChrome")
       seg(node.default, "TypeScopeDefault", "replace")
     end
-    if example then
+    local example_segs = example_segments(node, opts, true)
+    if #example_segs > 0 then
       seg("   e.g. ", "TypeScopeHint")
-      seg(example, "TypeScopeExample", "overlay", true)
+      for _, es in ipairs(example_segs) do
+        seg(es[1], es[2], es[3], es[4])
+      end
     end
     return segs
   end

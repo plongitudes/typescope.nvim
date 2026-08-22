@@ -28,23 +28,70 @@ local groups = {
 
 local applied = false
 
+--- Blend two 24-bit colors: alpha=1 is all `fg`, alpha=0 is all `bg`.
+--- Always computed from resolved theme colors, never invented — dimming a
+--- group means walking it toward the user's own background.
+---@param fg integer
+---@param bg integer
+---@param alpha number 0..1
+---@return string "#rrggbb"
+function M.blend(fg, bg, alpha)
+  local function chan(div)
+    local f = math.floor(fg / div) % 256
+    local b = math.floor(bg / div) % 256
+    return math.floor(f * alpha + b * (1 - alpha) + 0.5)
+  end
+  return ("#%02x%02x%02x"):format(chan(65536), chan(256), chan(1))
+end
+
+--- Resolved fg of a group (following links), and the Normal background to
+--- dim it toward. Either may be nil when the colorscheme leaves it unset.
+---@param name string
+---@return integer? fg, integer bg
+function M.resolve(name)
+  local ok, hl = pcall(vim.api.nvim_get_hl, 0, { name = name, link = false })
+  local okn, normal = pcall(vim.api.nvim_get_hl, 0, { name = "Normal", link = false })
+  return (ok and hl.fg or nil), (okn and normal.bg) or 0
+end
+
 -- Same hue as the header, dimmed: blend its resolved fg ~40% toward the
 -- background and drop bold. Computed (not linked) because no stock group has
 -- "darker @function" — recomputed on ColorScheme via apply().
 local function header_dim()
-  local ok, hl = pcall(vim.api.nvim_get_hl, 0, { name = "TypeScopeHeader", link = false })
-  if not ok or not hl.fg then
+  local fg, bg = M.resolve("TypeScopeHeader")
+  if not fg then
     return { link = "Comment" }
   end
-  local okn, normal = pcall(vim.api.nvim_get_hl, 0, { name = "Normal", link = false })
-  local bg = (okn and normal.bg) or 0
-  local alpha = 0.6
-  local function chan(div)
-    local f = math.floor(hl.fg / div) % 256
-    local b = math.floor(bg / div) % 256
-    return math.floor(f * alpha + b * (1 - alpha) + 0.5)
+  return { fg = M.blend(fg, bg, 0.6) }
+end
+
+-- Examples whose LLM value is still coming (38c). The placeholder is a bar of
+-- block characters and the animation is a wave travelling through it, so
+-- brightness has to track HEIGHT: one group per rung of the charset ladder,
+-- dimmest at ▁ and the full example color at ▇. They're static — the wave
+-- moves characters between them, it never recolors anything — which is what
+-- lets the whole animation ride an ordinary repaint, with no highlight
+-- namespace and no forced redraw (jit).
+M.PENDING_STEPS = 8
+M.PENDING_ALPHA = 0.3 -- the dimmest rung; the tallest sits at the full color
+
+--- Group for a bar cell at ladder rung `i` (1 = shortest).
+---@param i integer
+---@return string
+function M.pending_group(i)
+  return "TypeScopeExamplePending" .. math.max(1, math.min(M.PENDING_STEPS, i))
+end
+
+---@param i integer
+local function example_pending(i)
+  return function()
+    local fg, bg = M.resolve("TypeScopeExample")
+    if not fg then
+      return { link = "Comment" }
+    end
+    local t = M.PENDING_STEPS > 1 and (i - 1) / (M.PENDING_STEPS - 1) or 1
+    return { fg = M.blend(fg, bg, M.PENDING_ALPHA + (1 - M.PENDING_ALPHA) * t) }
   end
-  return { fg = ("#%02x%02x%02x"):format(chan(65536), chan(256), chan(1)) }
 end
 
 --- Define TypeScope* groups, layering config.highlights overrides on top.
@@ -55,10 +102,18 @@ function M.apply()
     hl.default = true
     vim.api.nvim_set_hl(0, name, hl)
   end
-  do -- derived group: needs TypeScopeHeader defined first
-    local hl = vim.tbl_extend("force", header_dim(), overrides.TypeScopeHeaderDim or {})
+  local derived = { TypeScopeHeaderDim = header_dim }
+  for i = 1, M.PENDING_STEPS do
+    derived[M.pending_group(i)] = example_pending(i)
+  end
+  -- the unsuffixed name is what a static (animations-off) bar uses
+  derived.TypeScopeExamplePending = example_pending(math.ceil(M.PENDING_STEPS / 2))
+  for name, derive in pairs(derived) do
+    -- derived groups: computed from the linked groups above, so they must be
+    -- defined after the loop that installs them
+    local hl = vim.tbl_extend("force", derive(), overrides[name] or {})
     hl.default = true
-    vim.api.nvim_set_hl(0, "TypeScopeHeaderDim", hl)
+    vim.api.nvim_set_hl(0, name, hl)
   end
   -- explicit overrides must win even after a colorscheme clears everything
   for name, attrs in pairs(overrides) do

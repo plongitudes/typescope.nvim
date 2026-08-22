@@ -13,9 +13,12 @@ local M = {}
 -- runs on every open; without the sentinel it would re-ask the model about
 -- the same whiffed leaves forever (Tony's repeated-generation report).
 local llm_cache = {}
--- keys with a request currently in flight. Batches outlive a closed float on
--- purpose (they pay for the next open) — a reopen mid-generation must reuse
--- them, not duplicate them.
+-- keys a run has claimed: queued OR with a request currently in flight.
+-- Batches outlive a closed float on purpose (they pay for the next open) — a
+-- reopen mid-generation must reuse them, not duplicate them. Queued-but-not-
+-- yet-dispatched keys count: a reopen that only checked dispatched ones would
+-- re-ask for everything still sitting behind the current batch. Doubles as
+-- the "still pending" set the breathing animation renders from (38c).
 local in_flight = {}
 -- the one open float subscribes here (40u): a reopen mid-generation skips
 -- in-flight keys, so when those batches land there is no on_progress aimed
@@ -34,6 +37,24 @@ end
 function M._clear_llm_cache()
   llm_cache = {}
   in_flight = {}
+end
+
+--- Is this node's example still coming? True from the moment a run claims
+--- the leaf until its batch resolves (value or MISS alike). Passed into
+--- render as opts.example_pending so pending rows can breathe.
+---@param node typescope.Node
+---@return boolean
+function M.awaiting(node)
+  return in_flight[cache_key(node)] == true
+end
+
+--- Is any leaf's example still coming, anywhere? Drives the breathing
+--- animation's lifetime, which outlives a single run: a float reopened
+--- mid-generation queues nothing (the dedup skips claimed keys) yet still has
+--- values arriving, and those rows should breathe too.
+---@return boolean
+function M.any_awaiting()
+  return next(in_flight) ~= nil
 end
 
 --- Subscribe the current float to batch landings; nil unsubscribes. One
@@ -172,6 +193,12 @@ function M.llm(roots, token, done, on_progress)
   if #pending == 0 then
     return done(#leaves > 0)
   end
+  -- claim the whole queue up front, not batch by batch: a reopen mid-run
+  -- must skip leaves this run has yet to reach, and the breathing animation
+  -- wants every not-yet-landed leaf, not just the eight in the air
+  for _, node in ipairs(pending) do
+    in_flight[cache_key(node)] = true
+  end
 
   local ollama = require("typescope.examples.ollama")
   local index = 1
@@ -194,7 +221,6 @@ function M.llm(roots, token, done, on_progress)
     for _, node in ipairs(batch) do
       table.insert(specs, { id = node.id, name = node.name, display = node.type.display or "Any" })
       keys[node.id] = cache_key(node)
-      in_flight[keys[node.id]] = true
     end
     ollama.generate(ollama.prompt(specs), cfg.ollama, function(response, err)
       for _, node in ipairs(batch) do
@@ -202,7 +228,13 @@ function M.llm(roots, token, done, on_progress)
       end
       if not response then
         -- abort the chain but report partial success: earlier batches
-        -- landed. Transport failures leave no sentinel — retry is fine.
+        -- landed. Transport failures leave no sentinel — retry is fine, so
+        -- release the tail of the queue too: keys nobody will ever ask about
+        -- would otherwise stay claimed for the session (unaskable, and
+        -- breathing forever).
+        for i = index, #pending do
+          in_flight[cache_key(pending[i])] = nil
+        end
         return done(any_filled, err)
       end
       local values = ollama.parse(response)
@@ -220,14 +252,15 @@ function M.llm(roots, token, done, on_progress)
         end
       end
       batches_done = batches_done + 1
-      if filled > 0 then
-        any_filled = true
-        if on_progress then
-          on_progress(batches_done, batches_total)
-        end
-        if landed_cb then
-          landed_cb()
-        end
+      any_filled = any_filled or filled > 0
+      -- a batch resolving is a UI event even when it filled nothing: its
+      -- leaves stopped being pending either way, and whatever the float drew
+      -- to say "still coming" has to come down
+      if on_progress then
+        on_progress(batches_done, batches_total)
+      end
+      if landed_cb then
+        landed_cb()
       end
       next_batch()
     end, { num_predict = math.min(2048, 96 + 16 * #specs) })

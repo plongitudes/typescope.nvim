@@ -9,6 +9,10 @@
 ---@field inherit string prefix for the origin class of inherited fields
 ---@field evaluated string prefix for hover-evaluated type decorations
 ---@field rule string section-separator character (repeated to width)
+---@field bar string[] block ladder, shortest → tallest: the tallest fills the
+--- placeholder an example waits behind, and the run descends through the rest
+--- as the value is revealed (38c). A list, not a string, because the cells are
+--- multibyte in some charsets and single-byte in others.
 
 local M = {}
 
@@ -27,6 +31,7 @@ local charsets = {
     inherit = "↑",
     evaluated = "≈ ",
     rule = "─",
+    bar = { "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█" },
   },
   ascii = {
     vert = "| ",
@@ -39,6 +44,7 @@ local charsets = {
     inherit = "^",
     evaluated = "~ ",
     rule = "-",
+    bar = { ".", ":", "-", "=", "+", "*", "#", "@" },
   },
   minimal = {
     vert = "  ",
@@ -51,6 +57,7 @@ local charsets = {
     inherit = "^",
     evaluated = "~ ",
     rule = " ",
+    bar = { ".", ":", "-", "=", "+", "*", "#", "@" },
   },
   rounded = {
     vert = "│ ",
@@ -63,6 +70,7 @@ local charsets = {
     inherit = "↑",
     evaluated = "≈ ",
     rule = "─",
+    bar = { "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█" },
   },
 }
 
