@@ -194,8 +194,8 @@ function M.definition(client, bufnr, row, col, token)
   return M.locate(client, bufnr, row, col, token, "textDocument/definition")
 end
 
---- textDocument/signatureHelp at the window's cursor. Used for the anchor
---- float content and the activeParameter index.
+--- textDocument/signatureHelp at the window's cursor. Used for the
+--- activeParameter index and the overload signature list.
 ---@param client vim.lsp.Client
 ---@param bufnr integer
 ---@param win integer
@@ -258,11 +258,20 @@ end
 --- Load (without displaying) the buffer for a uri. We only ever parse these
 --- buffers, so a stale/foreign swapfile always resolves to open-readonly
 --- instead of throwing E325 (which aborts the whole pipeline).
+---
+--- 'swapfile' goes off BEFORE the load, and that half matters as much as the
+--- SwapExists guard. These are typeshed stubs and site-packages sources we
+--- read and never touch, but nvim writes a .swp for them like any other
+--- listed buffer — so a K in one session left swap files all over
+--- site-packages, and a K in a SECOND session hit "STILL RUNNING" prompts on
+--- files neither session was editing. The guard below handles finding
+--- someone else's swapfile; this line stops us leaving one.
 ---@param uri string
 ---@return integer bufnr
 function M.load_buf(uri)
   local bufnr = vim.uri_to_bufnr(uri)
   if not vim.api.nvim_buf_is_loaded(bufnr) then
+    vim.bo[bufnr].swapfile = false
     local group = vim.api.nvim_create_augroup("TypeScopeSwapExists", { clear = true })
     vim.api.nvim_create_autocmd("SwapExists", {
       group = group,
@@ -270,7 +279,26 @@ function M.load_buf(uri)
         vim.v.swapchoice = "o"
       end,
     })
+    -- We only ever parse these buffers, but bufload runs the full autocmd
+    -- suite for a real edit. On a dependency file outside the project root
+    -- (typeshed, site-packages) FileType alone is enough for lspconfig to
+    -- resolve a DIFFERENT root_dir and start a second language server --
+    -- two basedpyrights and two ruffs under one nvim, which is a lot of
+    -- resident memory to hand to a file nobody opened.
+    --
+    -- Suppressing FileType is safe because the extractor always passes the
+    -- language explicitly (get_parser(src, "python")); it never infers it
+    -- from 'filetype'.
+    --
+    -- SwapExists is deliberately NOT in this list -- the handler above still
+    -- has to answer for someone else's swap file. BufReadCmd is out too:
+    -- suppressing it would disable a plugin-provided reader and we would
+    -- load nothing at all.
+    local save = vim.o.eventignore
+    vim.o.eventignore =
+      "FileType,Syntax,BufRead,BufReadPre,BufReadPost,BufNewFile,BufEnter,BufWinEnter"
     pcall(vim.fn.bufload, bufnr)
+    vim.o.eventignore = save
     vim.api.nvim_del_augroup_by_id(group)
   end
   return bufnr
