@@ -1582,10 +1582,19 @@ function M.ladder(node, opts)
       )
     end
     for _, inj in ipairs(l.inj) do
-      table.insert(
-        result.ts_injections,
-        { line = #result.lines - 1, col_start = inj.col_start, text = inj.text, mode = inj.mode }
-      )
+      -- from/to travel with the injection, exactly as render()'s emit does: a
+      -- wrapped or clipped segment puts only a SLICE of the snippet on this
+      -- line, and float.inject_highlights needs both ends to place the parsed
+      -- spans against it. Dropped, they default to the whole snippet and the
+      -- extmarks run off the end of the line (Invalid 'col': out of range).
+      table.insert(result.ts_injections, {
+        line = #result.lines - 1,
+        col_start = inj.col_start,
+        text = inj.text,
+        mode = inj.mode,
+        from = inj.from,
+        to = inj.to,
+      })
     end
     result.width = math.max(result.width, l.width)
   end

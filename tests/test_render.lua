@@ -48,6 +48,41 @@ local function eq_lines(desc, got, want)
   end
 end
 
+-- Every injection has to describe a slice that actually FITS the line it sits
+-- on. float.inject_highlights parses the whole snippet and places the spans
+-- covering inj.from..inj.to at inj.col_start; if that reaches past the end of
+-- the line, nvim_buf_set_extmark raises "Invalid 'col': out of range" and the
+-- float never paints.
+--
+-- Asserted as a blanket invariant over any render result rather than as a
+-- golden for one case, because the way this got shipped was a wrapping ladder
+-- fixture that checked its lines and never looked at its injections
+-- (render.ladder's push dropped from/to where render()'s emit kept them).
+---@param desc string
+---@param result typescope.RenderResult
+local function check_injections(desc, result)
+  local bad = nil
+  for _, inj in ipairs(result.ts_injections or {}) do
+    local from, to = inj.from or 0, inj.to or #inj.text
+    local line = result.lines[inj.line + 1] or ""
+    if to < from or to > #inj.text then
+      bad = bad or ("slice %d..%d outside a %d-byte snippet"):format(from, to, #inj.text)
+    elseif inj.col_start + (to - from) > #line then
+      bad = bad
+        or ("line %d: col %d + %d bytes overruns a %d-byte line"):format(
+          inj.line,
+          inj.col_start,
+          to - from,
+          #line
+        )
+    end
+  end
+  check(desc .. " keeps every injection inside its line", bad == nil)
+  if bad then
+    print("  " .. bad)
+  end
+end
+
 -- one tree exercising: nesting, defaults, badges, examples, unresolved
 -- indicator, collapsed root with hint, return keyword
 local function tree()
@@ -572,6 +607,39 @@ do
     "         e.g. 8080",
   })
   check("wrapped lines all map to the param", wrapped.line_to_node[1] == "port" and wrapped.line_to_node[2] == "port")
+  check_injections("ladder full", full)
+  check_injections("wrapped ladder", wrapped)
+
+  -- the real crash shape: an annotation long enough that the TYPE ITSELF is
+  -- split across lines, so each line carries a different slice of one snippet.
+  -- With from/to dropped, every one of these claimed the whole 67-byte
+  -- annotation and the second line's extmark ran 48 bytes past its end.
+  local wide = model.new({
+    name = "handlers",
+    kind = "param",
+    type = {
+      raw = "dict[str, Callable[[Request, Session], Awaitable[Response | None]]]",
+      display = "dict[str, Callable[[Request, Session], Awaitable[Response | None]]]",
+      category = "generic",
+    },
+  })
+  local split = render.ladder(wide, { show_examples = false, example_kind = "heuristic", max_width = 30 })
+  check("a long annotation splits across lines", #split.lines > 2)
+  check_injections("split-annotation ladder", split)
+  -- the slices walk the snippet forward without overlapping, and between them
+  -- reach its end. NOT contiguous: a wrap strips the leading space from the
+  -- remainder and steps `from` over it, so each break leaves a gap the width
+  -- of the whitespace that was dropped.
+  -- defaulted the same way float.inject_highlights defaults them, so a
+  -- regression that drops the fields fails this check instead of erroring on
+  -- a nil comparison and taking the rest of the suite with it
+  local walked, ordered = 0, true
+  for _, inj in ipairs(split.ts_injections) do
+    local from, to = inj.from or 0, inj.to or #inj.text
+    ordered = ordered and from >= walked
+    walked = to
+  end
+  check("...its slices walk the annotation in order, to the end", ordered and walked == #wide.type.display)
 
   -- a param with a limited set of valid values presents them (≈ evaluation),
   -- eliding member-by-member with a hidden-count before dropping entirely
