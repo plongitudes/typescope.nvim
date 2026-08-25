@@ -1375,16 +1375,28 @@ do
   -- waste more vertical space than cutting mid-word does
   check("an early break point is ignored", fbp("ab cdefghijklmnop", 16) == 16)
 
-  -- KNOWN WRONG, pinned deliberately — typescope.nvim-7bx.3.
-  -- `limit` is a cell budget but the scan indexes bytes, so on multibyte text
-  -- it searches an earlier slice of the string than the caller asked for and
-  -- under-fills the line. Same shape, same limit, ~5 cells of difference:
+  -- A cell budget spends the same on either. This used to be the tell for the
+  -- byte-indexed scan (7bx.3): identical shape, identical limit, and the
+  -- accented string came back 5 cells shorter because the window was measured
+  -- in the wrong unit. Byte counts differ, cell counts must not.
   local ascii, accented = "aaaa bbbb cccc dddd eeee", "ääää bbbb cccc dddd eeee"
-  check("ascii fills the limit", vim.api.nvim_strwidth(ascii:sub(1, fbp(ascii, 20))) == 19)
-  check(
-    "accented under-fills it (7bx.3: expect 19 once the window is measured in cells)",
-    vim.api.nvim_strwidth(accented:sub(1, fbp(accented, 20))) == 14
-  )
+  local ascii_cut, accented_cut = fbp(ascii, 20), fbp(accented, 20)
+  check("ascii fills the limit", vim.api.nvim_strwidth(ascii:sub(1, ascii_cut)) == 19)
+  check("accented fills it too", vim.api.nvim_strwidth(accented:sub(1, accented_cut)) == 19)
+  check("...taking more bytes to do it", accented_cut > ascii_cut)
+
+  -- and the cut lands on a character boundary, never inside one — the other
+  -- half of what the byte-indexed scan got wrong
+  local function ends_clean(s)
+    return #s == 0 or vim.str_utfindex(s, "utf-8", #s, false) ~= nil
+  end
+  check("the cut never splits a character", ends_clean(accented:sub(1, accented_cut)))
+  -- the no-whitespace fallback is where splitting actually used to happen:
+  -- nothing to break on, so it returned the raw cell budget as a byte index
+  local solid = "ünïcödé_ä_ö_ü_é_ändmöre"
+  local solid_cut = fbp(solid, 12)
+  check("...including on the no-whitespace fallback", ends_clean(solid:sub(1, solid_cut)))
+  check("...which still fills the budget", vim.api.nvim_strwidth(solid:sub(1, solid_cut)) == 12)
 end
 
 print(failures == 0 and "RENDER ALL PASS" or ("RENDER " .. failures .. " FAILURES"))

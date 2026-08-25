@@ -99,27 +99,75 @@ end
 --- whitespace. Only breaks in the back half of the line; a hard cut wastes
 --- less vertical space than honoring a lone early break point.
 ---
+--- `limit` is a count of CELLS and the return is a BYTE index, so the walk has
+--- to convert between them rather than conflating them. It used to scan
+--- `text:sub(i, i)` for i in limit..limit/2 — byte indices, against a cell
+--- budget. On multibyte text that searched an earlier slice of the string than
+--- the caller asked for and under-filled the line (14 cells where ASCII got 19,
+--- same shape, same limit), and its no-whitespace fallback returned the raw
+--- cell budget as a byte index, which split characters and put literal <c3>
+--- bytes on screen.
+---
+--- Walking forward instead of backward is equivalent, not merely similar. The
+--- old loop scanned DOWN and returned on the first comma-space, which is the
+--- HIGHEST one in the window; it set best_space on the first space it met,
+--- which is likewise the highest. Going up and keeping the last of each finds
+--- the same two positions, and a comma still outranks a space regardless of
+--- which sits further right.
+---
+--- Decodes UTF-8 lengths inline rather than reaching for str_utf_pos, and
+--- charges ASCII one cell without asking. That is not premature: this runs on
+--- every wrapped line of every repaint, and an expanded docstring under a
+--- running animation is ~40 calls a frame against a ~1.18ms budget. The
+--- straightforward version — str_utf_pos for the offsets, strwidth per
+--- character — measured 27x the old loop (0.11us -> 2.96us per call), almost
+--- all of it strwidth being called once per character for text that is
+--- overwhelmingly ASCII. Only genuinely multibyte characters pay for a width
+--- lookup, and nothing allocates.
+---
 --- NOTE: if ", " stops being a good boundary (e.g. annotations containing
 --- Literal["a, b"] strings, or future non-Python languages), switch to real
 --- syntax-aware breaks: vim.treesitter.get_string_parser(text, lang), then
 --- break at the subscript/argument node boundary nearest the limit. Same
 --- results for well-behaved annotations, but immune to commas inside strings.
----@param text string annotation text (assumed single-width chars)
+---@param text string annotation text
 ---@param limit integer display cells available on this line
 ---@return integer
 local function find_break_point(text, limit)
   local floor = math.max(1, math.floor(limit / 2))
-  local best_space
-  for i = limit, floor, -1 do
-    local c = text:sub(i, i)
-    if c == "," and text:sub(i + 1, i + 1) == " " then
-      return i -- keep the comma at end of line; caller strips the leading space
+  local n = #text
+  local used, prev_end, i = 0, 0, 1
+  local best_comma, best_space, last_fit
+  while i <= n do
+    local b = text:byte(i)
+    local clen, w
+    if b < 0x80 then
+      clen, w = 1, 1
+    else
+      clen = b >= 0xF0 and 4 or b >= 0xE0 and 3 or b >= 0xC0 and 2 or 1
+      w = strwidth(text:sub(i, math.min(i + clen - 1, n)))
     end
-    if c == " " and not best_space then
-      best_space = math.max(1, i - 1) -- break before the space, no trailing blank
+    local stop = math.min(i + clen - 1, n)
+    if used + w > limit then
+      break
     end
+    used = used + w
+    last_fit = stop
+    -- back half only: a lone early break point wastes more vertical space
+    -- than a hard cut does
+    if used >= floor and clen == 1 then
+      if b == 44 and text:byte(stop + 1) == 32 then -- "," followed by " "
+        best_comma = stop -- caller strips the leading space from the remainder
+      elseif b == 32 then -- " "
+        best_space = math.max(1, prev_end) -- break before it, no trailing blank
+      end
+    end
+    prev_end = stop
+    i = stop + 1
   end
-  return best_space or limit
+  -- every candidate is the end of a whole character, so the cut can never
+  -- land inside one
+  return best_comma or best_space or last_fit or math.min(limit, n)
 end
 
 --- Byte index of the longest prefix of `text` that fits in `cells` columns.
