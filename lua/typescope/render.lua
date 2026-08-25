@@ -137,7 +137,7 @@ local function find_break_point(text, limit)
   local floor = math.max(1, math.floor(limit / 2))
   local n = #text
   local used, prev_end, i = 0, 0, 1
-  local best_comma, best_space, last_fit
+  local best_comma, best_space, last_fit, first_end
   while i <= n do
     local b = text:byte(i)
     local clen, w
@@ -148,6 +148,7 @@ local function find_break_point(text, limit)
       w = strwidth(text:sub(i, math.min(i + clen - 1, n)))
     end
     local stop = math.min(i + clen - 1, n)
+    first_end = first_end or stop
     if used + w > limit then
       break
     end
@@ -165,9 +166,15 @@ local function find_break_point(text, limit)
     prev_end = stop
     i = stop + 1
   end
-  -- every candidate is the end of a whole character, so the cut can never
-  -- land inside one
-  return best_comma or best_space or last_fit or math.min(limit, n)
+  -- Every candidate is the end of a whole character, so the cut can never land
+  -- inside one — first_end included. That last fallback is not theoretical: a
+  -- node deep enough that its hanging indent exceeds the float's width gives
+  -- place() a NEGATIVE avail, and the callers all clamp with math.max(1, cut)
+  -- to guarantee forward progress. Returning the budget there (as the byte
+  -- scan did) meant that clamp landed on byte 1, which is the middle of the
+  -- first character whenever it is multibyte. One whole character is the
+  -- smallest honest unit of progress.
+  return best_comma or best_space or last_fit or first_end or 0
 end
 
 --- Byte index of the longest prefix of `text` that fits in `cells` columns.
@@ -189,6 +196,28 @@ local function fit_prefix(text, cells)
     used, last = used + w, stop
   end
   return last
+end
+
+--- Byte index at which the last `cells` columns of `text` begin — fit_prefix
+--- read from the other end. Needed by the ledger's middle-ellipsis, which has
+--- to keep a tail as well as a head: identifiers discriminate at both ends,
+--- and counting the tail in bytes gives a short one on multibyte names and
+--- can start it inside a character.
+---@param text string
+---@param cells integer
+---@return integer byte index, #text + 1 when not even one character fits
+local function fit_suffix(text, cells)
+  local at = vim.str_utf_pos(text)
+  local used = 0
+  for i = #at, 1, -1 do
+    local stop = (at[i + 1] or #text + 1) - 1
+    local w = strwidth(text:sub(at[i], stop))
+    if used + w > cells then
+      return at[i + 1] or #text + 1
+    end
+    used = used + w
+  end
+  return at[1] or 1
 end
 
 local is_expandable = require("typescope.model").is_expandable
@@ -1177,9 +1206,11 @@ function M.render(roots, opts)
       if strwidth(name) <= NAME_CAP then
         return name
       end
+      -- front and back are CELL budgets, so both ends are sliced by width
+      -- rather than by byte count; NAME_CAP is a column, not a byte offset
       local keep = NAME_CAP - 1
       local front = math.ceil(keep / 2)
-      return name:sub(1, front) .. "…" .. name:sub(-(keep - front))
+      return name:sub(1, fit_prefix(name, front)) .. "…" .. name:sub(fit_suffix(name, keep - front))
     end
 
     -- pass 1: visible rows, tree chrome carried like the other layouts
@@ -1285,7 +1316,9 @@ function M.render(roots, opts)
         def_w = node.default and not detail and 5 or 0
       end
       if strwidth(type_text) + def_w > budget then
-        type_text = type_text:sub(1, math.max(4, budget - def_w - 1)) .. "…"
+        -- budget, def_w and the ellipsis are all measured in cells, so the
+        -- prefix has to be taken in cells too
+        type_text = type_text:sub(1, fit_prefix(type_text, math.max(4, budget - def_w - 1))) .. "…"
         injectable = nil -- a truncated fragment isn't parseable source
       end
       line:add(type_text, type_group, injectable)
@@ -1410,7 +1443,7 @@ local function elide_members(text, budget)
     elseif text:find(" | ", 1, true) then
       head, body, tail, sep = "", text, "", " | "
     else
-      return text:sub(1, math.max(4, budget - 1)) .. "…"
+      return text:sub(1, fit_prefix(text, math.max(4, budget - 1))) .. "…"
     end
   end
   local members = vim.split(body, sep, { plain = true })

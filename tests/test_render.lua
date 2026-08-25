@@ -83,6 +83,60 @@ local function check_injections(desc, result)
   end
 end
 
+-- Nothing the renderer emits may be invalid UTF-8. Every truncation in this
+-- file is handed a budget in DISPLAY CELLS and returns a byte slice, and for a
+-- long time several of them indexed bytes with the cell count directly — which
+-- splits a character and puts a literal <c3> on screen.
+--
+-- Checked as a blanket invariant rather than per site: the fixtures were all
+-- ASCII, so every golden test passed while three separate truncations were
+-- broken. vim.str_utfindex does not validate, so this decodes.
+---@param s string
+local function valid_utf8(s)
+  local i, n = 1, #s
+  while i <= n do
+    local c = s:byte(i)
+    local len
+    if c < 0x80 then
+      len = 1
+    elseif c >= 0xC2 and c <= 0xDF then
+      len = 2
+    elseif c >= 0xE0 and c <= 0xEF then
+      len = 3
+    elseif c >= 0xF0 and c <= 0xF4 then
+      len = 4
+    else
+      return false
+    end
+    if i + len - 1 > n then
+      return false
+    end
+    for k = 1, len - 1 do
+      local b = s:byte(i + k)
+      if b < 0x80 or b > 0xBF then
+        return false
+      end
+    end
+    i = i + len
+  end
+  return true
+end
+
+---@param desc string
+---@param result typescope.RenderResult
+local function check_utf8(desc, result)
+  local bad = nil
+  for i, line in ipairs(result.lines) do
+    if not valid_utf8(line) then
+      bad = bad or ("line %d: %s"):format(i, vim.inspect(line))
+    end
+  end
+  check(desc .. " emits only valid UTF-8", bad == nil)
+  if bad then
+    print("  " .. bad)
+  end
+end
+
 -- one tree exercising: nesting, defaults, badges, examples, unresolved
 -- indicator, collapsed root with hint, return keyword
 local function tree()
@@ -1397,6 +1451,111 @@ do
   local solid_cut = fbp(solid, 12)
   check("...including on the no-whitespace fallback", ends_clean(solid:sub(1, solid_cut)))
   check("...which still fills the budget", vim.api.nvim_strwidth(solid:sub(1, solid_cut)) == 12)
+
+  -- A budget of nothing. A node deep enough that its hanging indent is wider
+  -- than the float hands place() a NEGATIVE avail, and every caller clamps
+  -- with math.max(1, cut) so the wrap loop cannot spin. Returning the budget
+  -- itself made that clamp land on byte 1 — inside the first character — so
+  -- the answer has to be a whole character even when none of it fits.
+  for _, budget in ipairs({ -17, -1, 0 }) do
+    local cut = math.max(1, fbp("ünïcödé", budget))
+    check(("a budget of %d still advances a whole character"):format(budget), cut == 2)
+  end
+end
+
+-- 14. truncation counts cells, not bytes
+--
+-- Four places took a cell budget and used it as a byte index: the wrap point
+-- (covered in 13), the ledger's type truncation, elide_members' no-separator
+-- fallback, and the ledger's middle-ellipsis name cap. Each produced a broken
+-- character on non-ASCII input, and every one of them passed the golden tests
+-- above, because every fixture in this file is ASCII.
+do
+  local uni_type = "Literal['ünïcödé_ä', 'ünïcödé_ö', 'ünïcödé_ü', 'ünïcödé_é']"
+  local uni_name = "ünïcödé_pärämètre_trës_löng_nöm_ïcï"
+  local uni_doc = "Ouvre une connexion réseau — le délai s'exprime en secondes, au-delà de quoi l'appel échoue avec une erreur « timeout »."
+  local uni_header = "ouvrir(möde, hôte_très_long, délai) -> Réponse"
+
+  local function uni_roots()
+    return {
+      model.new({
+        name = uni_name,
+        kind = "param",
+        type = { raw = uni_type, display = uni_type, category = "generic" },
+        default = "'lecture'",
+      }),
+    }
+  end
+
+  -- Width is the variable that matters: a truncation only misbehaves at the
+  -- widths where its cut happens to land mid-character, so a single fixture
+  -- width proves almost nothing. This is the check that would have caught all
+  -- three sites at once.
+  for _, layout in ipairs({ "tree", "table", "ledger" }) do
+    local worst = nil
+    for w = 20, 80 do
+      local res = render.render(uni_roots(), {
+        style = styles.get("rounded"),
+        max_width = w,
+        layout = layout,
+        align = "left",
+        show_examples = false,
+        example_kind = "heuristic",
+        lang = "python",
+        docstring = uni_doc,
+        docstring_pos = "bottom",
+        docstring_expanded = true,
+        header = uni_header,
+      })
+      for i, line in ipairs(res.lines) do
+        if not valid_utf8(line) then
+          worst = worst or ("w=%d line %d %s"):format(w, i, vim.inspect(line))
+        end
+      end
+    end
+    check(("%s survives every width from 20 to 80 intact"):format(layout), worst == nil)
+    if worst then
+      print("  " .. worst)
+    end
+  end
+
+  -- the ledger's middle-ellipsis keeps both ends of an identifier, and both
+  -- ends are now measured in columns — so a unicode name spends its whole
+  -- 24-cell cap instead of stopping around 13
+  local ledger = render.render(uni_roots(), {
+    style = styles.get("rounded"),
+    max_width = 70,
+    layout = "ledger",
+    show_examples = false,
+    example_kind = "heuristic",
+    lang = "python",
+  })
+  check_utf8("ledger with a long unicode name", ledger)
+  -- startswith/endswith, not :sub(1, 3) — a byte slice of "ünïcödé" yields
+  -- "ün", which is how this assertion got written wrong the first time
+  local shown = ledger.lines[1]:match("^· (%S+)")
+  check(
+    "the capped name keeps both ends",
+    vim.startswith(shown, "ünïcödé") and vim.endswith(shown, "nöm_ïcï")
+  )
+  check("...and spends its cell budget, not its byte budget", vim.api.nvim_strwidth(shown) == 24)
+
+  -- elide_members' fallback: a shape with no bracket, no braces and no " | "
+  -- has no member boundary to elide at, so it hard-cuts to the budget
+  local aliased = model.new({
+    name = "möde",
+    kind = "param",
+    type = { raw = "OpenTextMode", display = "OpenTextMode", category = "generic" },
+    evaluated = "ünïcödé_ä_ünïcödé_ö_ünïcödé_ü_ünïcödé_é_ünïcödé_à_ünïcödé_è_ünïcödé_ù",
+  })
+  local narrow = render.ladder(aliased, {
+    show_examples = false,
+    example_kind = "heuristic",
+    max_width = 28,
+    style = styles.get("rounded"),
+  })
+  check_utf8("ladder eliding an unbroken unicode shape", narrow)
+  check_injections("ladder eliding an unbroken unicode shape", narrow)
 end
 
 print(failures == 0 and "RENDER ALL PASS" or ("RENDER " .. failures .. " FAILURES"))
