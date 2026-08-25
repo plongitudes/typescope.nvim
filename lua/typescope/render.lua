@@ -1647,7 +1647,14 @@ function M.ladder(node, opts)
   return result
 end
 
--- exposed for testing and for the spike to hot-swap experiments
+-- Exposed so test_render.lua section 13 can pin the contract directly: cells
+-- in, a 1-based inclusive BYTE index out, caller strips the leading whitespace
+-- from the remainder. Five call sites route through it and the asymmetry in
+-- that contract is where both UTF-8 truncation defects came from, so it is
+-- worth asserting on its own rather than only through a rendered tree.
+--
+-- (It previously also claimed to be here for the spike to hot-swap
+-- experiments. Nothing ever did, and nothing does now.)
 M._find_break_point = find_break_point
 
 return M

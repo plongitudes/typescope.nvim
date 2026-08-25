@@ -1343,4 +1343,48 @@ do
   check("no detail, no examples", example_lines({}) == 0)
 end
 
+-- 13. find_break_point: the wrap decision every layout goes through
+--
+-- Five call sites depend on it — tree flow, docstring prose, header elision,
+-- table cells, ladder detail — and until now none of them tested it directly.
+-- Its contract is easy to get wrong from the outside, so pin it here: `limit`
+-- is a count of DISPLAY CELLS, the return is a 1-based INCLUSIVE BYTE index of
+-- the last character to keep, and the caller is expected to strip the leading
+-- whitespace from whatever remains.
+--
+-- That cells-in/bytes-out asymmetry is the seam both UTF-8 defects grew out
+-- of, which is the other reason these live here rather than being asserted
+-- through a whole rendered tree.
+do
+  local fbp = render._find_break_point
+
+  -- a comma+space is an argument boundary in type syntax, so it wins even when
+  -- a plain space sits further right (the loop scans down from `limit` and
+  -- returns on the first comma, having merely REMEMBERED the spaces above it)
+  check("comma-space beats a space further right", fbp("aaaa bbbb, cccc dddd", 20) == 10)
+  check("...keeping the comma at end of line", ("aaaa bbbb, cccc dddd"):sub(1, 10) == "aaaa bbbb,")
+
+  -- a plain space breaks BEFORE it, so the line never ends in a blank
+  check("breaks before a space", fbp("aaaa bbbb cccc", 14) == 9)
+  check("...leaving no trailing blank", ("aaaa bbbb cccc"):sub(1, 9) == "aaaa bbbb")
+
+  -- nothing to break on: a hard cut at the limit
+  check("no whitespace falls back to a hard cut", fbp("aaaaaaaaaaaaaa", 10) == 10)
+
+  -- only the back half is searched: honouring a lone early break point would
+  -- waste more vertical space than cutting mid-word does
+  check("an early break point is ignored", fbp("ab cdefghijklmnop", 16) == 16)
+
+  -- KNOWN WRONG, pinned deliberately — typescope.nvim-7bx.3.
+  -- `limit` is a cell budget but the scan indexes bytes, so on multibyte text
+  -- it searches an earlier slice of the string than the caller asked for and
+  -- under-fills the line. Same shape, same limit, ~5 cells of difference:
+  local ascii, accented = "aaaa bbbb cccc dddd eeee", "ääää bbbb cccc dddd eeee"
+  check("ascii fills the limit", vim.api.nvim_strwidth(ascii:sub(1, fbp(ascii, 20))) == 19)
+  check(
+    "accented under-fills it (7bx.3: expect 19 once the window is measured in cells)",
+    vim.api.nvim_strwidth(accented:sub(1, fbp(accented, 20))) == 14
+  )
+end
+
 print(failures == 0 and "RENDER ALL PASS" or ("RENDER " .. failures .. " FAILURES"))
