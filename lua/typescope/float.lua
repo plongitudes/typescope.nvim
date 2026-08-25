@@ -66,19 +66,30 @@ end
 
 --- Overlay real syntax highlighting on a source snippet embedded in a float
 --- line, above the base block color (which remains the fallback).
+---
+--- Only `inj.from`..`inj.to` of the snippet is on screen — the rest wrapped to
+--- another line, or is still under a falling block. The whole snippet is what
+--- gets parsed (a fragment parses as nothing), and the spans are then clipped
+--- to the visible slice and placed relative to it. That also means a reveal
+--- asks for the same snippet on every one of its frames, so it parses once.
 ---@param buf integer
 ---@param line integer 0-indexed
----@param col integer byte offset of the snippet in the line
----@param snippet string
+---@param col integer byte offset of the visible slice in the line
+---@param inj typescope.Injection
 ---@param lang string
 ---@param query vim.treesitter.Query
-local function inject_highlights(buf, line, col, snippet, lang, query)
-  for _, span in ipairs(capture_spans(snippet, lang, query)) do
-    vim.api.nvim_buf_set_extmark(buf, ns, line, col + span[1], {
-      end_col = col + span[2],
-      hl_group = span[3],
-      priority = 110,
-    })
+local function inject_highlights(buf, line, col, inj, lang, query)
+  local from = inj.from or 0
+  local to = inj.to or #inj.text
+  for _, span in ipairs(capture_spans(inj.text, lang, query)) do
+    local s, e = math.max(span[1], from), math.min(span[2], to)
+    if s < e then
+      vim.api.nvim_buf_set_extmark(buf, ns, line, col + s - from, {
+        end_col = col + e - from,
+        hl_group = span[3],
+        priority = 110,
+      })
+    end
   end
 end
 
@@ -102,7 +113,8 @@ local function line_signatures(highlights, injections)
     sig[hl.line] = (sig[hl.line] or "") .. ("%d:%d:%s;"):format(hl.col_start, hl.col_end, hl.group)
   end
   for _, inj in ipairs(injections or {}) do
-    sig[inj.line] = (sig[inj.line] or "") .. ("i%d:%s;"):format(inj.col_start, inj.mode or "")
+    sig[inj.line] = (sig[inj.line] or "")
+      .. ("i%d:%s:%d:%d;"):format(inj.col_start, inj.mode or "", inj.from or 0, inj.to or #inj.text)
   end
   return sig
 end
@@ -174,7 +186,8 @@ local function set_content(buf, lines, highlights, injections, lang)
   if query then
     for _, inj in ipairs(injections or {}) do
       if inj.mode ~= "overlay" then
-        replaced[("%d:%d:%d"):format(inj.line, inj.col_start, inj.col_start + #inj.text)] = true
+        local width = (inj.to or #inj.text) - (inj.from or 0)
+        replaced[("%d:%d:%d"):format(inj.line, inj.col_start, inj.col_start + width)] = true
       end
     end
   end
@@ -191,7 +204,7 @@ local function set_content(buf, lines, highlights, injections, lang)
   if query and lang then
     for _, inj in ipairs(injections or {}) do
       if not repaint or repaint[inj.line] then
-        inject_highlights(buf, inj.line, inj.col_start, inj.text, lang, query)
+        inject_highlights(buf, inj.line, inj.col_start, inj, lang, query)
       end
     end
   end
@@ -219,6 +232,15 @@ end
 function M.open(opts)
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].bufhidden = "wipe"
+  -- No undo history. Every animation frame rewrites the lines it repaints, and
+  -- each of those writes records an undo state on a buffer nobody can undo
+  -- into — it is scratch, and nomodifiable except inside set_content. The
+  -- history is never read and never trimmed, so it is pure growth: measured at
+  -- 15.6 KB per frame, 188 MB over 12000 frames, none of it reclaimable by the
+  -- Lua collector because it isn't Lua memory. At 60fps that is 3.4 GB an
+  -- hour, which is how nvim came to be holding 20GB of a machine that had run
+  -- out of it (Tony, 2026-08-24). Same load with undo off: 1.7 MB.
+  vim.bo[buf].undolevels = -1
   -- buffer numbers get reused; a stale signature table would convince the
   -- incremental repaint that lines it has never drawn are already correct
   painted[buf] = nil

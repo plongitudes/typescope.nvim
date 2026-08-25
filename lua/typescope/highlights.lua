@@ -44,14 +44,52 @@ function M.blend(fg, bg, alpha)
   return ("#%02x%02x%02x"):format(chan(65536), chan(256), chan(1))
 end
 
---- Resolved fg of a group (following links), and the Normal background to
---- dim it toward. Either may be nil when the colorscheme leaves it unset.
+---@param name string
+---@return integer? fg, integer? bg
+local function hl_of(name)
+  local ok, hl = pcall(vim.api.nvim_get_hl, 0, { name = name, link = false })
+  if not ok then
+    return nil, nil
+  end
+  return hl.fg, hl.bg
+end
+
+--- The background dimmed colors walk toward.
+---
+--- Normal.bg first, but a transparent theme leaves it unset, and the 0 that
+--- used to stand in for it means BLACK — past the terminal's own background,
+--- so the dimmest rungs of the pending wave read as holes punched in the
+--- float rather than as quiet blocks (Tony, reveal.mov, gruvbox-baby with a
+--- transparent background). Fall back through the other places a theme still
+--- states what it thinks its background is, and only then give up.
+---@return integer
+local function dim_toward()
+  for _, name in ipairs({ "Normal", "NormalFloat" }) do
+    local _, bg = hl_of(name)
+    if bg then
+      return bg
+    end
+  end
+  -- a colorscheme hands the terminal its own palette even when it paints no
+  -- background of its own; ANSI 0/15 is the end of it the float sits on
+  local ansi = vim.o.background == "light" and vim.g.terminal_color_15 or vim.g.terminal_color_0
+  if type(ansi) == "string" then
+    local n = tonumber((ansi:gsub("^#", "")), 16)
+    if n then
+      return n
+    end
+  end
+  local _, cursorline = hl_of("CursorLine")
+  return cursorline or (vim.o.background == "light" and 0xffffff or 0)
+end
+
+--- Resolved fg of a group (following links), and the background to dim it
+--- toward. fg may be nil when the colorscheme leaves it unset.
 ---@param name string
 ---@return integer? fg, integer bg
 function M.resolve(name)
-  local ok, hl = pcall(vim.api.nvim_get_hl, 0, { name = name, link = false })
-  local okn, normal = pcall(vim.api.nvim_get_hl, 0, { name = "Normal", link = false })
-  return (ok and hl.fg or nil), (okn and normal.bg) or 0
+  local fg = hl_of(name)
+  return fg, dim_toward()
 end
 
 -- Same hue as the header, dimmed: blend its resolved fg ~40% toward the

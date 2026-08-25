@@ -978,7 +978,7 @@ do
         -- last. The literal newlines in the text are escaped by json.encode,
         -- so each object still occupies exactly one line of the framing.
         local body = vim.json.encode({
-          response = 'config.host = "llm-host.example.io"\nconfig.port = 8443\nconfig.timeout_ms = 250\ntimeout = 12.5',
+          response = 'config.host = "llm-host.example.io/gateway/v2/ingest?region=us-west-2"\nconfig.port = 8443\nconfig.timeout_ms = 250\ntimeout = 12.5',
           done = false,
         }) .. "\n" .. vim.json.encode({ response = "", done = true }) .. "\n"
         sock:write(
@@ -991,6 +991,12 @@ do
   end)
 end
 
+-- ui.max_width is a FRACTION of editor width, and a headless 80-column
+-- editor caps the float at 40 — which is what the ledger already needs, so
+-- the float opens pinned at its ceiling and nothing can grow. Widen the
+-- editor so the landing frame has somewhere to go; restored below.
+local prev_columns = vim.o.columns
+vim.o.columns = 200
 require("typescope").setup({ ollama = { enabled = true, port = fake_port, timeout_ms = 3000 } })
 for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
   if l:find("handle = create_server") then
@@ -1008,12 +1014,32 @@ if llm_win then
   vim.api.nvim_feedkeys("E", "x", false)
   -- wait for BOTH: values uncover progressively as the reveal's blocks fall
   -- (38c), so the first one on screen doesn't mean the row has settled
+  -- the float opens into its new width rather than snapping there, so sample
+  -- what the window is actually showing while the blocks fall
+  local widths = {}
+  local function sample()
+    widths[#widths + 1] = vim.api.nvim_win_get_config(llm_win).width
+  end
   vim.wait(4000, function()
+    sample()
     local now = table.concat(float_lines() or {}, "\n")
     return now:find("llm%-host") ~= nil and now:find("8443") ~= nil
-  end)
+  end, 20)
+  -- values become legible partway through the grow, so keep sampling past the
+  -- predicate or the tail of the ease is never seen
+  vim.wait(600, function()
+    sample()
+    return false
+  end, 20)
   local all9 = table.concat(float_lines() or {}, "\n")
   check("LLM values rendered after E", all9:find("llm%-host") ~= nil and all9:find("8443") ~= nil)
+  -- >2 distinct widths means it eased; exactly 2 (old width, new width) is the
+  -- single-frame snap this replaced
+  local lo, hi = math.huge, 0
+  for _, w in ipairs(widths) do
+    lo, hi = math.min(lo, w), math.max(hi, w)
+  end
+  check("the float grows into the width the landed values need", hi > lo)
   local title_ok = false
   local cfg9 = vim.api.nvim_win_get_config(llm_win)
   if cfg9.title and cfg9.title[1] and cfg9.title[1][1]:find("typescope") then
@@ -1022,6 +1048,7 @@ if llm_win then
   check("spinner restored the title", title_ok)
 end
 require("typescope").close()
+vim.o.columns = prev_columns
 
 -- silent ollama (accepts, never answers): stall → auto-retry → honest stall
 -- message, not "unreachable". Cache cleared first or the E press is served

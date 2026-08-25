@@ -197,8 +197,10 @@ check(
     and kinds["3"] == "replace"
     and kinds['"localhost"'] == "overlay"
 )
--- a genuinely split annotation must not inject (fragments aren't parseable);
--- its unsplit default still does
+-- a split annotation still injects: each piece names the WHOLE annotation as
+-- its snippet and the byte slice of it that landed on that line, so a
+-- continuation reading `Awaitable[Response | None]]]` is painted from the
+-- colors the full type parses to rather than dropping to the base group
 local wide = render.render({
   model.new({
     name = "handlers",
@@ -210,16 +212,38 @@ local wide = render.render({
     default = "None",
   }),
 }, opts({ max_width = 40, show_examples = false }))
-local split_injected, default_injected = false, false
+local annotation = "dict[str, Callable[[Request, Session], Awaitable[Response | None]]]"
+local pieces, default_injected, slices_sound = {}, false, true
 for _, ij in ipairs(wide.ts_injections) do
-  if ij.text:find("Callable", 1, true) then
-    split_injected = true
+  if ij.text == annotation then
+    table.insert(pieces, ij)
+    -- the slice has to name real bytes of the snippet, and the line has to
+    -- actually hold them at col_start: an off-by-one here paints a wrapped
+    -- type with its neighbour's colors, which is invisible until it isn't
+    local slice = annotation:sub(ij.from + 1, ij.to)
+    local line = wide.lines[ij.line + 1]
+    if slice == "" or line:sub(ij.col_start + 1, ij.col_start + #slice) ~= slice then
+      slices_sound = false
+    end
   end
   if ij.text == "None" then
     default_injected = true
   end
 end
-check("split spans do not inject; unsplit defaults still do", not split_injected and default_injected)
+table.sort(pieces, function(a, b)
+  return a.from < b.from
+end)
+local covered = #pieces > 0 and pieces[1].from == 0 and pieces[#pieces].to == #annotation
+for i = 2, #pieces do
+  -- flow strips the blank after a break, so pieces may skip a byte but never
+  -- overlap and never leave a gap wider than the whitespace it dropped
+  local gap = annotation:sub(pieces[i - 1].to + 1, pieces[i].from)
+  if not gap:match("^%s*$") then
+    covered = false
+  end
+end
+check("a split annotation injects as slices of the whole", #pieces > 1 and covered and slices_sound)
+check("an unsplit default still injects", default_injected)
 
 -- 8b. atomic segments (origin/badges) never split mid-word when wrapping
 eq_lines(
@@ -785,6 +809,42 @@ do
     check("a MISS still falls away rather than popping", miss_frame(0.1):find("[▁▂▃▅▇]") ~= nil)
     check("...and leaves nothing behind", not miss_frame(nil):find("[▁▂▃▅▇]"))
 
+    -- The frozen wave is frozen in X too. Cells that drain with nothing under
+    -- them hold their column with a space; emitting nothing instead pulled
+    -- every block to their right one cell left per drained cell, so a MISS —
+    -- which drains ALL of them — crept steadily leftwards the whole way down
+    -- and read as the wave travelling again. Track the leftmost crest: it may
+    -- shrink and vanish, but while it stands it must not move.
+    -- Track the wave's PEAK, not a fixed brightness: every cell loses height
+    -- together, so the tallest cell stays the tallest one — and stays put.
+    -- Testing a fixed rung instead would fail honestly, since the whole wave
+    -- sinks past any threshold you pick.
+    local BAR = { "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█" }
+    local function peak_col(line)
+      -- every glyph on this row is single-width, so index IS column
+      local at = vim.str_utf_pos(line)
+      local best, best_col = 0, nil
+      for i = 1, #at do
+        local ch = line:sub(at[i], (at[i + 1] or #line + 1) - 1)
+        for rung, glyph in ipairs(BAR) do
+          if ch == glyph and rung > best then
+            best, best_col = rung, i
+          end
+        end
+      end
+      return best_col
+    end
+    local anchor = peak_col(miss_frame(0))
+    check("a draining MISS has a peak to track", anchor ~= nil)
+    local drifted = false
+    for _, pr in ipairs({ 0.1, 0.2, 0.3, 0.4, 0.5 }) do
+      local col = peak_col(miss_frame(pr))
+      if col and col ~= anchor then
+        drifted = true
+      end
+    end
+    check("the frozen wave holds its columns as it drains", not drifted)
+
     -- a pending node has no value yet, so a stale reveal must not fire
     progress = 0.5
     local bare = model.new({ name = "x", kind = "param", type = { display = "_T", category = "typevar" } })
@@ -816,6 +876,378 @@ do
       return false
     end }, '"example.com"').injected == true
   )
+end
+
+-- The bar's left edge has to read as the value's left edge, and the taper is
+-- what blurred it: the value lands in column one, but the outer columns were
+-- so faint that the bar looked like it began several columns in (Tony,
+-- reveal.mov). The taper stays — it is what keeps the wave from being chopped
+-- off mid-crest — but its SHAPE is now a quarter sine rather than a raised
+-- cosine, steepest at the edge and easing only into the plateau.
+--
+-- What is asserted is that shape, not a column number: alpha is a tuning knob
+-- (Tony has moved it twice), and a test that pins where the taper ends just
+-- has to be rewritten every time it moves. A test that says the climb is
+-- front-loaded holds at any width.
+do
+  local bare = model.new({ name = "x", kind = "param", type = { display = "_T", category = "typevar" } })
+  -- the bar is the whole tail of the row, trailing height-0 cells included,
+  -- so its columns are the last PENDING_CELLS characters of the line
+  local WIDTH = 28
+  local function bar_at(phase)
+    local line = render.render({ bare }, opts({
+      example_kind = "llm",
+      example_pending = function()
+        return true
+      end,
+      example_phase = phase,
+    })).lines[1]
+    local chars = vim.fn.strchars(line)
+    local cells = {}
+    for i = 1, WIDTH do
+      cells[i] = vim.fn.strcharpart(line, chars - WIDTH + i - 1, 1)
+    end
+    return cells
+  end
+  local ladder = { "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█" }
+  local function rung(cell)
+    for i, glyph in ipairs(ladder) do
+      if cell == glyph then
+        return i
+      end
+    end
+    return 0
+  end
+  -- across a full scroll, how tall does each column ever get?
+  local peak = {}
+  for step = 0, 39 do
+    local cells = bar_at(step / 40)
+    for i, cell in ipairs(cells) do
+      peak[i] = math.max(peak[i] or 0, rung(cell))
+    end
+  end
+  -- the taper runs from the edge to the first column that ever reaches full
+  local plateau
+  for i = 1, #peak do
+    if not plateau and peak[i] == #ladder then
+      plateau = i
+    end
+  end
+  -- Halfway through the taper it should be well past halfway up. A raised
+  -- cosine is exactly half up at its midpoint (rung 4 of 8) and spends the
+  -- first third of its width near zero; the quarter sine is at rung 6 there.
+  -- Six passes with a rung of room either side of the two curves.
+  local mid = plateau and peak[math.ceil(plateau / 2)] or 0
+  check("the taper climbs fastest at the edge, not in the middle", mid >= 5)
+  -- ...and it is still a taper, at both ends, not a square cut
+  check("the first column still fades in", peak[1] < #ladder)
+  check("the last column still fades out", (peak[#peak] or 0) < #ladder)
+end
+
+-- An animating row is a picture of one value, and a picture that wraps is two
+-- pictures. A 98-cell reveal used to come out as two stacked waves mid-flight
+-- and re-flow into a different shape the frame it settled; now it clips to one
+-- line and the opening window uncovers the rest (Tony, reveal.mov).
+do
+  local long = '"llm-host.example.io/gateway/v2/ingest?region=us-west-2&trace=on"'
+  local node = model.new({ name = "host", kind = "param", type = { display = "str", category = "builtin" } })
+  node.example.llm = long
+  local function frame(over)
+    return render.render({ node }, opts(vim.tbl_extend("force", {
+      layout = "ledger",
+      detail_all = true,
+      max_width = 40,
+      example_kind = "llm",
+    }, over)))
+  end
+  local waiting = frame({
+    example_pending = function()
+      return true
+    end,
+  })
+  local falling = frame({
+    example_pending = function()
+      return false
+    end,
+    example_reveal = function()
+      return 0.35, 0.3
+    end,
+  })
+  local settled = frame({
+    example_pending = function()
+      return false
+    end,
+  })
+  local function example_lines(r)
+    local n = 0
+    for _, l in ipairs(r.lines) do
+      if l:find("e.g.", 1, true) or l:find("[▁▂▃▄▅▆▇█]") then
+        n = n + 1
+      end
+    end
+    return n
+  end
+  check("a pending bar stays on one line", example_lines(waiting) == 1)
+  check("...and so does a falling one", example_lines(falling) == 1)
+  local widest = 0
+  for _, l in ipairs(falling.lines) do
+    widest = math.max(widest, vim.api.nvim_strwidth(l))
+  end
+  check("...clipped at the edge, never past it", widest <= 40)
+  -- the pop-in of the second line is allowed, but only once it is real text
+  check("the settled value is what wraps", #settled.lines > #falling.lines)
+end
+
+-- A half-uncovered value is a fragment: `_t.UriTy` parses as nothing, so it
+-- painted flat grey until the frame it became whole and then flipped to full
+-- color in one step. Each uncovered run names the whole value as its snippet
+-- and the slice of it on screen, so characters arrive already colored.
+do
+  -- nothing the value contains appears in the annotation, so any injection
+  -- naming part of it can only have come from the reveal
+  local value = '"https://api.example.com/data"'
+  local node = model.new({ name = "url", kind = "param", type = { display = "str", category = "builtin" } })
+  node.example.llm = value
+  local mid = render.render({ node }, opts({
+    example_kind = "llm",
+    example_pending = function()
+      return false
+    end,
+    example_reveal = function()
+      return 0.6, 0.3
+    end,
+  }))
+  local slices, sound = 0, true
+  for _, ij in ipairs(mid.ts_injections) do
+    if ij.text == value then
+      slices = slices + 1
+      local text = value:sub(ij.from + 1, ij.to)
+      if mid.lines[ij.line + 1]:sub(ij.col_start + 1, ij.col_start + #text) ~= text then
+        sound = false
+      end
+    end
+  end
+  check("an uncovered run injects the whole value", slices > 0)
+  check("...at the offset it actually occupies", sound)
+  local fragmented = false
+  for _, ij in ipairs(mid.ts_injections) do
+    if ij.text ~= value and value:find(ij.text, 1, true) then
+      fragmented = true
+    end
+  end
+  check("...and never as the fragment it looks like", not fragmented)
+end
+
+-- The window never shrinks, so the rules inside it must not either: a row that
+-- re-flowed narrower on the frame it settled used to drag both section rules
+-- in by a dozen columns while the frame around them stayed put.
+do
+  local node = model.new({ name = "x", kind = "param", type = { display = "str", category = "builtin" } })
+  local function rule_width(min)
+    local r = render.render({ node }, opts({ header = "f(x)", max_width = 90, window_width = min }))
+    local widest = 0
+    for _, l in ipairs(r.lines) do
+      -- a rule is a line of nothing but the rule glyph (which is three bytes,
+      -- so a Lua pattern can't say that)
+      if #l > 0 and (l:gsub("─", "")) == "" then
+        widest = math.max(widest, vim.api.nvim_strwidth(l))
+      end
+    end
+    return widest
+  end
+  local natural = rule_width(nil)
+  check("a rule with no floor still fits the content", natural > 0)
+  check("a floor holds it open", rule_width(natural + 20) == natural + 20)
+  check("...and a floor under the content is ignored", rule_width(4) == natural)
+end
+
+-- The pending bar used to be a fixed 28 cells while the landed value's wave
+-- ran the whole row, so the frame that landed a batch stretched every wave
+-- from two-thirds of the way across to the right edge in one step — a jump
+-- across a third of the row, on the loudest frame of the transition (Tony,
+-- reveal.mov f747->f748). The bar now runs out to the float's own edge, so
+-- there is nothing left for the landing frame to move.
+do
+  local short = model.new({ name = "method", kind = "param", type = { display = "str", category = "builtin" } })
+  short.example.llm = '"GET"'
+  local W = 64
+  local function frame(over)
+    return render.render({ short }, opts(vim.tbl_extend("force", {
+      layout = "ledger",
+      detail_all = true,
+      max_width = 90,
+      window_width = W,
+      example_kind = "llm",
+      example_phase = 0.25,
+    }, over)))
+  end
+  local waiting = frame({
+    example_pending = function()
+      return true
+    end,
+  })
+  local landing = frame({
+    example_pending = function()
+      return false
+    end,
+    -- progress 0 is the first frame of the fall: the wave has not moved yet,
+    -- so it must still be the one the pending frame was showing
+    example_reveal = function()
+      return 0, 0.25
+    end,
+  })
+  local function example_line(r)
+    for _, l in ipairs(r.lines) do
+      if l:find("e.g.", 1, true) then
+        return l
+      end
+    end
+  end
+  local before, after = example_line(waiting), example_line(landing)
+  check("a pending wave reaches the float's right edge", vim.api.nvim_strwidth(before) == W)
+  -- the landing row may come up one cell short: its trailing cell is a drained
+  -- blank with no character under it, and those are trimmed rather than left as
+  -- trailing whitespace
+  check("...and the landing frame is the same width", W - vim.api.nvim_strwidth(after) <= 1)
+  -- every column that is a block in BOTH frames has to be the SAME block:
+  -- that is what "nothing moved sideways" means, cell by cell
+  local ladder = "[▁▂▃▄▅▆▇█]"
+  local moved, compared = false, 0
+  for i = 1, math.min(vim.fn.strchars(before), vim.fn.strchars(after)) do
+    local a = vim.fn.strcharpart(before, i - 1, 1)
+    local b = vim.fn.strcharpart(after, i - 1, 1)
+    if a:match(ladder) and b:match(ladder) then
+      compared = compared + 1
+      if a ~= b then
+        moved = true
+      end
+    end
+  end
+  check("...and every block that is still a block sits where it did", compared > 10 and not moved)
+end
+
+-- The wave is drawn out to the float's right edge — and during a reveal that
+-- edge is moving, because the values that just landed are what widen the
+-- float. Measured against it every frame, frozen_wave rescales its wavelength
+-- to a longer run each time and the wave visibly stretches while it falls
+-- (Tony). example_reveal hands back the width the wave froze at, and it keeps
+-- that for the whole fall.
+do
+  local node = model.new({ name = "returns", kind = "return", type = { display = "R", category = "class" } })
+  node.example.llm = 'Response(status_code=200, content=b"{\'key\': \'value\'}", headers={"Content-Type": "app"})'
+  local FROZEN = 64
+  local function example_at(window, froze_at)
+    local r = render.render({ node }, opts({
+      layout = "ledger",
+      detail_all = true,
+      max_width = 90,
+      window_width = window,
+      example_kind = "llm",
+      example_phase = 0.25,
+      example_pending = function()
+        return false
+      end,
+      -- one fixed instant of the fall, sampled while the window eases open
+      example_reveal = function()
+        return 0.3, 0.25, froze_at
+      end,
+    }))
+    for _, l in ipairs(r.lines) do
+      if l:find("e.g.", 1, true) then
+        return l
+      end
+    end
+  end
+  local frozen = example_at(FROZEN, FROZEN)
+  local same, differed = true, false
+  for _, window in ipairs({ 71, 78, 85, 90 }) do
+    if example_at(window, FROZEN) ~= frozen then
+      same = false
+    end
+    -- the control: without a frozen width the wave follows the edge, which is
+    -- what the stretch WAS. If this stops differing the test has gone vacuous.
+    if example_at(window, nil) ~= example_at(FROZEN, nil) then
+      differed = true
+    end
+  end
+  check("a falling wave keeps its shape while the window opens", same)
+  check("...where one measured against the moving edge would not", differed)
+end
+
+-- An atomic segment too wide to fit even on a continuation line used to spin
+-- flow() forever: it kept asking for a fresh line, and a fresh line is never
+-- narrower than its own chrome. render.render is pure and synchronous, so that
+-- was a hung editor rather than a bad layout.
+--
+-- The origin tag is the atomic segment here. Examples used to be atomic too,
+-- and were the easiest way in, but they split like ordinary text now — so the
+-- example covers the split path and the origin covers the one that hung.
+--
+-- If this ever regresses the suite HANGS instead of failing, so the assertions
+-- below are really just markers for whoever has to read the stack.
+do
+  local wide = model.new({ name = "host", kind = "param", type = { display = "str", category = "builtin" } })
+  wide.example.heuristic = '"llm-host.example.io/gateway/v2/ingest?region=us-west-2"'
+  wide.origin = "typescope.transport.gateway.RegionalIngestClientConfiguration"
+  local narrow = render.render({ wide }, opts({ layout = "ledger", detail_all = true, max_width = 40 }))
+  check("an example wider than the float wraps instead of hanging", #narrow.lines >= 2)
+  local widest = 0
+  for _, l in ipairs(narrow.lines) do
+    widest = math.max(widest, vim.api.nvim_strwidth(l))
+  end
+  check("...and every wrapped line stays inside max_width", widest <= 40)
+  -- deep chrome eats more of each continuation line; the guard has to be the
+  -- prefix's real width, not a constant
+  local parent = model.new({ name = "cfg", kind = "param", type = { display = "C", category = "struct" } })
+  parent.state.expanded = true
+  parent.children = { wide }
+  local nested = render.render({ parent }, opts({ layout = "ledger", detail_all = true, max_width = 40 }))
+  check("...at depth too", #nested.lines >= 3)
+end
+
+-- `e.g.` is a two-character label, and an atomic example left it alone on a
+-- line of its own with the value hanging underneath — a whole line spent on
+-- two characters in a float built to be compact. It also disagreed with the
+-- animation immediately before it, which starts the value straight after the
+-- label (Tony's call, reveal.mov f804->f805).
+do
+  local node = model.new({ name = "returns", kind = "return", type = { display = "R", category = "class" } })
+  node.example.heuristic = 'Response(status_code=200, content=b"{\'data\': [{\'id\': 1, \'name\': \'Item 1\'}]}")'
+  local r = render.render({ node }, opts({ layout = "ledger", detail_all = true, max_width = 64 }))
+  local label
+  for _, l in ipairs(r.lines) do
+    if l:find("e.g.", 1, true) then
+      label = l
+    end
+  end
+  check("the value starts on the e.g. line", label ~= nil and label:find("Response(", 1, true) ~= nil)
+  -- and it uses that line: an atomic example left it two characters wide
+  check("...filling it rather than leaving a stub", vim.api.nvim_strwidth(label) > 50)
+end
+
+-- The float opens into a landed batch's width instead of snapping there. The
+-- e2e can only check THAT it grows; how it travels is pure math, so it gets
+-- checked here where load can't blur it.
+do
+  local ease = require("typescope.interact")._grow_ease
+  check("a grow starts where the window already is", ease(40, 80, 0) == 40)
+  check("...and ends exactly on the target", ease(40, 80, 1) == 80)
+  local prev, monotone, strictly_inside = 40, true, false
+  for i = 1, 19 do
+    local w = ease(40, 80, i / 20)
+    if w < prev then
+      monotone = false
+    end
+    if w > 40 and w < 80 then
+      strictly_inside = true
+    end
+    prev = w
+  end
+  check("...never goes backwards", monotone)
+  check("...and passes through intermediate widths (this is what a snap lacks)", strictly_inside)
+  -- ease-OUT: the first half of the time covers well over half the distance
+  check("most of the travel happens up front", ease(0, 100, 0.5) > 60)
+  check("a zero-length grow is not a divide-by-anything", ease(50, 50, 0.5) == 50)
 end
 
 -- d1x: L's transient peek opens every ledger detail block at once. Without it

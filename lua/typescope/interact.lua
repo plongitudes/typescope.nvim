@@ -5,6 +5,28 @@ local config = require("typescope.config")
 
 local M = {}
 
+--- Where a width grow has reached at `t` (0..1 through its duration).
+--- Ease-out cubic: most of the travel happens up front, so the window is out of
+--- the way early and the last columns drift rather than lurch.
+---
+--- Pulled out as a pure function because the e2e can only sample the real
+--- window from the event loop, and how many samples land inside a 400ms grow
+--- depends on machine load — enough to pass alone and fail under the suite
+--- runner. The curve is testable exactly; the wiring is one call site.
+---@param from integer
+---@param to integer
+---@param t number
+---@return integer
+function M._grow_ease(from, to, t)
+  if t <= 0 then
+    return from
+  end
+  if t >= 1 then
+    return to
+  end
+  return math.floor(from + (to - from) * (1 - (1 - t) ^ 3) + 0.5)
+end
+
 ---@class typescope.Controller
 ---@field opts typescope.RenderOpts current render options (mutated by toggles)
 ---@field refresh fun(focus_id?: string)
@@ -80,13 +102,68 @@ function M.attach(args)
   local WAVE_PERIOD_MS = 1400 -- one full traverse of the pending bar
   local REVEAL_MS = 675
   local REVEAL_STAGGER_MS = 90 -- rows of a landed batch cascade, not flash
+  -- The float opens into its new width instead of snapping there. Landed
+  -- values are routinely wider than the 28-cell bar that stood in for them, so
+  -- the frame that lands a batch used to widen the window by a dozen columns
+  -- in one step — the loudest single event in the whole transition. Growing
+  -- under the fall reads as the value pushing the window open, and the tail
+  -- the window has yet to uncover is still bar, not settled text.
+  --
+  -- Shorter than REVEAL_MS on purpose: the window finishes opening while
+  -- blocks are still falling, so the two don't end on the same frame and the
+  -- animation has no flat tail.
+  local GROW_MS = 400
+  -- How long the bars are willing to wait before they stop moving. A pending
+  -- row animates because a request is out; if that request never comes back —
+  -- curl wedged, or a callback orphaned when its float closed — nothing
+  -- retires the claim, and the clock repaints at 60fps for as long as the
+  -- editor lives. That is what ran for hours behind the 20GB nvim (Tony,
+  -- 2026-08-24). The leak underneath it is fixed (float.lua turns off undo on
+  -- the float buffer), but an animation with no end is still wrong on a
+  -- laptop.
+  --
+  -- Generous on purpose: a batch of 8 asks for ~224 tokens, which is 19-27s on
+  -- an 8GB M1, and a cold model load can precede it. Three minutes is many
+  -- times the worst honest case. Past it the bars simply stand still — the
+  -- answer is not abandoned, and a late one still paints, because
+  -- examples.on_landed refreshes whether or not a clock is running.
+  local PENDING_MAX_MS = 180000
+  local waiting_since = nil ---@type integer? hrtime the current wait began
   local reveals = {} ---@type table<string, integer> node id -> hrtime its wave starts
   local was_pending = {} ---@type table<string, boolean> pending as of the last paint
   local clock = nil
+  local grow = nil ---@type { from: integer, to: integer, start: integer }?
 
-  --- Anything still moving? Pending bars travel; landed rows sweep.
+  --- The width to paint this frame: the grow's eased position, or the settled
+  --- width when nothing is growing. Retires the grow once it arrives.
+  ---@return integer
+  local function grown_width()
+    if not grow then
+      return st.width
+    end
+    local t = (vim.uv.hrtime() - grow.start) / 1e6 / GROW_MS
+    if t >= 1 then
+      grow = nil
+      return st.width
+    end
+    return M._grow_ease(grow.from, grow.to, t)
+  end
+
+  --- Anything still moving? Pending bars travel; landed rows sweep; the window
+  --- opens. The grow is listed so the clock outlives a reveal that somehow
+  --- retires first — otherwise the window would stop half-open.
+  ---
+  --- A wait that has gone on past PENDING_MAX_MS stops counting as movement.
   local function animating()
-    return examples.any_awaiting() or next(reveals) ~= nil
+    local waiting = examples.any_awaiting()
+    if not waiting then
+      waiting_since = nil
+    elseif not waiting_since then
+      waiting_since = vim.uv.hrtime()
+    elseif (vim.uv.hrtime() - waiting_since) / 1e6 > PENDING_MAX_MS then
+      waiting = false
+    end
+    return waiting or next(reveals) ~= nil or grow ~= nil
   end
 
   local function stop_clock()
@@ -135,9 +212,9 @@ function M.attach(args)
     end
     local t = (vim.uv.hrtime() - r.start) / 1e6
     if t <= 0 then
-      return 0, r.phase -- staggered behind an earlier row: hold the frozen wave
+      return 0, r.phase, r.width -- staggered behind an earlier row: hold the frozen wave
     end
-    return t < REVEAL_MS and t / REVEAL_MS or nil, r.phase
+    return t < REVEAL_MS and t / REVEAL_MS or nil, r.phase, r.width
   end
 
   --- Queue a wave for every leaf that stopped being pending since the last
@@ -154,11 +231,28 @@ function M.attach(args)
       end
     end)
     was_pending = now
+    -- something came back, so the wait that is running is a fresh one: a
+    -- generation of several batches re-arms the watchdog at each landing
+    -- rather than being timed as one long silence
+    if #landed > 0 then
+      waiting_since = nil
+    end
     local base = vim.uv.hrtime()
     for i, id in ipairs(landed) do
       -- freeze the wave where the eye last saw it, then let it fall from
       -- there: st.opts.example_phase is this frame's phase, set just above
-      reveals[id] = { start = base + (i - 1) * REVEAL_STAGGER_MS * 1e6, phase = st.opts.example_phase or 0 }
+      -- ...and the width it froze at, alongside the phase. The wave is drawn
+      -- to the float's right edge, and that edge is about to move: the values
+      -- that just landed are what widen the float. Left to follow it, the
+      -- wave's own wavelength is recomputed against a wider run every frame of
+      -- the grow, so it stretches while it falls (Tony). Frozen means frozen —
+      -- st.width here is still the pre-landing width, because the render that
+      -- discovers the new one has not run yet.
+      reveals[id] = {
+        start = base + (i - 1) * REVEAL_STAGGER_MS * 1e6,
+        phase = st.opts.example_phase or 0,
+        width = st.width,
+      }
     end
   end
 
@@ -185,19 +279,41 @@ function M.attach(args)
     -- animation), and sync_reveals freezes newly-landed rows AT this value
     st.opts.example_phase = (vim.uv.hrtime() / 1e6 % WAVE_PERIOD_MS) / WAVE_PERIOD_MS
     sync_reveals()
+    -- The width the float already has. Two things need it: the rules under the
+    -- header and above the docstring stretch to at least it, so a row that
+    -- re-flows narrower on the frame it settles doesn't drag them in with it;
+    -- and a pending wave runs out to it, so the bar is already as wide as the
+    -- landed value's will be. One frame behind the render it feeds, which is
+    -- what keeps it from chasing its own tail — the bar reaching the edge is
+    -- what makes the edge stay put.
+    st.opts.window_width = st.width
     st.result = render.render(st.roots, st.opts)
     sync_clock()
     local lines = vim.list_extend({}, st.result.lines)
     local highlights = st.result.highlights
     -- expanding deep subtrees produces wider content than the float opened
     -- with — grow the window (never shrink; up to max_width) or lines clip
+    local target = st.width -- the width we were already headed for
+    local shown = grown_width() -- ...and the one actually on screen, mid-grow
     st.width = math.max(st.width, math.min(st.opts.max_width, st.result.width))
+    -- Only a reveal animates the growth. Everywhere else — <CR> to expand, the
+    -- first paint — the new width is what the user asked for and should be
+    -- there on the next frame, and outside a reveal there is no clock running
+    -- to ease it with anyway.
+    --
+    -- Keyed on the TARGET moving, not on the window lagging behind it: mid-grow
+    -- the window is always narrower than st.width, so testing that instead
+    -- restarted the ease every single frame and turned a fixed 400ms curve into
+    -- an exponential crawl that only ended when the reveals did.
+    if st.width > target and next(reveals) ~= nil and config.get().ui.animations then
+      grow = { from = shown, to = st.width, start = vim.uv.hrtime() }
+    end
     float.update(st.handle, {
       lines = lines,
       highlights = highlights,
       ts_injections = st.result.ts_injections,
       lang = st.opts.lang,
-      width = st.width,
+      width = grown_width(),
       height = math.min(st.max_height, #lines),
     })
     if focus_id then

@@ -6,9 +6,11 @@
 
 ---@class typescope.Injection
 ---@field line integer 0-indexed
----@field col_start integer byte offset
+---@field col_start integer byte offset where the VISIBLE slice starts
 ---@field text string source snippet to highlight with the language's TS parser
 ---@field mode "replace"|"overlay" replace: syntax colors supplant the base block group (so bold/italic from semantic groups don't bleed through); overlay: both apply (examples keep their dim styling)
+---@field from integer byte offset into `text` of the slice actually on screen
+---@field to integer exclusive end of that slice
 
 ---@class typescope.RenderResult
 ---@field lines string[]
@@ -22,6 +24,7 @@
 ---@class typescope.RenderOpts
 ---@field style typescope.Charset
 ---@field max_width integer resolved columns (callers use config.resolved_max_width)
+---@field window_width? integer inner width the float ALREADY has; content is laid out to at least it (rules stretch to it, pending bars reach it)
 ---@field layout? "tree"|"table"|"ledger" flowing segments (default) vs column grid (U5) vs one-line rows + detail block (U6)
 ---@field align? "left"|"right" name column alignment (default left, tree layout)
 ---@field detail_id? string ledger layout: node whose row expands into a detail block
@@ -29,7 +32,7 @@
 ---@field show_examples boolean
 ---@field example_kind "heuristic"|"llm"
 ---@field example_pending? fun(node: typescope.Node): boolean leaves whose LLM value is still coming (38c); injected so render stays pure
----@field example_reveal? fun(node: typescope.Node): number?, number? 0..1 through the fall, plus the wave phase it froze at (38c)
+---@field example_reveal? fun(node: typescope.Node): number?, number?, integer? 0..1 through the fall, the wave phase it froze at, and the float width it froze at (38c)
 ---@field example_phase? number 0..1 position of the travelling wave through the pending bar (38c)
 ---@field lang? string treesitter language for injected snippet highlighting
 ---@field header? string one-line call shape shown above the tree
@@ -51,10 +54,21 @@ local function new_line()
   return setmetatable({ text = "", width = 0, hls = {}, inj = {} }, Line)
 end
 
+--- `text` is what lands on this line; `snippet`/`from` say what it is a piece
+--- OF. A wrapped value and a half-uncovered one are both fragments — `dict[str,`
+--- or `_t.UriTy` parse as nothing on their own, which is why a value that
+--- wrapped, or one still emerging from under the wave, used to go flat grey
+--- and then snap into color the instant it became whole (Tony, reveal.mov).
+--- Parsing the WHOLE value and painting only the part on screen gives the
+--- fragment the colors it will end up with. It also memoises: the snippet is
+--- the same string every frame of a reveal, where per-frame fragments were a
+--- fresh cache key each time.
 ---@param text string
 ---@param group? string base highlight group
 ---@param inject? "replace"|"overlay" span is a source snippet for real TS highlighting
-function Line:add(text, group, inject)
+---@param snippet? string full source `text` is a slice of (defaults to `text`)
+---@param from? integer byte offset of `text` within `snippet` (defaults to 0)
+function Line:add(text, group, inject, snippet, from)
   if text == "" then
     return self
   end
@@ -62,7 +76,14 @@ function Line:add(text, group, inject)
     table.insert(self.hls, { col_start = #self.text, col_end = #self.text + #text, group = group })
   end
   if inject then
-    table.insert(self.inj, { col_start = #self.text, text = text, mode = inject })
+    from = from or 0
+    table.insert(self.inj, {
+      col_start = #self.text,
+      text = snippet or text,
+      mode = inject,
+      from = from,
+      to = from + #text,
+    })
   end
   self.text = self.text .. text
   self.width = self.width + strwidth(text)
@@ -101,12 +122,33 @@ local function find_break_point(text, limit)
   return best_space or limit
 end
 
+--- Byte index of the longest prefix of `text` that fits in `cells` columns.
+--- Unlike find_break_point this cuts wherever it must and counts real display
+--- width — the caller is clipping an animation frame, not laying out prose,
+--- and the run it is cutting is usually block glyphs (three bytes, one cell).
+---@param text string
+---@param cells integer
+---@return integer byte index, 0 when not even one character fits
+local function fit_prefix(text, cells)
+  local at = vim.str_utf_pos(text)
+  local used, last = 0, 0
+  for i = 1, #at do
+    local stop = (at[i + 1] or #text + 1) - 1
+    local w = strwidth(text:sub(at[i], stop))
+    if used + w > cells then
+      break
+    end
+    used, last = used + w, stop
+  end
+  return last
+end
+
 local is_expandable = require("typescope.model").is_expandable
 
 -- LuaJIT compiles these to machine instructions once localised; the wave calls
 -- them per cell per frame, so this is the one place in the file where hoisting
 -- them off the `math` table is worth the two lines.
-local sin, cos = math.sin, math.cos
+local sin = math.sin
 local floor = math.floor
 -- separate statements ON PURPOSE: `local floor, round = math.floor, ... floor`
 -- binds the closure's `floor` to the GLOBAL (nil), because Lua evaluates the
@@ -119,7 +161,7 @@ local PI = math.pi
 -- The shape that travels through the placeholder bar while a leaf waits, and
 -- that the landed value emerges from under. A Tukey-windowed sine: position is
 -- NORMALISED (t = cell/(count-1)), so WAVE_FREQ oscillations span whatever
--- width the bar happens to be, and the cosine taper at each end fades it to
+-- width the bar happens to be, and the sine taper at each end fades it to
 -- nothing instead of chopping it off mid-crest.
 --
 -- This replaced a fixed 14-entry lookup table, which had two faults the shape
@@ -132,15 +174,37 @@ local PI = math.pi
 -- Brightness tracks height (see highlights.lua), so a cell rising through the
 -- wave lights up as it grows and the highlight groups stay static.
 local WAVE_FREQ = 3.0 -- oscillations across the bar, at ANY width
-local WAVE_ALPHA = 0.4 -- fraction of total width spent tapering, split per end
+-- Fraction of total width spent tapering, split per end. It was 0.4 — 5.4
+-- cells of fade at each end of a 28-cell bar — and the first four columns
+-- never got above rung 2 at any phase, so the bar looked like it began five
+-- columns right of where it does. The value's first character lands in column
+-- one, which made the whole thing arrive left of where the eye had been
+-- watching (Tony, reveal.mov). At 0.10 the fade is 1.4 cells: column two
+-- already reaches rung 7, so the edge softens without moving. The trailing end
+-- gets the same short taper and ends nearly square, which is the trade.
+local WAVE_ALPHA = 0.30
 local WAVE_STEPS = 8 -- ladder rungs; 8 reads as a curve where 5 read as steps
--- Minimum bar width. Below this the taper eats the whole wave (at 5 cells,
--- alpha 0.4 leaves two visible rungs), so a narrow float still gets a bar
--- worth looking at.
+-- Minimum bar width. Below this there is less than one wavelength to look at,
+-- so a narrow float still gets a bar worth watching.
 local PENDING_CELLS = 28
 -- charset fallback matching the ladder's own `opts.style and ... or` idiom —
 -- LadderOpts.style is optional
 local DEFAULT_BAR = { "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█" }
+
+--- Fifth element of a tail segment: the things only some segments carry.
+---@class typescope.SegmentExtra
+---@field clip boolean? overflow is cut off at the line's edge instead of wrapping
+---@field snippet string? full source the segment's text is a slice of
+---@field from integer? byte offset of the segment's text within `snippet`
+
+-- Every cell of an animating row clips. A pending bar or a falling one is a
+-- picture of a single value, and a picture that wraps is two pictures: the
+-- 98-cell reveal of `returns` came out as two stacked waves mid-flight and
+-- then re-flowed into a different shape when it settled (Tony, reveal.mov).
+-- Clipped, the row stays one line and the window uncovers the rest of it as
+-- it opens — which is what the growing float was for. The second line is
+-- allowed to pop in at the end, once the value is real text.
+local CLIP = { clip = true }
 
 ---@param opts typescope.RenderOpts|typescope.LadderOpts
 local function ladder_of(opts)
@@ -158,13 +222,12 @@ end
 --- so a 14-cell bar costs ~6 highlights rather than 14.
 ---@param heights integer[]
 ---@param ladder string[]
----@param atomic boolean?
 ---@return { [1]: string, [2]: string?, [3]: string?, [4]: boolean? }[]
-local function bar_segments(heights, ladder, atomic)
+local function bar_segments(heights, ladder)
   local segs, run, run_h = {}, {}, nil
   local function flush()
     if #run > 0 then
-      table.insert(segs, { table.concat(run), rung_group(run_h), nil, atomic })
+      table.insert(segs, { table.concat(run), rung_group(run_h), nil, nil, CLIP })
       run = {}
     end
   end
@@ -186,26 +249,71 @@ end
 ---@param phase number 0..1, one full scroll
 ---@param count integer
 ---@param alpha number? taper fraction, defaults to WAVE_ALPHA
+---@param freq number? oscillations across the run, defaults to WAVE_FREQ
 ---@return integer[]
-local function wave_heights(phase, count, alpha)
+local function wave_heights(phase, count, alpha, freq)
   alpha = alpha or WAVE_ALPHA
+  freq = freq or WAVE_FREQ
   local half = alpha / 2
   local turns = phase * 2 * PI
   local heights = {}
   for i = 1, count do
     local t = count > 1 and (i - 1) / (count - 1) or 0
+    -- Quarter sine, not raised cosine. Both run 0 -> 1 across the taper
+    -- and both meet the plateau flat, but the raised cosine is an S: it
+    -- leaves the outermost columns near nothing for the first third of the
+    -- taper (at alpha 0.3 the first one peaked at rung 1 of 8) and does all
+    -- its climbing in the middle. Those columns read as unpainted, which is
+    -- most of why the bar looked like it began further in than it does.
+    --
+    -- A sine is steepest at the very edge and eases only as it approaches
+    -- the plateau, so the lower half of the climb is near-linear: that same
+    -- column now peaks at rung 3, and the taper's midpoint at 6 rather
+    -- than 4. Nothing else moves — this is exactly the square root of the
+    -- old envelope (the amplitude taper where that was the power one), so
+    -- the taper keeps its width and its smooth join.
     local envelope = 1.0
     if t < half then
-      envelope = 0.5 * (1 + cos(PI * ((2 * t) / alpha - 1)))
+      envelope = sin(PI / 2 * (t / half))
     elseif t > (1 - half) then
-      envelope = 0.5 * (1 + cos(PI * ((2 * t - 2) / alpha + 1)))
+      envelope = sin(PI / 2 * ((1 - t) / half))
     end
     -- unipolar: 0..1 rather than -1..1, so the trough is empty and the crest
     -- is full rather than the bar sitting at half height at rest
-    local unipolar = 0.5 * (1 + sin(2 * PI * WAVE_FREQ * t + turns))
+    local unipolar = 0.5 * (1 + sin(2 * PI * freq * t + turns))
     heights[i] = round(unipolar * envelope * WAVE_STEPS)
   end
   return heights
+end
+
+--- The pending bar's wave, continued across `span` cells.
+---
+--- wave_heights normalises position, so asking it for a wider run STRETCHES
+--- the shape — three oscillations either way, just longer ones. That is wrong
+--- here: the bar the eye was watching had a wavelength, and the frame it
+--- freezes on must not change it. Scaling frequency and taper by the same
+--- factor as the span keeps both fixed IN CELLS, so cells 1..PENDING_CELLS
+--- come back bit-identical to what the bar was showing and the extra cells
+--- simply continue the same wave.
+---
+--- Not exactly identical at the right end: the bar's own trailing taper sat
+--- at the float's right edge, and in a longer run the taper has moved out to
+--- the value's real end, so those cells rise a few rungs on the landing frame.
+--- That surge is the deliberate cost of keeping the wavelength — the
+--- alternative, pinning the taper to the window edge as it slides, tripled the
+--- highlight runs per frame (817 -> 2767 on a 48-leaf ledger) for a subtler
+--- join. It also lands where the window is about to open, which is the least
+--- conspicuous place on the row for it to happen.
+---@param phase number
+---@param span integer
+---@param base integer cells the pending bar occupied — the wavelength to keep
+---@return integer[]
+local function frozen_wave(phase, span, base)
+  if span <= base then
+    return wave_heights(phase, base)
+  end
+  local k = (span - 1) / (base - 1)
+  return wave_heights(phase, span, WAVE_ALPHA / k, WAVE_FREQ * k)
 end
 
 --- Is this leaf's LLM value still coming? Only llm mode has a pending state;
@@ -228,23 +336,11 @@ local function example_for(node, opts)
   return node.example[opts.example_kind] or node.example.heuristic
 end
 
---- How an example renders: its highlight group, and whether treesitter paints
---- real syntax colors over it. A settled example overlays — the value keeps
---- str/int/dict colors like code anywhere else. A still-coming one drops the
---- injection and shows flat in the pending group: syntax colors sit ON TOP of
---- the base extmark, so breathing underneath them would be invisible (38c —
---- Tony saw only the pop-in). Flat-and-dim while waiting, full color the
---- instant it lands, is also the louder affordance.
---- Only llm mode has a pending state; a heuristic value is final on arrival.
----@param node typescope.Node
----@param opts typescope.RenderOpts|typescope.LadderOpts
----@return string group, string? inject
-local function example_style(node, opts)
-  if is_pending(node, opts) then
-    return "TypeScopeExamplePending", nil
-  end
-  return "TypeScopeExample", "overlay"
-end
+-- (example_style used to live here, choosing between a flat pending group and
+-- the overlaid settled one. Nothing calls it any more: a pending row is a bar,
+-- never text, so the only style left is the settled one — plain
+-- TypeScopeExample with syntax colors overlaid, inline at the end of
+-- example_segments.)
 
 -- How far the blocks have fallen at the end of the reveal: a full-height cell
 -- has to reach zero exactly as the animation finishes.
@@ -261,24 +357,34 @@ local FALL_DISTANCE = #DEFAULT_BAR
 --- nothing. That also makes a MISS graceful — no value at all just means the
 --- bar drains off the line instead of vanishing between frames.
 ---
---- The wave covers only the ground the BAR held, never the tail of a value
---- longer than it. Tiling it across the whole value instead put a hole every
---- 14 cells — a 98-char `returns` example came out in seven chunks, illegible
---- for the whole 675ms — and it bought nothing: the "nothing jumps" bargain
---- above only pays when the value fits inside the bar. When it does not, the
---- line jumps wider the instant the value lands no matter what the wave does,
---- so occluding the tail adds unreadability on top of a jump it cannot
---- prevent.
+--- The wave covers the WHOLE value, tail included. It used to stop at the
+--- bar's width, on the reasoning that a longer value jumps the line wider the
+--- instant it lands no matter what the wave does — so occluding the tail only
+--- added unreadability on top of a jump it could not prevent. Two things
+--- changed. The float now grows into its new width over ~400ms instead of
+--- snapping (interact.lua), so there IS no jump to concede to; and the tail
+--- was arriving as bare settled text on the first reveal frame, which is what
+--- made roughly 40% of a long value appear between two frames.
+---
+--- The older objection — that tiling the wave across the value put a hole
+--- every 14 cells and broke a 98-char example into seven chunks — was against
+--- the fixed lookup table this replaced. frozen_wave continues one wave at a
+--- constant wavelength rather than repeating a fixed-length one, so there are
+--- no seams to fall between.
 ---@param value string? nil for a MISS: bar falls, nothing underneath
 ---@param progress number 0..1
 ---@param phase number the wave phase this froze at
 ---@param ladder string[]
----@param atomic boolean?
+---@param base integer cells the pending bar filled, so the fall starts its width
 ---@return { [1]: string, [2]: string?, [3]: string?, [4]: boolean? }[]
-local function reveal_segments(value, progress, phase, ladder, atomic)
-  local chars, cells = {}, 0
+local function reveal_segments(value, progress, phase, ladder, base)
+  -- `at` is kept as well as `chars`: it is already the 1-based byte offset of
+  -- every character, which is what an injection slice needs, so carrying it
+  -- costs nothing where a second parallel array would cost one store per cell
+  -- per row per frame
+  local chars, at, cells = {}, nil, 0
   if value then
-    local at = vim.str_utf_pos(value)
+    at = vim.str_utf_pos(value)
     cells = #at
     for i = 1, cells do
       chars[i] = value:sub(at[i], (at[i + 1] or #value + 1) - 1)
@@ -286,106 +392,157 @@ local function reveal_segments(value, progress, phase, ladder, atomic)
   end
   -- keep the bar's own width until the blocks drain it away: the value never
   -- has to shove the line wider, it's uncovered inside a space already held
-  local total = math.max(cells, PENDING_CELLS)
-  -- the frozen wave, over the bar's width only — the same heights the pending
-  -- bar was showing the frame before this one, so the fall starts from exactly
+  local total = math.max(cells, base)
+  -- the same heights the pending bar was showing the frame before this one,
+  -- continued across the value's full width, so the fall starts from exactly
   -- where the eye left it
-  local frozen = wave_heights(phase, PENDING_CELLS)
+  local frozen = frozen_wave(phase, total, base)
   -- Released with a little initial velocity rather than from rest. Pure
   -- gravity (progress²) spends its first 40% moving less than one rung, and
   -- with only eight rungs to quantise into that reads as nothing happening at
   -- all; this keeps the brief peak-hold an equalizer has, then accelerates.
   local fallen = FALL_DISTANCE * progress * (0.6 + 0.4 * progress)
 
-  -- merge neighbours that render the same way: a run of text, or a run of
-  -- blocks at one rung
-  local segs, run, run_key, run_rung = {}, {}, nil, nil
+  -- merge neighbours that render the same way: a run of text, a run of blocks
+  -- at one rung, or a run of held-open cells
+  local segs, keys, run, run_key, run_rung, run_at = {}, {}, {}, nil, nil, 1
   local function flush()
     if #run == 0 then
       return
     end
     if run_key == "text" then
-      -- a fragment injects as the parser's valid prefix, the same bargain the
-      -- ladder's elided values already make
-      table.insert(segs, { table.concat(run), "TypeScopeExample", "overlay", atomic })
+      -- an uncovered run injects as a SLICE of the whole value, not as the
+      -- fragment it looks like: `_t.UriTy` parses as nothing, so painting it
+      -- on its own left the value grey until the frame it became whole and
+      -- then flipped it to full color in one step (Tony, reveal.mov). Sliced,
+      -- every character arrives already wearing the color it will keep.
+      table.insert(segs, {
+        table.concat(run),
+        "TypeScopeExample",
+        "overlay",
+        nil,
+        { clip = true, snippet = value, from = at[run_at] - 1 },
+      })
+    elseif run_key == "blank" then
+      table.insert(segs, { table.concat(run), nil, nil, nil, CLIP })
     else
-      table.insert(segs, { table.concat(run), rung_group(run_rung), nil, atomic })
+      table.insert(segs, { table.concat(run), rung_group(run_rung), nil, nil, CLIP })
     end
+    keys[#segs] = run_key
     run = {}
   end
   for i = 1, total do
-    -- past the bar's width the value is simply itself (see the note above);
-    -- for a value that fits, i never gets here and the behaviour is unchanged
-    local height = -1
-    if i <= PENDING_CELLS then
-      height = frozen[i] - fallen
-    end
+    local height = frozen[i] - fallen
     local key, rung, text
     if height <= 0 then
-      key, text = "text", chars[i] -- nil past the end of the value: cell empties
+      -- A drained cell with no character under it holds its column with a
+      -- SPACE. Emitting nothing pulled every block to its right one cell left,
+      -- so a value shorter than the bar (or a MISS, with nothing under any of
+      -- it) had its frozen wave creep leftwards the whole way down — the eye
+      -- reads that as the wave travelling again, which is the one thing
+      -- freezing it was meant to stop. Values longer than the bar never showed
+      -- the artifact: every cell has a character, so nothing ever collapsed.
+      key, text = chars[i] and "text" or "blank", chars[i] or " "
     else
       rung = math.max(1, math.min(#ladder, math.ceil(height)))
       key, text = "bar", ladder[rung]
     end
-    if text then
-      if key ~= run_key or rung ~= run_rung then
-        flush()
-      end
-      run_key, run_rung = key, rung
-      table.insert(run, text)
-    else
+    if key ~= run_key or rung ~= run_rung then
       flush()
-      run_key, run_rung = nil, nil
+      run_at = i
     end
+    run_key, run_rung = key, rung
+    table.insert(run, text)
   end
   flush()
+  -- held-open cells only matter BETWEEN things; past the last block or
+  -- character they are trailing whitespace, and nothing to their right can
+  -- shift. Dropping them keeps the row's measured width honest.
+  while #segs > 0 and keys[#segs] == "blank" do
+    local last = #segs
+    segs[last], keys[last] = nil, nil
+  end
   return segs
 end
 
 --- Segments for a node's example: none when there's nothing to show, one for a
---- settled or still-pending value, two mid-wave — the lit prefix in real
---- syntax colors, the bar in the pending group. Two is the point: one group
---- can't carry both, and keeping the whole thing dim until the wave finished
---- would just move the pop-in to the end of it.
+--- settled value, many while waiting or mid-fall — alternating runs of block
+--- and (mid-fall) uncovered text in real syntax colors. More than one group is
+--- the point: one can't carry both, and keeping the whole thing dim until the
+--- wave finished would just move the pop-in to the end of it.
+--- NOT atomic, unlike the badges and origin tags around it. An atomic segment
+--- jumps whole to the next line rather than splitting, which for a value wider
+--- than the row left `e.g.` alone on a line of its own with the value hanging
+--- underneath it — a whole line spent on two characters, in a float whose
+--- point is compactness (Tony's call, reveal.mov f804->f805). It also
+--- disagreed with the animation right before it: the clipped falling frame
+--- starts the value straight after `e.g. `, and settling then moved it. Split
+--- like ordinary text, the two frames agree and nothing moves vertically.
 ---@param node typescope.Node
 ---@param opts typescope.RenderOpts|typescope.LadderOpts
----@param atomic boolean? example jumps whole to the next line rather than splitting mid-word
+---@param fill boolean? caller wraps segments (flow/wrap_segs) and can size a wave to the row
 ---@return { [1]: string, [2]: string?, [3]: string?, [4]: boolean? }[]
-local function example_segments(node, opts, atomic)
+local function example_segments(node, opts, fill)
   local value = example_for(node, opts)
   local ladder = ladder_of(opts)
   local phase = opts.example_phase or 0
 
-  if is_pending(node, opts) then
-    if not value then
-      -- Nothing to show yet, but something IS coming: hold the line open with
-      -- the bar. Otherwise the row has no example line at all and the value
-      -- doesn't so much arrive as make the block grow a line under the cursor
-      -- — what Tony saw on `object: _T`, a leaf no heuristic matches.
-      return bar_segments(wave_heights(phase, PENDING_CELLS), ladder, atomic)
-    end
-    -- A heuristic stands in while we wait: real information, and it means a
-    -- MISS changes nothing on screen instead of visibly reverting. It pulses
-    -- as one piece rather than per character — splitting it into runs would
-    -- change where the value is allowed to wrap, mid-animation.
-    -- no envelope here: this is one brightness for the whole value, not a
-    -- shape across cells, so there is no width to taper over
-    local h = round(0.5 * (1 + sin(2 * PI * (phase % 1))) * WAVE_STEPS)
-    return { { value, rung_group(h), nil, atomic } }
+  --- One segment standing for a wave whose width isn't known here. Only the
+  --- wrapper knows where on the row the example starts, and the wave has to
+  --- run from there to the float's right edge — a bar that stops short of it
+  --- has to grow to the edge on the frame the value lands, which is a jump
+  --- across a third of the row (Tony, reveal.mov f747->f748). The wrapper
+  --- calls back with the cell count once it knows it.
+  ---@param make fun(cells: integer): table[]
+  ---@param edge integer? right edge to run out to, if not the float's current one
+  local function sized(make, edge)
+    return { { "", nil, nil, nil, { fill = make, edge = edge, clip = true } } }
   end
 
-  local progress, frozen = nil, 0
+  if is_pending(node, opts) then
+    -- EVERY waiting row is a bar, whether or not a heuristic could stand in.
+    -- It used to be two states — a bar for leaves no heuristic matched, the
+    -- heuristic itself pulsing for the rest — and the two have to become one
+    -- thing at the landing frame. They didn't: the pulsing rows grew 28 cells
+    -- of bar between two frames, out of nothing (Tony, 38c video, f931->f932).
+    -- Losing the heuristic during the wait is the price; a MISS now reveals it
+    -- under the falling bar instead of leaving it untouched, which is a
+    -- better answer for the row anyway.
+    --
+    -- The bar also holds the line open. Without it a leaf that ends up with no
+    -- example at all has no example line, and the value doesn't so much arrive
+    -- as make the block grow a line under the cursor.
+    if fill then
+      return sized(function(cells)
+        return bar_segments(wave_heights(phase, cells), ladder)
+      end)
+    end
+    return bar_segments(wave_heights(phase, PENDING_CELLS), ladder)
+  end
+
+  local progress, frozen, frozen_width = nil, 0, nil
   if opts.example_reveal then
-    progress, frozen = opts.example_reveal(node)
+    progress, frozen, frozen_width = opts.example_reveal(node)
   end
   if progress and progress < 1 then
-    return reveal_segments(value, progress, frozen or 0, ladder, atomic)
+    if fill then
+      -- The same cell count the pending bar had, so the frozen wave the blocks
+      -- fall from is the one that was on screen the frame before — and it
+      -- KEEPS that count for the whole fall. The landed values are what widen
+      -- the float, so a wave measured against the float's current edge is
+      -- measured against a moving one, and frozen_wave rescales its wavelength
+      -- to the new run every frame: the wave stretches as the window opens.
+      return sized(function(cells)
+        return reveal_segments(value, progress, frozen or 0, ladder, cells)
+      end, frozen_width)
+    end
+    return reveal_segments(value, progress, frozen or 0, ladder, PENDING_CELLS)
   end
   if not value then
     return {}
   end
-  local group, inject = example_style(node, opts)
-  return { { value, group, inject, atomic } }
+  -- settled: the value keeps str/int/dict colors like code anywhere else
+  return { { value, "TypeScopeExample", "overlay" } }
 end
 
 --- Render a forest of nodes into lines + highlights. Pure: no window or
@@ -411,10 +568,14 @@ function M.render(roots, opts)
       })
     end
     for _, inj in ipairs(line.inj) do
-      table.insert(
-        result.ts_injections,
-        { line = lnum - 1, col_start = inj.col_start, text = inj.text, mode = inj.mode }
-      )
+      table.insert(result.ts_injections, {
+        line = lnum - 1,
+        col_start = inj.col_start,
+        text = inj.text,
+        mode = inj.mode,
+        from = inj.from,
+        to = inj.to,
+      })
     end
     result.width = math.max(result.width, line.width)
   end
@@ -424,9 +585,18 @@ function M.render(roots, opts)
   ---@param line typescope.Line current line holding prefix + name padding
   ---@param cont_prefix string chrome carried onto continuation lines
   ---@param cont_pad integer spaces after cont_prefix to reach the annotation column
-  ---@param segments { [1]: string, [2]: string? }[] tail segments (text, group)
+  ---@param segments { [1]: string, [2]: string?, [3]: string?, [4]: boolean?, [5]: typescope.SegmentExtra? }[]
   ---@param node_id string
   local function flow(line, cont_prefix, cont_pad, segments, node_id)
+    -- how wide a FRESH continuation line already is before any content: the
+    -- chrome plus the pad. Pushing an over-long atomic segment down a line only
+    -- helps while the current line is wider than this; test it against cont_pad
+    -- alone and a line that has just been continued still reads as "wider than
+    -- the pad" (the chrome counts), so an atomic segment too big to fit even on
+    -- an empty continuation line asks for another one forever. render.render
+    -- then never returns — a hung editor, not a mangled layout.
+    local cont_width = strwidth(cont_prefix) + cont_pad
+
     local function continuation()
       emit(line, node_id)
       line = new_line()
@@ -435,29 +605,78 @@ function M.render(roots, opts)
       return line
     end
 
-    for _, seg in ipairs(segments) do
+    -- How many cells a wave gets on this row: from wherever it starts out to
+    -- the float's own right edge, so the pending bar is already as wide as the
+    -- landed value's will be and the landing frame moves nothing sideways.
+    -- Before the float has a width — its very first paint — there is no edge
+    -- to reach for and the fixed bar stands in for one frame.
+    local function wave_cells(edge)
+      edge = math.min(opts.max_width, edge or opts.window_width or 0)
+      return math.max(PENDING_CELLS, edge - line.width)
+    end
+
+    -- once a clipping segment has run into the edge, everything after it
+    -- would sit past the same edge; emitting it would wrap the very line the
+    -- clip exists to keep whole
+    local clipped = false
+    local function place(seg)
       local text, group = seg[1], seg[2]
-      -- injection only survives on unsplit spans: a wrapped fragment like
-      -- "dict[str," is not parseable source, so continuations keep the base
-      -- group color only
       local inject = seg[3]
       -- atomic segments (badges, origin tags, indicators) never split
       -- mid-word — they jump whole to the next line instead
       local atomic = seg[4]
+      local extra = seg[5]
+      -- Splitting no longer costs the injection. What lands on a line is a
+      -- SLICE of a snippet, so a continuation carrying `dict[str,` is painted
+      -- from the colors the whole annotation parses to, and a reveal's
+      -- half-uncovered value from the colors the whole value parses to.
+      local snippet = (extra and extra.snippet) or text
+      local from = (extra and extra.from) or 0
       while text ~= "" do
         local avail = opts.max_width - line.width
         if strwidth(text) <= avail then
-          line:add(text, group, text == seg[1] and inject or nil)
+          line:add(text, group, inject, snippet, from)
           text = ""
-        elseif (atomic or avail < 8) and line.width > cont_pad then
+        elseif extra and extra.clip then
+          local cut = fit_prefix(text, avail)
+          line:add(text:sub(1, cut), group, inject, snippet, from)
+          text, clipped = "", true
+        elseif (atomic or avail < 8) and line.width > cont_width then
           -- push the whole segment down a line
           line = continuation()
         else
+          -- it does not fit even on a line of its own: split it after all,
+          -- atomic or not. A value chopped across two rows is worse than one
+          -- kept whole, and better than every other outcome available here.
           local cut = math.max(1, find_break_point(text, avail))
-          line:add(text:sub(1, cut), group)
-          text = text:sub(cut + 1):gsub("^%s+", "")
+          line:add(text:sub(1, cut), group, inject, snippet, from)
+          local rest = text:sub(cut + 1)
+          local kept = rest:gsub("^%s+", "")
+          -- the stripped leading blank is still part of the snippet, so the
+          -- next piece's offset has to step over it too
+          from = from + cut + (#rest - #kept)
+          text = kept
           line = continuation()
         end
+      end
+    end
+
+    for _, seg in ipairs(segments) do
+      if clipped then
+        break
+      end
+      local extra = seg[5]
+      if extra and extra.fill then
+        -- sized here and not by the caller: line.width is only final once
+        -- everything to the left of the wave has been placed
+        for _, sub in ipairs(extra.fill(wave_cells(extra.edge))) do
+          if clipped then
+            break
+          end
+          place(sub)
+        end
+      else
+        place(seg)
       end
     end
     emit(line, node_id)
@@ -471,8 +690,7 @@ function M.render(roots, opts)
     -- every row carries a marker glyph — expandable (▾/▸) or leaf (·) — so
     -- names inside a sibling group align regardless of expandability
     -- (Tony's call, 2026-07-29)
-    local marker = is_expandable(node) and (node.state.expanded and style.expanded or style.collapsed)
-      or style.leaf
+    local marker = is_expandable(node) and (node.state.expanded and style.expanded or style.collapsed) or style.leaf
     if depth > 0 then
       line:add(branch, "TypeScopeChrome")
     end
@@ -536,9 +754,7 @@ function M.render(roots, opts)
     if #example_segs > 0 then
       table.insert(segments, { "  ", nil })
       -- overlay: examples are hypothetical values, they keep their dim
-      -- TypeScopeExample styling underneath the syntax colors. Atomic: an
-      -- example jumps whole to the next line rather than splitting mid-word
-      -- (still splits if longer than a full line).
+      -- TypeScopeExample styling underneath the syntax colors
       vim.list_extend(segments, example_segs)
     end
     if is_expandable(node) and not node.state.expanded and depth == 0 then
@@ -610,7 +826,10 @@ function M.render(roots, opts)
     result.doc_end = #result.lines
   end
 
-  local has_doc = opts.docstring ~= nil and opts.docstring ~= "" and opts.docstring_pos ~= nil and opts.docstring_pos ~= false
+  local has_doc = opts.docstring ~= nil
+    and opts.docstring ~= ""
+    and opts.docstring_pos ~= nil
+    and opts.docstring_pos ~= false
   if opts.header then
     -- the header is a one-liner by contract: a 48-param call shape must not
     -- eat the float, so the param list elides at width with the return type
@@ -833,7 +1052,8 @@ function M.render(roots, opts)
             current, cur_w = {}, 0
           else
             local cut = math.max(1, find_break_point(text, avail))
-            local clean = text:sub(cut, cut):match("[%s,]") ~= nil or text:sub(cut + 1, cut + 1):match("%s") ~= nil
+            local clean = text:sub(cut, cut):match("[%s,]") ~= nil
+              or text:sub(cut + 1, cut + 1):match("%s") ~= nil
             if cur_w > 0 and not clean then
               -- forced mid-word cut on a shared slice reads terribly — give
               -- the segment a fresh slice with the full column width instead
@@ -978,8 +1198,7 @@ function M.render(roots, opts)
       line:add(string.rep(" ", math.max(0, name_col - line.width)) .. "  ")
 
       local type_text = node.type.display or node.type.raw or "?"
-      local evaluated_visible = node.evaluated
-        and not (node.evaluated_on_expand and not node.state.expanded)
+      local evaluated_visible = node.evaluated and not (node.evaluated_on_expand and not node.state.expanded)
       -- an unannotated param's declared type is only implicit Any — show the
       -- inferred view as the type itself (the detail block then skips it)
       local type_is_evaluation = evaluated_visible and type_text == "Any"
@@ -1051,8 +1270,8 @@ function M.render(roots, opts)
           if owner and owner ~= (node.type.display or node.type.raw) then
             table.insert(segs, { owner .. " = ", "TypeScopeEvaluated" })
           end
-          -- overlay: real syntax colors over the dim ≈ base (flow drops the
-          -- injection automatically if the value wraps)
+          -- overlay: real syntax colors over the dim ≈ base, kept even if the
+          -- value wraps (flow slices the injection with it)
           table.insert(segs, { node.evaluated, "TypeScopeEvaluated", "overlay" })
           detail_line(segs)
         end
@@ -1067,7 +1286,10 @@ function M.render(roots, opts)
           vim.list_extend(info, example_segs)
         end
         if node.origin then
-          table.insert(info, { (#info > 0 and "   " or "") .. style.inherit .. node.origin, "TypeScopeHint", nil, true })
+          table.insert(
+            info,
+            { (#info > 0 and "   " or "") .. style.inherit .. node.origin, "TypeScopeHint", nil, true }
+          )
         end
         if #info > 0 then
           detail_line(info)
@@ -1102,9 +1324,15 @@ function M.render(roots, opts)
     emit_docstring()
   end
 
-  -- separators stretch to the final content width, known only now
+  -- Separators stretch to the final content width, known only now — but never
+  -- back in from a width they have already reached. The window is monotonic
+  -- (interact keeps st.width at its high-water mark), and a rule that shrank
+  -- while the frame around it stayed put read as the whole float twitching:
+  -- landing a long value re-flowed its row onto two shorter ones, and both
+  -- rules snapped in by a dozen columns on that frame (Tony, reveal.mov).
+  local rule_width = math.max(4, result.width, opts.window_width or 0)
   for _, lnum in ipairs(separators) do
-    local bar = string.rep(style.rule, math.max(4, result.width))
+    local bar = string.rep(style.rule, rule_width)
     result.lines[lnum] = bar
     table.insert(result.highlights, { line = lnum - 1, col_start = 0, col_end = #bar, group = "TypeScopeChrome" })
   end
@@ -1163,7 +1391,7 @@ local LADDER_MAX_LINES = 3
 ---@field show_examples boolean
 ---@field example_kind "heuristic"|"llm"
 ---@field example_pending? fun(node: typescope.Node): boolean leaves whose LLM value is still coming (38c); injected so render stays pure
----@field example_reveal? fun(node: typescope.Node): number?, number? 0..1 through the fall, plus the wave phase it froze at (38c)
+---@field example_reveal? fun(node: typescope.Node): number?, number?, integer? 0..1 through the fall, the wave phase it froze at, and the float width it froze at (38c)
 ---@field example_phase? number 0..1 position of the travelling wave through the pending bar (38c)
 ---@field style? typescope.Charset for the ≈ glyph (defaults to unicode's)
 ---@field fn_name? string callee name — heads the signature block
@@ -1205,12 +1433,19 @@ function M.ladder(node, opts)
   ---@return { [1]: string, [2]: string?, [3]: string?, [4]: boolean? }[]
   local function segs_for(shape_text)
     local segs = {}
-    local function seg(text, group, inject, atomic)
-      table.insert(segs, { text, group, inject, atomic })
+    -- extras ride along: without them wrap_segs never sees a wave's request to
+    -- be sized to the row, or an animating example's request not to wrap, and
+    -- silently renders the empty placeholder instead of the wave
+    local function seg(text, group, inject, atomic, extra)
+      table.insert(segs, { text, group, inject, atomic, extra })
     end
     seg(node.name, "TypeScopeActive")
     seg(": ", "TypeScopeChrome")
-    seg(type_text, node.evaluated and type_text == node.evaluated and "TypeScopeEvaluated" or "TypeScopeType", "replace")
+    seg(
+      type_text,
+      node.evaluated and type_text == node.evaluated and "TypeScopeEvaluated" or "TypeScopeType",
+      "replace"
+    )
     if shape_text then
       seg(" " .. eval_glyph, "TypeScopeEvaluated")
       -- overlay injection: values keep their real syntax colors (str/int/
@@ -1223,20 +1458,29 @@ function M.ladder(node, opts)
       seg(" = ", "TypeScopeChrome")
       seg(node.default, "TypeScopeDefault", "replace")
     end
+    -- fill=true, though LadderOpts carries no window_width: the insert ladder
+    -- is sized to its content on every keystroke rather than held at a
+    -- high-water mark, so there is no edge to reach for and wave_cells falls
+    -- back to the fixed bar. Opting in costs nothing and means the two
+    -- wrappers stay the same shape.
     local example_segs = example_segments(node, opts, true)
     if #example_segs > 0 then
       seg("   e.g. ", "TypeScopeHint")
       for _, es in ipairs(example_segs) do
-        seg(es[1], es[2], es[3], es[4])
+        seg(es[1], es[2], es[3], es[4], es[5])
       end
     end
     return segs
   end
 
   -- wrap segments into width-bounded lines with a hanging indent (mirrors
-  -- render()'s flow: injection survives only on unsplit segments, atomic
-  -- segments jump whole to the next line)
-  ---@param segs { [1]: string, [2]: string?, [3]: string?, [4]: boolean? }[]
+  -- render()'s flow: a split piece keeps its injection as a slice of the whole
+  -- snippet, and atomic segments jump whole to the next line)
+  --- The ladder's own wrapper. Same contract as render's flow(), including the
+  --- segment extras: an animating example clips to one line instead of
+  --- wrapping into two pictures of itself, and a split piece keeps its
+  --- injection as a slice of the whole snippet.
+  ---@param segs { [1]: string, [2]: string?, [3]: string?, [4]: boolean?, [5]: typescope.SegmentExtra? }[]
   ---@param cont_indent integer
   local function wrap_segs(segs, cont_indent)
     local lines = {}
@@ -1246,22 +1490,51 @@ function M.ladder(node, opts)
       line = new_line()
       line:add(string.rep(" ", cont_indent))
     end
-    for _, seg in ipairs(segs) do
+    local clipped = false
+    local function wave_cells(edge)
+      edge = math.min(opts.max_width, edge or opts.window_width or 0)
+      return math.max(PENDING_CELLS, edge - line.width)
+    end
+    local function place(seg)
       local text, group, inject, atomic = seg[1], seg[2], seg[3], seg[4]
-      local whole = text
+      local extra = seg[5]
+      local snippet = (extra and extra.snippet) or text
+      local from = (extra and extra.from) or 0
       while text ~= "" do
         local avail = opts.max_width - line.width
         if strwidth(text) <= avail then
-          line:add(text, group, text == whole and inject or nil)
+          line:add(text, group, inject, snippet, from)
           text = ""
+        elseif extra and extra.clip then
+          line:add(text:sub(1, fit_prefix(text, avail)), group, inject, snippet, from)
+          text, clipped = "", true
         elseif (atomic or avail < 8) and line.width > cont_indent then
           continuation()
         else
           local cut = math.max(1, find_break_point(text, avail))
-          line:add(text:sub(1, cut), group)
-          text = text:sub(cut + 1):gsub("^%s+", "")
+          line:add(text:sub(1, cut), group, inject, snippet, from)
+          local rest = text:sub(cut + 1)
+          local kept = rest:gsub("^%s+", "")
+          from = from + cut + (#rest - #kept)
+          text = kept
           continuation()
         end
+      end
+    end
+    for _, seg in ipairs(segs) do
+      if clipped then
+        break
+      end
+      local extra = seg[5]
+      if extra and extra.fill then
+        for _, sub in ipairs(extra.fill(wave_cells(extra.edge))) do
+          if clipped then
+            break
+          end
+          place(sub)
+        end
+      else
+        place(seg)
       end
     end
     table.insert(lines, line)
@@ -1303,10 +1576,16 @@ function M.ladder(node, opts)
     table.insert(result.lines, l.text)
     result.line_to_node[#result.lines] = node_id
     for _, hl in ipairs(l.hls) do
-      table.insert(result.highlights, { line = #result.lines - 1, col_start = hl.col_start, col_end = hl.col_end, group = hl.group })
+      table.insert(
+        result.highlights,
+        { line = #result.lines - 1, col_start = hl.col_start, col_end = hl.col_end, group = hl.group }
+      )
     end
     for _, inj in ipairs(l.inj) do
-      table.insert(result.ts_injections, { line = #result.lines - 1, col_start = inj.col_start, text = inj.text, mode = inj.mode })
+      table.insert(
+        result.ts_injections,
+        { line = #result.lines - 1, col_start = inj.col_start, text = inj.text, mode = inj.mode }
+      )
     end
     result.width = math.max(result.width, l.width)
   end
@@ -1351,7 +1630,10 @@ function M.ladder(node, opts)
   if rule_lnum then
     local bar = string.rep(opts.style and opts.style.rule or "─", math.max(4, result.width))
     result.lines[rule_lnum] = bar
-    table.insert(result.highlights, { line = rule_lnum - 1, col_start = 0, col_end = #bar, group = "TypeScopeChrome" })
+    table.insert(
+      result.highlights,
+      { line = rule_lnum - 1, col_start = 0, col_end = #bar, group = "TypeScopeChrome" }
+    )
   end
   return result
 end
