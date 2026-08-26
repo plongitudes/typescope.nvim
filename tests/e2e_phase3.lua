@@ -1223,4 +1223,44 @@ do
   end
 end
 
+-- setup() has to be re-entrant in BOTH directions.
+--
+-- config.setup says "safe to call more than once", and it is — but the wiring
+-- around it only ever added autocmds. Turning a feature back off left its
+-- group installed and firing: switching trigger from "hover" to "manual" kept
+-- auto-opening the float on CursorHold. Anyone toggling at runtime hits this,
+-- and so does a plugin manager that merges `opts` and then also runs a
+-- `config` function.
+--
+-- Runs last on purpose: it rewrites the global config, so nothing after it
+-- could trust what it left behind.
+do
+  local ts = require("typescope")
+  local function autocmds(group)
+    local ok, list = pcall(vim.api.nvim_get_autocmds, { group = group })
+    return ok and #list or 0
+  end
+
+  ts.setup({ trigger = "hover" })
+  check("trigger = hover installs the CursorHold autocmd", autocmds("TypeScopeHover") > 0)
+  ts.setup({ trigger = "manual" })
+  check("...and switching back to manual takes it down", autocmds("TypeScopeHover") == 0)
+  ts.setup({ trigger = "hover" })
+  check("...and it comes back when asked again", autocmds("TypeScopeHover") > 0)
+
+  ts.setup({ insert_mode = { enabled = true } })
+  check("insert_mode on installs the typing-surface autocmds", autocmds("TypeScopeInsert") > 0)
+  ts.setup({ insert_mode = { enabled = false } })
+  check("...and turning it off takes them down", autocmds("TypeScopeInsert") == 0)
+
+  -- warmstart already cleared its own group; assert it stays that way, since
+  -- the other two now follow its pattern
+  ts.setup({ prefetch = true, trigger = "manual" })
+  local with_prefetch = autocmds("TypeScopeWarmstart")
+  ts.setup({ prefetch = false, trigger = "manual" })
+  check("prefetch off drops its CursorHold watcher", autocmds("TypeScopeWarmstart") < with_prefetch)
+
+  ts.setup({}) -- leave the config at defaults
+end
+
 print(failures == 0 and "ALL PASS" or (failures .. " FAILURES"))
