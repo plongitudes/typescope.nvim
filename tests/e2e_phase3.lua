@@ -1152,4 +1152,115 @@ if not auto:find("llm%-host") then
 end
 require("typescope").close()
 
+-- A cancelled lazy expand must leave the node retryable.
+--
+-- resolve.recurse clears node._lazy up front, deliberately: attach_type's
+-- enrichment fallback is gated on the hook being absent. If the token is
+-- cancelled mid-chase the hook used to stay cleared, and since `loaded` is
+-- still false and `source` is still set the row kept its expander marker while
+-- recurse_into had nothing to fire — a silent no-op, handed back by the
+-- resolve cache on every reopen of that symbol.
+--
+-- Cancelling BEFORE the call rather than racing one in flight: attach_type
+-- checks staleness first thing, so this lands in the same branch every run
+-- instead of depending on how fast the mock answers.
+do
+  local model = require("typescope.model")
+  local async = require("typescope.async")
+  local resolve = require("typescope.resolve")
+  local lsp = require("typescope.lsp")
+  local client = lsp.client_for(bufnr)
+  local uri = vim.uri_from_fname(fixture_dir .. "/sample.py")
+
+  -- `ServerConfig` sits at line 20 of the fixture (0-based 19); a beyond-depth
+  -- placeholder points its ref there and carries no children of its own
+  local function lazy_node()
+    local n = model.new({
+      name = "config",
+      kind = "param",
+      type = { raw = "ServerConfig", display = "ServerConfig", category = "generic" },
+      loaded = false,
+      source = { uri = uri, range = { start = { line = 19, character = 0 } } },
+    })
+    n._lazy = {
+      uri = uri,
+      refs = { { name = "ServerConfig", row = 19, col = 6 } },
+      ancestry = {},
+      impl = require("typescope.extract").get("python"),
+    }
+    return n
+  end
+
+  local cancelled = lazy_node()
+  local dead_token = async.token()
+  async.cancel(dead_token)
+  resolve.recurse(client, cancelled, dead_token, function() end)
+  vim.wait(200, function()
+    return not cancelled.state.loading
+  end)
+  check("a cancelled expand keeps its lazy hook", cancelled._lazy ~= nil)
+  check("...and is not left mid-load", cancelled.state.loading == false)
+  check("...still unloaded, so the retry actually chases", cancelled.state.loaded == false)
+  check("...with no half-built children to duplicate", #cancelled.children == 0)
+
+  -- the point of restoring the hook: expanding again has to WORK
+  local done = false
+  resolve.recurse(client, cancelled, async.token(), function()
+    done = true
+  end)
+  vim.wait(2000, function()
+    return done
+  end)
+  check("...and a later expand resolves it for real", #cancelled.children > 0)
+  if #cancelled.children == 0 then
+    print("  DEBUG: loaded=" .. tostring(cancelled.state.loaded) .. " lazy=" .. tostring(cancelled._lazy ~= nil))
+  else
+    local names = {}
+    for _, c in ipairs(cancelled.children) do
+      table.insert(names, c.name)
+    end
+    check("...into ServerConfig's own fields", vim.tbl_contains(names, "host") and vim.tbl_contains(names, "port"))
+  end
+end
+
+-- setup() has to be re-entrant in BOTH directions.
+--
+-- config.setup says "safe to call more than once", and it is — but the wiring
+-- around it only ever added autocmds. Turning a feature back off left its
+-- group installed and firing: switching trigger from "hover" to "manual" kept
+-- auto-opening the float on CursorHold. Anyone toggling at runtime hits this,
+-- and so does a plugin manager that merges `opts` and then also runs a
+-- `config` function.
+--
+-- Runs last on purpose: it rewrites the global config, so nothing after it
+-- could trust what it left behind.
+do
+  local ts = require("typescope")
+  local function autocmds(group)
+    local ok, list = pcall(vim.api.nvim_get_autocmds, { group = group })
+    return ok and #list or 0
+  end
+
+  ts.setup({ trigger = "hover" })
+  check("trigger = hover installs the CursorHold autocmd", autocmds("TypeScopeHover") > 0)
+  ts.setup({ trigger = "manual" })
+  check("...and switching back to manual takes it down", autocmds("TypeScopeHover") == 0)
+  ts.setup({ trigger = "hover" })
+  check("...and it comes back when asked again", autocmds("TypeScopeHover") > 0)
+
+  ts.setup({ insert_mode = { enabled = true } })
+  check("insert_mode on installs the typing-surface autocmds", autocmds("TypeScopeInsert") > 0)
+  ts.setup({ insert_mode = { enabled = false } })
+  check("...and turning it off takes them down", autocmds("TypeScopeInsert") == 0)
+
+  -- warmstart already cleared its own group; assert it stays that way, since
+  -- the other two now follow its pattern
+  ts.setup({ prefetch = true, trigger = "manual" })
+  local with_prefetch = autocmds("TypeScopeWarmstart")
+  ts.setup({ prefetch = false, trigger = "manual" })
+  check("prefetch off drops its CursorHold watcher", autocmds("TypeScopeWarmstart") < with_prefetch)
+
+  ts.setup({}) -- leave the config at defaults
+end
+
 print(failures == 0 and "ALL PASS" or (failures .. " FAILURES"))

@@ -127,6 +127,9 @@ end
 -- that was already answering the port is never touched (and never killed).
 local server_handle = nil
 local ensuring = false
+-- callers that arrived while a readiness run was already in flight; they get
+-- that run's answer rather than starting one of their own
+local ensure_waiters = {}
 
 --- One cheap liveness probe. cb(ok) on the main loop.
 ---@param cfg typescope.OllamaConfig
@@ -153,12 +156,28 @@ end
 ---@param cb fun(ready: boolean)
 function M.ensure_server(cfg, cb)
   if ensuring then
+    -- Re-entry is not an answer. This used to `return` without calling cb at
+    -- all, and cb is load-bearing: warmup's done() is what clears `warming`
+    -- and drains warm_waiters, so a dropped one parks every subsequent
+    -- generate for the rest of the session — and leaves the pending bars
+    -- breathing until PENDING_MAX_MS retires the clock three minutes later.
+    -- Answering cb(false) would be a different lie: a server IS on its way
+    -- up. Wait for the real answer, the way generate already waits on warmup.
+    table.insert(ensure_waiters, cb)
     return
   end
   ensuring = true
   local function done(ready)
     ensuring = false
+    -- drained BEFORE the callbacks run, with `ensuring` already false, so a
+    -- waiter that calls ensure_server again starts a fresh run instead of
+    -- queueing onto a list nothing will flush
+    local queued = ensure_waiters
+    ensure_waiters = {}
     cb(ready)
+    for _, waiter in ipairs(queued) do
+      waiter(ready)
+    end
   end
   probe(cfg, function(alive)
     if alive then

@@ -2,14 +2,14 @@ local M = {}
 
 --- Optional: users may call setup() with overrides, or skip it entirely.
 ---@param opts? table
+--- Each of these is called unconditionally and decides for itself, the way
+--- _enable_warmstart already did. config.setup advertises that calling it more
+--- than once is safe; the wiring has to hold up its end, or a second setup()
+--- turning a feature back OFF leaves its autocmds installed and running.
 function M.setup(opts)
   local cfg = require("typescope.config").setup(opts)
-  if cfg.trigger == "hover" then
-    M._enable_hover()
-  end
-  if cfg.insert_mode.enabled then
-    require("typescope.insert").enable()
-  end
+  M._enable_hover(cfg)
+  require("typescope.insert").set_enabled(cfg.insert_mode.enabled)
   M._enable_warmstart(cfg)
 end
 
@@ -18,8 +18,15 @@ end
 -- revisit if it feels over- or under-eager).
 local last_hover_key = nil
 
-function M._enable_hover()
+---@param cfg typescope.Config
+function M._enable_hover(cfg)
+  -- the group is created (and so cleared) whichever way the trigger is set:
+  -- that is what takes the autocmd down again when a later setup() switches
+  -- back to "manual"
   local group = vim.api.nvim_create_augroup("TypeScopeHover", { clear = true })
+  if cfg.trigger ~= "hover" then
+    return
+  end
   vim.api.nvim_create_autocmd("CursorHold", {
     group = group,
     desc = "TypeScope: auto-open on cursor rest (trigger = 'hover')",

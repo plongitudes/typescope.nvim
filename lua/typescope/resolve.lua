@@ -678,6 +678,25 @@ function M.recurse(client, node, token, cb)
     run_enrichment(ctx)
     node.state.loading = false
     if async.stale(token) then
+      -- Cancelled mid-chase — the CursorMoved dismissal that closes the float
+      -- is the ordinary way to get here. Put the node back exactly as we found
+      -- it. The hook was cleared up front (see above) because attach_type's
+      -- enrichment fallback is gated on its absence, but leaving it cleared
+      -- STRANDS the node: `loaded` is still false and `source` is still set,
+      -- so it keeps its expander marker, while recurse_into finds no hook to
+      -- fire and <CR> falls through to a plain toggle that reveals nothing.
+      -- The resolve cache then hands that same dead node back on every reopen
+      -- of the symbol.
+      --
+      -- Children are dropped rather than kept. A partial chase plus a restored
+      -- hook appends a SECOND set of children on the retry; a cancelled
+      -- recurse being a no-op is the only honest state, and the float is
+      -- already gone, so nobody is looking at what landed. A node holding a
+      -- hook never has children of its own to lose (attach_type only sets
+      -- _lazy where it declined to recurse), so this restores the exact
+      -- pre-call state rather than merely a plausible one.
+      node.children = {}
+      node._lazy = lazy
       return
     end
     if #node.children > 0 then

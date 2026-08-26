@@ -405,9 +405,18 @@ function M._update()
   open_for(bufnr, key, frow0, fcol)
 end
 
---- Register the typing-surface autocmds (called from setup when enabled).
-function M.enable()
+--- Register or tear down the typing-surface autocmds. Takes the flag rather
+--- than being called conditionally, so the off case cannot be forgotten: the
+--- group is cleared either way, and turning the feature off also closes a
+--- surface that happens to be open — a float belonging to a disabled feature
+--- has no business outliving it.
+---@param enabled boolean
+function M.set_enabled(enabled)
   local group = vim.api.nvim_create_augroup("TypeScopeInsert", { clear = true })
+  if not enabled then
+    M.close()
+    return
+  end
   vim.api.nvim_create_autocmd({ "InsertEnter", "TextChangedI", "CursorMovedI" }, {
     group = group,
     desc = "TypeScope: typing surface follows the call under the cursor",

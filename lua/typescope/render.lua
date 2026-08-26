@@ -99,27 +99,82 @@ end
 --- whitespace. Only breaks in the back half of the line; a hard cut wastes
 --- less vertical space than honoring a lone early break point.
 ---
+--- `limit` is a count of CELLS and the return is a BYTE index, so the walk has
+--- to convert between them rather than conflating them. It used to scan
+--- `text:sub(i, i)` for i in limit..limit/2 — byte indices, against a cell
+--- budget. On multibyte text that searched an earlier slice of the string than
+--- the caller asked for and under-filled the line (14 cells where ASCII got 19,
+--- same shape, same limit), and its no-whitespace fallback returned the raw
+--- cell budget as a byte index, which split characters and put literal <c3>
+--- bytes on screen.
+---
+--- Walking forward instead of backward is equivalent, not merely similar. The
+--- old loop scanned DOWN and returned on the first comma-space, which is the
+--- HIGHEST one in the window; it set best_space on the first space it met,
+--- which is likewise the highest. Going up and keeping the last of each finds
+--- the same two positions, and a comma still outranks a space regardless of
+--- which sits further right.
+---
+--- Decodes UTF-8 lengths inline rather than reaching for str_utf_pos, and
+--- charges ASCII one cell without asking. That is not premature: this runs on
+--- every wrapped line of every repaint, and an expanded docstring under a
+--- running animation is ~40 calls a frame against a ~1.18ms budget. The
+--- straightforward version — str_utf_pos for the offsets, strwidth per
+--- character — measured 27x the old loop (0.11us -> 2.96us per call), almost
+--- all of it strwidth being called once per character for text that is
+--- overwhelmingly ASCII. Only genuinely multibyte characters pay for a width
+--- lookup, and nothing allocates.
+---
 --- NOTE: if ", " stops being a good boundary (e.g. annotations containing
 --- Literal["a, b"] strings, or future non-Python languages), switch to real
 --- syntax-aware breaks: vim.treesitter.get_string_parser(text, lang), then
 --- break at the subscript/argument node boundary nearest the limit. Same
 --- results for well-behaved annotations, but immune to commas inside strings.
----@param text string annotation text (assumed single-width chars)
+---@param text string annotation text
 ---@param limit integer display cells available on this line
 ---@return integer
 local function find_break_point(text, limit)
   local floor = math.max(1, math.floor(limit / 2))
-  local best_space
-  for i = limit, floor, -1 do
-    local c = text:sub(i, i)
-    if c == "," and text:sub(i + 1, i + 1) == " " then
-      return i -- keep the comma at end of line; caller strips the leading space
+  local n = #text
+  local used, prev_end, i = 0, 0, 1
+  local best_comma, best_space, last_fit, first_end
+  while i <= n do
+    local b = text:byte(i)
+    local clen, w
+    if b < 0x80 then
+      clen, w = 1, 1
+    else
+      clen = b >= 0xF0 and 4 or b >= 0xE0 and 3 or b >= 0xC0 and 2 or 1
+      w = strwidth(text:sub(i, math.min(i + clen - 1, n)))
     end
-    if c == " " and not best_space then
-      best_space = math.max(1, i - 1) -- break before the space, no trailing blank
+    local stop = math.min(i + clen - 1, n)
+    first_end = first_end or stop
+    if used + w > limit then
+      break
     end
+    used = used + w
+    last_fit = stop
+    -- back half only: a lone early break point wastes more vertical space
+    -- than a hard cut does
+    if used >= floor and clen == 1 then
+      if b == 44 and text:byte(stop + 1) == 32 then -- "," followed by " "
+        best_comma = stop -- caller strips the leading space from the remainder
+      elseif b == 32 then -- " "
+        best_space = math.max(1, prev_end) -- break before it, no trailing blank
+      end
+    end
+    prev_end = stop
+    i = stop + 1
   end
-  return best_space or limit
+  -- Every candidate is the end of a whole character, so the cut can never land
+  -- inside one — first_end included. That last fallback is not theoretical: a
+  -- node deep enough that its hanging indent exceeds the float's width gives
+  -- place() a NEGATIVE avail, and the callers all clamp with math.max(1, cut)
+  -- to guarantee forward progress. Returning the budget there (as the byte
+  -- scan did) meant that clamp landed on byte 1, which is the middle of the
+  -- first character whenever it is multibyte. One whole character is the
+  -- smallest honest unit of progress.
+  return best_comma or best_space or last_fit or first_end or 0
 end
 
 --- Byte index of the longest prefix of `text` that fits in `cells` columns.
@@ -141,6 +196,28 @@ local function fit_prefix(text, cells)
     used, last = used + w, stop
   end
   return last
+end
+
+--- Byte index at which the last `cells` columns of `text` begin — fit_prefix
+--- read from the other end. Needed by the ledger's middle-ellipsis, which has
+--- to keep a tail as well as a head: identifiers discriminate at both ends,
+--- and counting the tail in bytes gives a short one on multibyte names and
+--- can start it inside a character.
+---@param text string
+---@param cells integer
+---@return integer byte index, #text + 1 when not even one character fits
+local function fit_suffix(text, cells)
+  local at = vim.str_utf_pos(text)
+  local used = 0
+  for i = #at, 1, -1 do
+    local stop = (at[i + 1] or #text + 1) - 1
+    local w = strwidth(text:sub(at[i], stop))
+    if used + w > cells then
+      return at[i + 1] or #text + 1
+    end
+    used = used + w
+  end
+  return at[1] or 1
 end
 
 local is_expandable = require("typescope.model").is_expandable
@@ -1129,9 +1206,11 @@ function M.render(roots, opts)
       if strwidth(name) <= NAME_CAP then
         return name
       end
+      -- front and back are CELL budgets, so both ends are sliced by width
+      -- rather than by byte count; NAME_CAP is a column, not a byte offset
       local keep = NAME_CAP - 1
       local front = math.ceil(keep / 2)
-      return name:sub(1, front) .. "…" .. name:sub(-(keep - front))
+      return name:sub(1, fit_prefix(name, front)) .. "…" .. name:sub(fit_suffix(name, keep - front))
     end
 
     -- pass 1: visible rows, tree chrome carried like the other layouts
@@ -1237,7 +1316,9 @@ function M.render(roots, opts)
         def_w = node.default and not detail and 5 or 0
       end
       if strwidth(type_text) + def_w > budget then
-        type_text = type_text:sub(1, math.max(4, budget - def_w - 1)) .. "…"
+        -- budget, def_w and the ellipsis are all measured in cells, so the
+        -- prefix has to be taken in cells too
+        type_text = type_text:sub(1, fit_prefix(type_text, math.max(4, budget - def_w - 1))) .. "…"
         injectable = nil -- a truncated fragment isn't parseable source
       end
       line:add(type_text, type_group, injectable)
@@ -1362,7 +1443,7 @@ local function elide_members(text, budget)
     elseif text:find(" | ", 1, true) then
       head, body, tail, sep = "", text, "", " | "
     else
-      return text:sub(1, math.max(4, budget - 1)) .. "…"
+      return text:sub(1, fit_prefix(text, math.max(4, budget - 1))) .. "…"
     end
   end
   local members = vim.split(body, sep, { plain = true })
@@ -1582,10 +1663,19 @@ function M.ladder(node, opts)
       )
     end
     for _, inj in ipairs(l.inj) do
-      table.insert(
-        result.ts_injections,
-        { line = #result.lines - 1, col_start = inj.col_start, text = inj.text, mode = inj.mode }
-      )
+      -- from/to travel with the injection, exactly as render()'s emit does: a
+      -- wrapped or clipped segment puts only a SLICE of the snippet on this
+      -- line, and float.inject_highlights needs both ends to place the parsed
+      -- spans against it. Dropped, they default to the whole snippet and the
+      -- extmarks run off the end of the line (Invalid 'col': out of range).
+      table.insert(result.ts_injections, {
+        line = #result.lines - 1,
+        col_start = inj.col_start,
+        text = inj.text,
+        mode = inj.mode,
+        from = inj.from,
+        to = inj.to,
+      })
     end
     result.width = math.max(result.width, l.width)
   end
@@ -1638,7 +1728,14 @@ function M.ladder(node, opts)
   return result
 end
 
--- exposed for testing and for the spike to hot-swap experiments
+-- Exposed so test_render.lua section 13 can pin the contract directly: cells
+-- in, a 1-based inclusive BYTE index out, caller strips the leading whitespace
+-- from the remainder. Five call sites route through it and the asymmetry in
+-- that contract is where both UTF-8 truncation defects came from, so it is
+-- worth asserting on its own rather than only through a rendered tree.
+--
+-- (It previously also claimed to be here for the spike to hot-swap
+-- experiments. Nothing ever did, and nothing does now.)
 M._find_break_point = find_break_point
 
 return M

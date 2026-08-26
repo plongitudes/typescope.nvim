@@ -73,6 +73,53 @@ check(
 
 float.close(handle)
 
+-- Paint signatures are keyed by buffer, and nvim does NOT reuse buffer
+-- handles — a wiped buffer's number never comes back. So an entry that
+-- outlives its float is retained for the whole session: small individually, a
+-- table with one entry per float ever opened by the end of a long one. There
+-- was a _forget for exactly this, but it referenced `painted` from above the
+-- local's declaration, so it resolved to a global and threw on the one call
+-- that would have bounded the table. Nothing called it, so nothing noticed.
+check("forgetting a buffer's signatures does not throw", pcall(float._forget, 1))
+
+local function cycle()
+  local h = float.open({
+    lines = { "a", "b" },
+    highlights = {},
+    width = 10,
+    height = 2,
+    relative = "editor",
+    row = 1,
+    col = 1,
+  })
+  float.update(h, { lines = { "a", "c" }, highlights = {}, width = 10, height = 2 })
+  float.close(h)
+  return h
+end
+for _ = 1, 50 do
+  cycle()
+end
+check(
+  ("50 open/update/close cycles leave nothing behind (holding %d)"):format(float._painted_count()),
+  float._painted_count() == 0
+)
+
+-- ...and the same for a float the USER dismissed: :q and WinClosed both reach
+-- M.close with the window already invalid, which is why the cleanup cannot sit
+-- behind the validity check that guards the window close
+local dismissed = float.open({
+  lines = { "x" },
+  highlights = {},
+  width = 6,
+  height = 1,
+  relative = "editor",
+  row = 1,
+  col = 1,
+})
+vim.api.nvim_win_close(dismissed.win, true)
+float.close(dismissed)
+check("a user-dismissed float is forgotten too", float._painted_count() == 0)
+
 if fail_count == 0 then
   print("FLOAT ALL PASS")
 else
