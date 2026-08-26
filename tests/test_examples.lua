@@ -413,4 +413,51 @@ do
   vim.system = real_system
 end
 
+-- ensure_server must answer everyone who asked. Transport faked at
+-- vim.system, and the probe is HELD in flight rather than answered, which is
+-- both what creates the re-entry window and what guarantees nothing here ever
+-- spawns a real `ollama serve`.
+--
+-- The callback is load-bearing rather than advisory: warmup's done() is what
+-- clears `warming` and drains warm_waiters, so dropping one parks every later
+-- generate for the session and leaves the pending bars breathing until
+-- PENDING_MAX_MS retires the clock.
+do
+  local real_system = vim.system
+  local probes, held = 0, nil
+  ---@diagnostic disable-next-line: duplicate-set-field
+  vim.system = function(_, _, cb)
+    probes = probes + 1
+    held = cb -- never answered until we say so; no subprocess is ever started
+    return { wait = function() end }
+  end
+
+  local cfg = { host = "127.0.0.1", port = 9998, model = "testmodel", autostart = false, timeout_ms = 1000 }
+  local answers = {}
+  local function ask()
+    ollama.ensure_server(cfg, function(ready)
+      table.insert(answers, ready)
+    end)
+  end
+  ask()
+  ask()
+  check("a caller arriving mid-flight does not start a second probe", probes == 1, probes)
+  check("...and nobody has been answered yet", #answers == 0, #answers)
+
+  held({ code = 0, stdout = "{}" }) -- the server answers: it is up
+  vim.wait(100)
+  check("both callers are answered", #answers == 2, #answers)
+  check("...with the real result, not a re-entry brush-off", answers[1] == true and answers[2] == true)
+
+  -- the queue has to release, or the NEXT run inherits a stale waiter list
+  answers = {}
+  ask()
+  check("a later run probes afresh", probes == 2, probes)
+  held({ code = 0, stdout = "{}" })
+  vim.wait(100)
+  check("...and answers only its own caller", #answers == 1, #answers)
+
+  vim.system = real_system
+end
+
 print(failures == 0 and "EXAMPLES ALL PASS" or ("EXAMPLES " .. failures .. " FAILURES"))
