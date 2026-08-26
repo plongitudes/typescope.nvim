@@ -25,10 +25,28 @@ function M._clear_capture_cache()
   captures, captures_n = {}, 0
 end
 
---- Forget a buffer's paint signatures (it's about to be wiped).
+-- per-buffer signature of what each line was last painted WITH, so a line
+-- whose text is unchanged but whose colors moved still gets repainted. The
+-- pending heuristic pulse is exactly that case: same characters, a different
+-- rung group every frame.
+--
+-- Declared HERE, above the functions that touch it: it used to sit below
+-- _forget, so `painted[buf] = nil` there resolved to a global (nil) and threw
+-- on the one call that would have bounded this table.
+local painted = {} ---@type table<integer, table<integer, string>>
+
+--- Forget a buffer's paint signatures (it's about to be wiped). Called from
+--- M.close rather than left to the callers: buffer handles are NOT reused, so
+--- an entry per float open is retained for the life of the session otherwise.
 ---@param buf integer
 function M._forget(buf)
   painted[buf] = nil
+end
+
+--- Buffers currently holding paint signatures (test seam).
+---@return integer
+function M._painted_count()
+  return vim.tbl_count(painted)
 end
 
 --- Byte ranges + highlight groups for a single-line snippet.
@@ -93,17 +111,6 @@ local function inject_highlights(buf, line, col, inj, lang, query)
   end
 end
 
----@param buf integer
----@param lines string[]
----@param highlights typescope.Highlight[]
----@param injections? typescope.Injection[]
----@param lang? string
--- per-buffer signature of what each line was last painted WITH, so a line
--- whose text is unchanged but whose colors moved still gets repainted. The
--- pending heuristic pulse is exactly that case: same characters, a different
--- rung group every frame.
-local painted = {} ---@type table<integer, table<integer, string>>
-
 ---@param highlights typescope.Highlight[]
 ---@param injections? typescope.Injection[]
 ---@return table<integer, string>
@@ -141,6 +148,11 @@ local function changed_lines(buf, lines, sig)
   return changed
 end
 
+---@param buf integer
+---@param lines string[]
+---@param highlights typescope.Highlight[]
+---@param injections? typescope.Injection[]
+---@param lang? string
 local function set_content(buf, lines, highlights, injections, lang)
   -- Repaint only what moved. A full rewrite every frame — set_lines over the
   -- whole buffer, clear the namespace, rebuild ~80 extmarks — churns the
@@ -305,7 +317,15 @@ end
 
 ---@param handle typescope.FloatHandle?
 function M.close(handle)
-  if handle and vim.api.nvim_win_is_valid(handle.win) then
+  if not handle then
+    return
+  end
+  -- outside the validity check on purpose: a float dismissed by the user (:q,
+  -- WinClosed) reaches here with its window already gone, and its signatures
+  -- still have to be dropped. The buffer is bufhidden=wipe, so by now it may
+  -- be gone too — forgetting a buffer that no longer exists is the point.
+  M._forget(handle.buf)
+  if vim.api.nvim_win_is_valid(handle.win) then
     vim.api.nvim_win_close(handle.win, true)
   end
 end
