@@ -104,6 +104,36 @@ local function docstring_of(body, src)
   return out ~= "" and out or nil
 end
 
+--- Does `fn`'s first parameter bind the receiver? True for a method, false for
+--- a plain function and for a @staticmethod, whose first parameter is a real
+--- argument the caller supplies.
+---
+--- Asked by POSITION rather than by name. `self` and `cls` are conventions, not
+--- rules: a method whose receiver is called anything else was still shown as a
+--- parameter, and since pyright types it `Self@Class` — a diagnostic notation,
+--- not a Python type — the example generator had nothing to work from and fell
+--- back on the name (typescope.nvim-o6s).
+---@param fn TSNode function_definition
+---@param src integer|string
+---@return boolean
+local function binds_receiver(fn, src)
+  local top = fn
+  if top:parent() and top:parent():type() == "decorated_definition" then
+    top = top:parent()
+    for d in top:iter_children() do
+      if d:type() == "decorator" and text(d, src):match("staticmethod") then
+        return false
+      end
+    end
+  end
+  local block = top:parent()
+  if not block or block:type() ~= "block" then
+    return false
+  end
+  local owner = block:parent()
+  return owner ~= nil and owner:type() == "class_definition"
+end
+
 --- Structured signature of the function whose definition contains (row, col).
 ---@param src integer|string
 ---@param row integer 0-based
@@ -124,6 +154,7 @@ function M.function_info(src, row, col)
     docstring = docstring_of(field1(fn, "body"), src),
   }
   local params_node = field1(fn, "parameters")
+  local receiver_binding = binds_receiver(fn, src)
   if params_node then
     -- pass-mode bookkeeping: params after `*` (or *args) are keyword-only;
     -- a `/` retroactively marks everything before it positional-only
@@ -164,7 +195,13 @@ function M.function_info(src, row, col)
         table.insert(info.shape, "/")
         slash_at = #info.params
       end
-      if entry and entry.name ~= "self" and entry.name ~= "cls" then
+      -- Two filters, answering different questions. By POSITION: the first
+      -- parameter of a method is the receiver whatever it is called. By NAME:
+      -- `self`/`cls` anywhere else is a receiver by convention (a def written
+      -- outside its class for later attachment), and dropping it preserves
+      -- long-standing behaviour.
+      local conventional = entry and (entry.name == "self" or entry.name == "cls")
+      if entry and not (i == 0 and receiver_binding) and not conventional then
         if name_node then
           -- position of the bare name: where hover answers "(parameter) x: T"
           -- with pyright's inferred type for unannotated params

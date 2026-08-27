@@ -9,11 +9,17 @@ AUTOMATICALLY — tests/test_shapes.lua reads the marker comments below and asse
 extract.type_at agrees with each one. The markers are the expectation, so they
 cannot drift from the file the way a table in a test file would.
 
-Marker grammar: a comment line beginning "typescope:" directly above a construct
-(above any decorator), carrying "category=" and "fields=", where fields is a
-comma-separated list or the word NONE. An optional "note=" explains a NONE. Every
-marker in this docstring is described rather than written out, so that the parser
-sees exactly the real ones and no examples. A marker that says NONE is documenting a real
+Two marker kinds, both comment lines directly above a construct (above any
+decorator), and both described here rather than written out so the parser sees
+only the real ones.
+
+The class marker begins "typescope:" and carries "category=" and "fields=",
+where fields is a comma-separated list or the word NONE. Protocols may add
+"methods=", and an optional "note=" explains a NONE.
+
+The parameter marker begins "typescope-params:" and carries "params=", the
+parameters a caller actually supplies — so a method's receiver is absent from it
+whatever that receiver is named. A marker that says NONE is documenting a real
 gap, not blessing it — when a gap is closed, this file fails until its marker is
 updated, which is the point.
 
@@ -198,6 +204,45 @@ class Unannotated:
 class Dunders:
     __version__: str = "1.0"
     visible: int = 1
+
+
+# === Parameters: what a caller actually supplies =====================
+#
+# The receiver is identified by POSITION, not by name. It used to be dropped by
+# matching "self"/"cls", so a method whose receiver was called anything else was
+# presented as a parameter the caller passes — and pyright types that Self@Class,
+# a diagnostic notation rather than a Python type, which left the example
+# generator nothing to work from (typescope.nvim-o6s).
+
+
+class Receivers:
+    # typescope-params: params=x
+    def conventional(self, x: int) -> None: ...
+
+    # typescope-params: params=NONE
+    def oddly_named(numpy_test) -> None: ...
+
+    # typescope-params: params=y
+    def classmethod_like(klass, y: str) -> None: ...
+
+    # A staticmethod's first parameter is NOT a receiver — the caller supplies it.
+    # typescope-params: params=a,b
+    @staticmethod
+    def static(a: int, b: int) -> None: ...
+
+    # typescope-params: params=z
+    @classmethod
+    def klass(cls, z: int) -> None: ...
+
+    # typescope-params: params=NONE
+    @property
+    def prop(this) -> int: ...
+
+
+# A plain function binds no receiver, so its first parameter stays — even when it
+# is named like one.
+# typescope-params: params=numpy_test,other
+def free_function(numpy_test, other: int) -> None: ...
 
 
 # === Hover targets: LSP-backed, NOT machine-checked here =============

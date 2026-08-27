@@ -164,6 +164,38 @@ for _, m in ipairs(found) do
   end
 end
 
+-- Parameter markers: what a CALLER supplies. The receiver is identified by
+-- position, so a method drops its first parameter whatever it is named, while a
+-- plain function and a @staticmethod keep theirs.
+for i, line in ipairs(lines) do
+  local params_raw = line:match("^%s*#%s*typescope%-params:%s*params=([^%s]+)")
+  if params_raw then
+    local fname, row, col
+    for j = i + 1, #lines do
+      local d, at = lines[j]:match("def%s+([%w_]+)"), lines[j]:find("def%s")
+      if d then
+        fname, row, col = d, j - 1, at + 4
+        break
+      end
+    end
+    if not fname then
+      check(("params marker on line %d binds to a def"):format(i), false)
+    else
+      local info = py.function_info(src, row, col)
+      local got = {}
+      for _, p in ipairs(info and info.params or {}) do
+        table.insert(got, p.name)
+      end
+      local want = params_raw == "NONE" and "" or params_raw
+      check(
+        ("%s supplies: %s"):format(fname, want == "" and "nothing" or want),
+        want == table.concat(got, ","),
+        ("got [%s]"):format(table.concat(got, ","))
+      )
+    end
+  end
+end
+
 if failures == 0 then
   print("SHAPES ALL PASS")
 else
