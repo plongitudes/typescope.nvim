@@ -131,6 +131,30 @@ for _, m in ipairs(found) do
   end
 end
 
+-- Initial values on self-assigned fields: a literal is worth showing, a name is
+-- not (`self.inflow: dict = inflow` would render "inflow  dict = inflow"). And a
+-- class-level declaration must win the value as well as the name.
+local function fields_of(name)
+  for _, m in ipairs(found) do
+    if m.name == name then
+      local got = py.type_at(src, m.row, m.col)
+      local by = {}
+      for _, f in ipairs(got and got.fields or {}) do
+        by[f.name] = f.default or false
+      end
+      return by
+    end
+  end
+  return {}
+end
+
+local init = fields_of("Initialisers")
+check("a literal initialiser is kept", init.literal == "42", tostring(init.literal))
+check("a non-literal initialiser is dropped", init.from_param == false, tostring(init.from_param))
+
+local dual = fields_of("DeclaredAndAssigned")
+check("the class-level declaration wins the value, not just the name", dual.host == '"localhost"', tostring(dual.host))
+
 -- Marker bases are structural, not inheritance to chase: a TypedDict must not
 -- report TypedDict as a base, or resolve would try to walk into typing.
 for _, m in ipairs(found) do

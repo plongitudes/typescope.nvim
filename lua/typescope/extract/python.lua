@@ -580,6 +580,79 @@ end
 --- down to the actual default value. Not gated on category: a pydantic model
 --- inheriting from a user base classifies as plain "class" here (only the
 --- base names BaseModel) but still uses Field — the call shape is unambiguous.
+--- Is `n` a literal worth showing as an initial value? A name or a call is
+--- not: `self.inflow: dict = inflow` would render "inflow  dict = inflow",
+--- which is noise. A literal (`= 42`, `= "bar"`) actually tells you something.
+---@param n TSNode?
+---@return boolean
+local function is_literal(n)
+  local t = n and n:type()
+  if t == "unary_operator" then
+    return is_literal(field1(n, "argument"))
+  end
+  return t == "string"
+    or t == "concatenated_string"
+    or t == "integer"
+    or t == "float"
+    or t == "true"
+    or t == "false"
+    or t == "none"
+end
+
+--- Attributes annotated on `self` in __init__/__post_init__ — the imperative
+--- class style, as opposed to the class-level declarations the main scan reads
+--- (typescope.nvim-xex). Only the DIRECT children of the function body are
+--- scanned: `self.x: T` inside a conditional is a field that may not exist, and
+--- the class-level scan has the same shallow contract.
+---
+--- The receiver name is read from the first parameter rather than assumed to be
+--- "self" — it is a convention, not a rule, and `cls`/`s` appear in real code.
+---@param fn TSNode function_definition
+---@param src integer|string
+---@param seen table<string, boolean> names already claimed by class-level fields
+---@param out table[] fields to append to
+local function collect_self_fields(fn, src, seen, out)
+  local params = field1(fn, "parameters")
+  local first = params and params:named_child(0)
+  if not first then
+    return
+  end
+  -- the receiver may be bare (`self`) or annotated (`self: Foo`)
+  local recv = first:type() == "identifier" and text(first, src)
+    or (field1(first, "name") and text(field1(first, "name"), src))
+  if not recv then
+    return
+  end
+  local body = field1(fn, "body")
+  if not body then
+    return
+  end
+  for i = 0, body:named_child_count() - 1 do
+    local stmt = body:named_child(i)
+    if stmt:type() == "expression_statement" then
+      local a = stmt:named_child(0)
+      if a and a:type() == "assignment" then
+        local left, tnode, right = field1(a, "left"), field1(a, "type"), field1(a, "right")
+        if left and left:type() == "attribute" and tnode then
+          local obj = field1(left, "object")
+          local attr = field1(left, "attribute")
+          if obj and attr and obj:type() == "identifier" and text(obj, src) == recv then
+            local fname = text(attr, src)
+            if not fname:match("^__") and not seen[fname] then
+              seen[fname] = true
+              table.insert(out, {
+                name = fname,
+                type_node = tnode,
+                default = (right and is_literal(right)) and clean(text(right, src)) or nil,
+              })
+            end
+          end
+        end
+      end
+    end
+  end
+end
+
 local function unwrap_default(right, src)
   if right:type() == "call" then
     local fn = field1(right, "function")
@@ -653,6 +726,11 @@ function M.type_at(src, row, col)
   if not body then
     return result
   end
+  -- Class-level declarations win over an __init__ assignment of the same name:
+  -- the declaration is the class's stated shape, and the assignment merely
+  -- fills it in.
+  local declared = {}
+  local init_fns = {}
   for i = 0, body:named_child_count() - 1 do
     local stmt = body:named_child(i)
     if stmt:type() == "expression_statement" then
@@ -662,6 +740,7 @@ function M.type_at(src, row, col)
         if left and left:type() == "identifier" and tnode then
           local fname = text(left, src)
           if not fname:match("^__") then
+            declared[fname] = true
             local badge
             local inner = tnode
             -- Required[X]/NotRequired[X]: annotation grammar produces
@@ -694,12 +773,20 @@ function M.type_at(src, row, col)
           end
         end
       end
-    elseif stmt:type() == "function_definition" and category == "protocol" then
+    elseif stmt:type() == "function_definition" then
       local mname = text(field1(stmt, "name"), src)
-      if not mname:match("^__") then
+      if mname == "__init__" or mname == "__post_init__" then
+        -- deferred: the class-level pass has to finish first, so `declared`
+        -- is complete before an assignment is allowed to claim a name
+        table.insert(init_fns, stmt)
+      elseif category == "protocol" and not mname:match("^__") then
         table.insert(result.methods, { name = mname, signature = method_signature(stmt, src) })
       end
     end
+  end
+  -- After the class-level pass, so a declaration always wins the name.
+  for _, fn in ipairs(init_fns) do
+    collect_self_fields(fn, src, declared, result.fields)
   end
   return result
 end

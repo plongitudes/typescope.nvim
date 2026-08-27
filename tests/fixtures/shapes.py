@@ -26,8 +26,8 @@ from typing import NamedTuple, NotRequired, Protocol, Required, TypedDict
 import pydantic
 from pydantic import BaseModel
 
-
 # === Supported: the declarative shapes ===============================
+
 
 # typescope: category=dataclass fields=host,port,debug
 @dataclass
@@ -79,6 +79,7 @@ class ClassLevel:
 
 # === Supported: inheritance =========================================
 
+
 # typescope: category=class fields=env
 class BaseConfig:
     env: str = "dev"
@@ -103,18 +104,84 @@ class Mixed(TypedDict):
     optional: NotRequired[int]
 
 
-# === NOT supported: the gaps, deliberately recorded =================
+# === Supported: the imperative shape (typescope.nvim-xex) ===========
 
-# The shape typescope.nvim-xex is about. Attributes assigned in __init__ are
-# invisible twice over: the scan reads the class body's direct children only, so
-# it never enters __init__, and `self.strong` parses as an attribute rather than
-# an identifier, which the scan also skips. A plain hand-written class is the most
-# common Python class there is, so this is the biggest gap in the sheet.
-# typescope: category=class fields=NONE note=init-assigned attributes (xex)
+
+# Attributes annotated on self in __init__. This is how a large share of ordinary
+# hand-written Python looks, and it was the biggest gap in this sheet until xex.
+# typescope: category=class fields=strong,ant
 class InitAssigned:
     def __init__(self, inflow: dict) -> None:
         self.strong: str = "bar string"
         self.ant: int = 42
+
+
+# __post_init__ too, which is where a dataclass does its derived fields.
+# typescope: category=dataclass fields=raw,derived
+@dataclass
+class Derived:
+    raw: str
+
+    def __post_init__(self) -> None:
+        self.derived: int = len(self.raw)
+
+
+# The receiver name is read from the first parameter, not assumed to be "self" —
+# a convention, not a rule.
+# typescope: category=class fields=renamed
+class OddReceiver:
+    def __init__(this) -> None:
+        this.renamed: bool = True
+
+
+# A class-level declaration wins over an __init__ assignment of the same name:
+# the declaration is the stated shape, the assignment merely fills it in. `host`
+# must appear ONCE, and with the declared annotation.
+# typescope: category=class fields=host,port
+class DeclaredAndAssigned:
+    host: str = "localhost"
+
+    def __init__(self) -> None:
+        self.host: str = "overridden"
+        self.port: int = 8000
+
+
+# Only literals become an initial value. `self.inflow: dict = inflow` would
+# otherwise render "inflow  dict = inflow", which is noise.
+# typescope: category=class fields=literal,from_param
+class Initialisers:
+    def __init__(self, given: int) -> None:
+        self.literal: int = 42
+        self.from_param: int = given
+
+
+# === NOT supported: the gaps, deliberately recorded =================
+
+
+# Unannotated self-assignment: same reasoning as the class-level case below.
+# typescope: category=class fields=NONE note=no annotation on self.x
+class UnannotatedSelf:
+    def __init__(self) -> None:
+        self.strong = "bar string"
+
+
+# Only the DIRECT children of __init__ are scanned. An attribute set inside a
+# conditional may not exist at runtime, and the class-level scan has the same
+# shallow contract — so this is a deliberate boundary, not an oversight.
+# typescope: category=class fields=always note=conditional self-assignment is not scanned
+class Conditional:
+    def __init__(self, flag: bool) -> None:
+        self.always: int = 1
+        if flag:
+            self.sometimes: int = 2
+
+
+# Dunders are filtered on self too, not just at class level.
+# typescope: category=class fields=shown note=self.__private is filtered like any dunder
+class SelfDunder:
+    def __init__(self) -> None:
+        self.__private: int = 1
+        self.shown: int = 2
 
 
 # Unannotated class-level assignments are skipped on purpose: without an
