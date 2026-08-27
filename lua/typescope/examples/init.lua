@@ -104,6 +104,25 @@ end
 ---@param roots typescope.Node[]
 ---@param node typescope.Node
 ---@return boolean
+--- pyright renders a bound TypeVar or a Self type as `Name@Owner` — `Self@Bar`
+--- for a receiver, `T@func` for a type variable. Neither is a Python type
+--- expression, and no literal satisfies one, so asking for an example produces
+--- an answer keyed on something other than the type: the model, forbidden by the
+--- prompt from declining, falls back on the field NAME. That is how a receiver
+--- called numpy_test was offered `np.array([1, 2, 3, 4, 5])` (typescope.nvim-o6s).
+---
+--- String literals are stripped before looking, so `Literal["user@example.com"]`
+--- — a perfectly good type with an @ in it — is not caught.
+---@param display string?
+---@return boolean
+local function is_unbound_notation(display)
+  if not display then
+    return false
+  end
+  local stripped = display:gsub('"[^"]*"', ""):gsub("'[^']*'", "")
+  return stripped:find("[%w_]+@[%w_]+") ~= nil
+end
+
 local function eligible(node)
   local has_real_default = node.default ~= nil and node.default ~= "None" and node.default ~= "..."
   -- _lazy placeholders are unresolved structure (an alias name standing in
@@ -115,6 +134,7 @@ local function eligible(node)
     and node.type.category ~= "unresolved"
     and node._lazy == nil
     and not has_real_default
+    and not is_unbound_notation(node.type.display)
 end
 
 function M.annotate(roots)

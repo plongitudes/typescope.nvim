@@ -112,6 +112,49 @@ check(
 )
 check("parse skips non-matching lines", parsed["not"] == nil)
 
+-- The escape hatch (typescope.nvim-o6s). Without a way to decline, the prompt's
+-- "EXACTLY one line per field" forces a value for every field, so a type that
+-- admits no literal gets one invented from the field's NAME — a confident wrong
+-- answer rather than an absent one.
+check("prompt offers a way to decline", prompt:find("SKIP") ~= nil)
+
+-- the padded line is concatenated rather than written into a long string so the
+-- trailing whitespace it is testing survives an editor, and a linter, untouched
+local declined = ollama.parse(table.concat({
+  'host = "localhost"',
+  "receiver = SKIP",
+  "  padded = SKIP  ",
+  'label = "SKIP"',
+  "port = 8080",
+}, "\n"))
+check("a bare SKIP is dropped", declined.receiver == nil)
+check("...even padded", declined.padded == nil)
+-- compared unquoted and exact, so a str field may legitimately answer "SKIP"
+check('a quoted "SKIP" is a real value', declined.label == '"SKIP"')
+check("declining does not disturb its neighbours", declined.host == '"localhost"' and declined.port == "8080")
+
+-- Types that admit no literal are never asked about at all. pyright renders a
+-- receiver as Self@Bar and a bound TypeVar as T@func; neither is a Python type.
+do
+  local model = require("typescope.model")
+  local examples = require("typescope.examples")
+  local function heuristic_for(name, display)
+    local n = model.new({ name = name, kind = "param", type = { display = display, category = "builtin" } })
+    examples.annotate({ n })
+    return n.example.heuristic
+  end
+  check("a receiver is not asked for an example", heuristic_for("numpy_test", "Self@Bar") == nil)
+  check("nor a bound TypeVar", heuristic_for("email", "T@handler") == nil)
+  check("nor one nested in a generic", heuristic_for("email", "list[Self@Bar]") == nil)
+  -- the two shapes a careless pattern would break: an @ inside a string literal,
+  -- and a class whose name merely starts with Self
+  check(
+    "a Literal containing an @ is still asked",
+    heuristic_for("email", 'Literal["user@example.com"]') == '"user@example.com"'
+  )
+  check("a class named SelfEmployed is still asked", heuristic_for("email", "SelfEmployed") ~= nil)
+end
+
 -- LLM caching discipline: misses get a sentinel (auto-run never re-asks),
 -- E's retry_misses lifts it, and in-flight batches are never duplicated by
 -- a reopen. Ollama's transport is faked at the module boundary.

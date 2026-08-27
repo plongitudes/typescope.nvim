@@ -371,6 +371,9 @@ function M.prompt(leaves)
     "path = value",
     "where value is a single valid Python literal appropriate for the type.",
     "Prefer realistic-looking values over placeholders. No prose, no code fences.",
+    "If no sensible literal exists for a field, reply exactly:",
+    "path = SKIP",
+    "Do not invent a value from the field's name when its type does not admit one.",
     "",
     "Fields:",
   }
@@ -382,6 +385,12 @@ end
 
 --- Parse "path = literal" lines back into a map. Tolerates prose noise and
 --- code fences — anything that doesn't match the shape is skipped.
+---
+--- A bare SKIP is the model declining, and is dropped rather than stored. The
+--- prompt offers that way out because without one every field MUST get a value,
+--- which turns "this type admits no literal" into a confident wrong answer
+--- rather than an absent one (typescope.nvim-o6s). Compared unquoted and exact,
+--- so the string value `"SKIP"` is still a legitimate answer for a str field.
 ---@param text string model output
 ---@return table<string, string> path -> literal
 function M.parse(text)
@@ -389,7 +398,10 @@ function M.parse(text)
   for line in text:gmatch("[^\n]+") do
     local path, value = line:match("^%s*([%w_%.]+)%s*=%s*(.+)$")
     if path and value then
-      out[path] = vim.trim(value)
+      value = vim.trim(value)
+      if value ~= "SKIP" then
+        out[path] = value
+      end
     end
   end
   return out
