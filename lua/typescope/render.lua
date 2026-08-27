@@ -1078,7 +1078,6 @@ function M.render(roots, opts)
     end
 
     -- pass 2: column widths, capping the wrappable columns to fit max_width
-    local WRAPPABLE = { [3] = true, [5] = true } -- type, example
     local widths = {}
     for c = 1, 6 do
       widths[c] = 0

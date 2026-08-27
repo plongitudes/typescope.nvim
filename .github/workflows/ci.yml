@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: tests (nvim ${{ matrix.nvim }})
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.nvim == 'nightly' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # v0.10.4 is the floor the plugin advertises (plugin/typescope.lua
+        # refuses to load below nvim-0.10).
+        nvim: ["v0.10.4", "stable", "nightly"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: ${{ matrix.nvim }}
+
+      # tests/run.sh expects nvim-treesitter at this exact path, and reads the
+      # python parser out of it. The master branch is the one with
+      # :TSInstallSync; nvim-treesitter's main branch has a different API.
+      - name: Install nvim-treesitter and the python parser
+        run: |
+          git clone --depth 1 --branch master \
+            https://github.com/nvim-treesitter/nvim-treesitter \
+            "$HOME/.local/share/nvim/lazy/nvim-treesitter"
+          nvim --headless --clean \
+            --cmd "set rtp+=$HOME/.local/share/nvim/lazy/nvim-treesitter" \
+            -c "TSInstallSync python" -c "qa!"
+
+      - name: Run the suites
+        run: ./tests/run.sh
+
+  lint:
+    name: luacheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install luacheck
+        run: sudo apt-get update && sudo apt-get install -y lua5.1 luarocks && sudo luarocks install luacheck
+      - name: Lint
+        run: luacheck lua/ tests/
+
+  format:
+    name: stylua
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: JohnnyMorganz/stylua-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          version: latest
+          args: --check lua/ tests/

@@ -25,8 +25,8 @@ end
 ---@param cfg typescope.OllamaConfig
 ---@param cb fun(response: string?, err: string?)
 ---@param gen_opts? { num_predict?: integer } sized by the caller to the leaf count
----@param _retrying? boolean internal
-function M.generate(prompt, cfg, cb, gen_opts, _retrying)
+---@param retrying? boolean internal
+function M.generate(prompt, cfg, cb, gen_opts, retrying)
   -- Never race a warmup we can see. warmup and this call are dispatched
   -- microseconds apart on float open (init.lua:331-336) and ollama serves one
   -- request at a time, so on a cold server this one used to spend its whole
@@ -37,9 +37,9 @@ function M.generate(prompt, cfg, cb, gen_opts, _retrying)
   -- a server that will never answer costs ~1s to establish, not the 120s
   -- load budget. Parked work always runs — done() fires on every path — which
   -- matters because this callback is what releases examples.in_flight.
-  if warming and not _retrying then
+  if warming and not retrying then
     table.insert(warm_waiters, function()
-      M.generate(prompt, cfg, cb, gen_opts, _retrying)
+      M.generate(prompt, cfg, cb, gen_opts, retrying)
     end)
     return
   end
@@ -81,7 +81,7 @@ function M.generate(prompt, cfg, cb, gen_opts, _retrying)
     },
     { text = true },
     vim.schedule_wrap(function(out)
-      if out.code == 28 and not _retrying then
+      if out.code == 28 and not retrying then
         -- Stalled, not slow. ollama keeps loading/holding the model after we
         -- hang up, so a stall that was really a cold load clears on the retry.
         return M.generate(prompt, cfg, cb, gen_opts, true)

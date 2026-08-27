@@ -27,7 +27,7 @@ end
 -- open the fixture and attach the mock server
 vim.cmd.edit(fixture_dir .. "/sample.py")
 local bufnr = vim.api.nvim_get_current_buf()
-local client_id = vim.lsp.start({
+vim.lsp.start({
   name = "typescope-mock",
   cmd = require("tests.mock_server").cmd(fixture_dir),
   root_dir = fixture_dir,
