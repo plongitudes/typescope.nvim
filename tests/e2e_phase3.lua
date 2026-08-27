@@ -414,7 +414,7 @@ do
   resolve.clear_cache()
 end
 
--- insert-mode typing surface (U6 ladder): names block listing every param +
+-- insert-mode typing surface (U6): names block listing every param +
 -- ONE detail line for the active one, anchored above the cursor (hard rule:
 -- cursor line + line below never occluded), never focusable, degradation
 -- instead of wrapping, closes on InsertLeave. Overloads never stack — [n/m]
@@ -471,14 +471,14 @@ do
         and detail:find("{host", 1, true) ~= nil
     )
     check("no docstring while typing", not table.concat(ilines, "\n"):find("Spin up"))
-    check("ladder wears the shared border", ic.border ~= nil and ic.border ~= "none")
+    check("typing surface wears the shared border", ic.border ~= nil and ic.border ~= "none")
     -- hard rule: SW row 0 → in a REAL UI the whole float (border included)
     -- ends on the line above the cursor. Headless attaches no UI and never
     -- applies anchor geometry, so screen positions can't be asserted here —
     -- assert the normalized config instead (get_config rewrites
     -- relative=cursor to win coords: SW anchored at the cursor's window row)
     check(
-      "ladder anchors SW at the cursor row (real UI: ends on the line above)",
+      "typing surface anchors SW at the cursor row (real UI: ends on the line above)",
       ic.anchor == "SW" and ic.row == vim.fn.winline() - 1
     )
     -- the param name is the active-param highlight (always, by construction)
@@ -489,7 +489,7 @@ do
         has_active = true
       end
     end
-    check("ladder highlights the active param", has_active)
+    check("typing surface highlights the active param", has_active)
     vim.cmd("doautocmd InsertLeave")
     check("insert float closes on InsertLeave", insert_float() == nil)
   end
@@ -508,12 +508,12 @@ do
   check("insert overload float opened", ow ~= nil)
   if ow then
     local oall = table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(ow), 0, -1, false), "\n")
-    check("ladder carries the overload badge [1/2]", oall:find("%[1/2%]") ~= nil)
-    check("ladder shows one overload only", oall:find("key") ~= nil and not oall:find("%[2/2%]"))
-    check("ladder keeps the heuristic example at full width", oall:find("e%.g%.") ~= nil)
+    check("typing surface carries the overload badge [1/2]", oall:find("%[1/2%]") ~= nil)
+    check("typing surface shows one overload only", oall:find("key") ~= nil and not oall:find("%[2/2%]"))
+    check("typing surface keeps the heuristic example at full width", oall:find("e%.g%.") ~= nil)
 
     -- auto-follow: adding a second argument bumps the mock's arity-based
-    -- activeSignature; the ladder silently swaps its badge. The line must
+    -- activeSignature; the typing surface silently swaps its badge. The line must
     -- reach DISK — the mock reads files, not buffers (didChange desync is
     -- mock-only, same as the cache-buster test above).
     local frow
@@ -549,7 +549,7 @@ do
     vim.cmd("silent write")
     vim.cmd("doautocmd InsertLeave")
 
-    -- client-side matching (h8h) in the ladder: cursor inside a string arg,
+    -- client-side matching (h8h) in the typing surface: cursor inside a string arg,
     -- where the mock's word-at answer yields no signatureHelp signal worth
     -- trusting (activeSignature=0 via the callee fallback) — the literal
     -- kind still picks the sink: str overload
@@ -567,7 +567,7 @@ do
       local h = table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(ww), 0, -1, false), "\n")
       return h:find("%[2/2%]") ~= nil
     end, 100)
-    check("ladder client-matches the str overload inside a string arg", str_matched)
+    check("typing surface client-matches the str overload inside a string arg", str_matched)
     vim.cmd("doautocmd InsertLeave")
   end
 
@@ -584,7 +584,7 @@ do
     return insert_float() ~= nil
   end)
   local nw = insert_float()
-  check("insert narrow ladder opened", nw ~= nil)
+  check("insert narrow typing surface opened", nw ~= nil)
   if nw then
     local nlines = vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(nw), 0, -1, false)
     local nall = table.concat(nlines, "\n")
@@ -593,7 +593,7 @@ do
       within = within and vim.api.nvim_strwidth(l) <= 28
     end
     check(
-      "narrow ladder wraps within insert_mode.max_width, keeps everything",
+      "narrow typing surface wraps within insert_mode.max_width, keeps everything",
       #nlines > 1 and within and nall:find("e%.g%.") ~= nil and nall:find("key") ~= nil and nall:find("%[1/2%]") ~= nil
     )
     vim.cmd("doautocmd InsertLeave")

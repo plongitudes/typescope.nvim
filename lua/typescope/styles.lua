@@ -1,5 +1,5 @@
 ---@class typescope.Charset
----@field vert string continuation bar for ancestor levels
+---@field vert string continuation line for ancestor levels
 ---@field branch string prefix for a non-last child
 ---@field last string prefix for the last child
 ---@field expanded string marker on an expanded expandable node
@@ -9,7 +9,7 @@
 ---@field inherit string prefix for the origin class of inherited fields
 ---@field evaluated string prefix for hover-evaluated type decorations
 ---@field rule string section-separator character (repeated to width)
----@field bar string[] block ladder, shortest → tallest: the tallest fills the
+---@field ramp string[] block ramp, shortest → tallest: the tallest fills the
 --- placeholder an example waits behind, and the run descends through the rest
 --- as the value is revealed (38c). A list, not a string, because the cells are
 --- multibyte in some charsets and single-byte in others.
@@ -31,7 +31,7 @@ local charsets = {
     inherit = "↑",
     evaluated = "≈ ",
     rule = "─",
-    bar = { "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█" },
+    ramp = { "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█" },
   },
   ascii = {
     vert = "| ",
@@ -44,7 +44,7 @@ local charsets = {
     inherit = "^",
     evaluated = "~ ",
     rule = "-",
-    bar = { ".", ":", "-", "=", "+", "*", "#", "@" },
+    ramp = { ".", ":", "-", "=", "+", "*", "#", "@" },
   },
   minimal = {
     vert = "  ",
@@ -57,7 +57,7 @@ local charsets = {
     inherit = "^",
     evaluated = "~ ",
     rule = " ",
-    bar = { ".", ":", "-", "=", "+", "*", "#", "@" },
+    ramp = { ".", ":", "-", "=", "+", "*", "#", "@" },
   },
   rounded = {
     vert = "│ ",
@@ -70,7 +70,7 @@ local charsets = {
     inherit = "↑",
     evaluated = "≈ ",
     rule = "─",
-    bar = { "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█" },
+    ramp = { "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█" },
   },
 }
 

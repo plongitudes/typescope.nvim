@@ -105,7 +105,7 @@ end
 
 -- Examples whose LLM value is still coming (38c). The placeholder is a bar of
 -- block characters and the animation is a wave travelling through it, so
--- brightness has to track HEIGHT: one group per rung of the charset ladder,
+-- brightness has to track HEIGHT: one group per rung of the charset ramp,
 -- dimmest at ▁ and the full example color at ▇. They're static — the wave
 -- moves characters between them, it never recolors anything — which is what
 -- lets the whole animation ride an ordinary repaint, with no highlight
@@ -113,7 +113,7 @@ end
 M.PENDING_STEPS = 8
 M.PENDING_ALPHA = 0.3 -- the dimmest rung; the tallest sits at the full color
 
---- Group for a bar cell at ladder rung `i` (1 = shortest).
+--- Group for a bar cell at ramp rung `i` (1 = shortest).
 ---@param i integer
 ---@return string
 function M.pending_group(i)

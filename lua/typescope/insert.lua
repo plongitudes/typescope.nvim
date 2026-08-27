@@ -1,4 +1,4 @@
--- Insert-mode typing surface (U6 ladder): ONE line for the active parameter,
+-- Insert-mode typing surface (U6): ONE line for the active parameter,
 -- repositioned every keystroke so the cursor line and the line below it are
 -- never occluded. No tree, no docstring, no LLM, no keymaps — the density
 -- research's insert rule is "zero manual controls": segments drop in a fixed
@@ -111,7 +111,7 @@ local function active_params(st)
   return st.roots
 end
 
--- The one param the ladder describes: signatureHelp's active param by name,
+-- The one param the typing surface describes: signatureHelp's active param by name,
 -- else the first param (a fresh `f(` before any answer lands).
 ---@param st typescope.InsertState
 ---@return typescope.Node?
@@ -130,7 +130,7 @@ end
 
 ---@param st typescope.InsertState
 ---@return typescope.RenderResult?
-local function ladder_result(st)
+local function typing_result(st)
   local node = param_node(st)
   if not node then
     return nil
@@ -148,7 +148,7 @@ local function ladder_result(st)
   end
   local config = require("typescope.config")
   local cfg = config.get()
-  return require("typescope.render").ladder(node, {
+  return require("typescope.render").typing_surface(node, {
     max_width = math.min(config.resolved_max_width(cfg.insert_mode.max_width), vim.o.columns - 6),
     show_examples = cfg.show_examples and cfg.example_mode ~= "none",
     example_kind = "heuristic", -- LLM values decorate if already cached, never requested
@@ -221,7 +221,7 @@ end
 ---@param st typescope.InsertState
 repaint = function(st)
   ensure_shape(st)
-  local result = ladder_result(st)
+  local result = typing_result(st)
   if not result then
     close_float() -- an overload swap can land on a 0-param signature
     return
@@ -238,7 +238,7 @@ repaint = function(st)
 end
 
 -- Debounced signatureHelp → active param + (U4) overload auto-follow: when
--- activeSignature changes, the ladder silently swaps to that overload.
+-- activeSignature changes, the typing surface silently swaps to that overload.
 -- Repaints only on change; no resolve, no chases.
 local function refresh_active()
   stop_timer()
@@ -327,7 +327,7 @@ local function open_for(srcbuf, key, frow0, fcol)
     local has_overloads = type(meta) == "table" and meta.overloads ~= nil
     ---@type typescope.InsertState
     local st = {
-      handle = nil, -- set below; ladder_result doesn't need it
+      handle = nil, -- set below; typing_result doesn't need it
       key = key,
       srcbuf = srcbuf,
       roots = roots,
@@ -337,7 +337,7 @@ local function open_for(srcbuf, key, frow0, fcol)
       token = token,
       active_name = nil,
     }
-    local result = ladder_result(st)
+    local result = typing_result(st)
     if not result then
       return -- nothing to describe (0-param call); pending_key stays as negative cache
     end

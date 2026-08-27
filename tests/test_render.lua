@@ -15,7 +15,7 @@ local function check(desc, cond)
   end
 end
 
--- Distinct ladder rungs present in a line. Plain find per rung, NOT a pattern
+-- Distinct ramp rungs present in a line. Plain find per rung, NOT a pattern
 -- class: Lua patterns are byte-based and "[▁▂▃]" matches individual UTF-8
 -- bytes rather than characters.
 local RUNGS = { "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█" }
@@ -55,9 +55,9 @@ end
 -- float never paints.
 --
 -- Asserted as a blanket invariant over any render result rather than as a
--- golden for one case, because the way this got shipped was a wrapping ladder
+-- golden for one case, because the way this got shipped was a wrapping typing surface
 -- fixture that checked its lines and never looked at its injections
--- (render.ladder's push dropped from/to where render()'s emit kept them).
+-- (render.typing_surface's push dropped from/to where render()'s emit kept them).
 ---@param desc string
 ---@param result typescope.RenderResult
 local function check_injections(desc, result)
@@ -639,7 +639,7 @@ do
   check("ledger caps long names with middle ellipsis", long.lines[1]:find("…") ~= nil and long.lines[1]:find("bool") ~= nil)
 end
 
--- 12. insert ladder (U6): one line, fixed degradation order
+-- 12. insert typing surface (U6): one line, fixed degradation order
 do
   local node = model.new({
     name = "port",
@@ -649,20 +649,20 @@ do
     example = { heuristic = "8080" },
   })
   -- fn/badge/ret render only in the signature block; without params the
-  -- ladder is the bare detail
+  -- typing surface is the bare detail
   local base = { show_examples = true, example_kind = "heuristic", fn_name = "run", badge = "[2/2]" }
-  local full = render.ladder(node, vim.tbl_extend("force", base, { max_width = 60 }))
-  eq_lines("ladder full", full.lines, { "port: int = 8000   e.g. 8080" })
-  check("ladder maps to the param", full.line_to_node[1] == "port")
+  local full = render.typing_surface(node, vim.tbl_extend("force", base, { max_width = 60 }))
+  eq_lines("typing surface full", full.lines, { "port: int = 8000   e.g. 8080" })
+  check("typing surface maps to the param", full.line_to_node[1] == "port")
   -- out of room → the detail WRAPS (hanging indent); nothing is dropped
-  local wrapped = render.ladder(node, vim.tbl_extend("force", base, { max_width = 20 }))
-  eq_lines("ladder wraps instead of dropping", wrapped.lines, {
+  local wrapped = render.typing_surface(node, vim.tbl_extend("force", base, { max_width = 20 }))
+  eq_lines("typing surface wraps instead of dropping", wrapped.lines, {
     "port: int = 8000",
     "         e.g. 8080",
   })
   check("wrapped lines all map to the param", wrapped.line_to_node[1] == "port" and wrapped.line_to_node[2] == "port")
-  check_injections("ladder full", full)
-  check_injections("wrapped ladder", wrapped)
+  check_injections("typing surface full", full)
+  check_injections("wrapped typing surface", wrapped)
 
   -- the real crash shape: an annotation long enough that the TYPE ITSELF is
   -- split across lines, so each line carries a different slice of one snippet.
@@ -677,9 +677,9 @@ do
       category = "generic",
     },
   })
-  local split = render.ladder(wide, { show_examples = false, example_kind = "heuristic", max_width = 30 })
+  local split = render.typing_surface(wide, { show_examples = false, example_kind = "heuristic", max_width = 30 })
   check("a long annotation splits across lines", #split.lines > 2)
-  check_injections("split-annotation ladder", split)
+  check_injections("split-annotation typing surface", split)
   -- the slices walk the snippet forward without overlapping, and between them
   -- reach its end. NOT contiguous: a wrap strips the leading space from the
   -- remainder and steps `from` over it, so each break leaves a gap the width
@@ -705,11 +705,11 @@ do
     default = '"r"',
   })
   local vbase = { show_examples = true, example_kind = "heuristic", style = styles.get("unicode"), fn_name = "open", badge = "[1/7]" }
-  local vfull = render.ladder(mode, vim.tbl_extend("force", vbase, { max_width = 80 }))
-  eq_lines("ladder presents valid values", vfull.lines, { "mode: OpenTextMode ≈ Literal['r', 'w', 'x', 'a'] = \"r\"" })
+  local vfull = render.typing_surface(mode, vim.tbl_extend("force", vbase, { max_width = 80 }))
+  eq_lines("typing surface presents valid values", vfull.lines, { "mode: OpenTextMode ≈ Literal['r', 'w', 'x', 'a'] = \"r\"" })
   -- a modest overflow wraps with the FULL value set intact
-  local vwrapped = render.ladder(mode, vim.tbl_extend("force", vbase, { max_width = 40 }))
-  eq_lines("ladder wraps full valid values", vwrapped.lines, {
+  local vwrapped = render.typing_surface(mode, vim.tbl_extend("force", vbase, { max_width = 40 }))
+  eq_lines("typing surface wraps full valid values", vwrapped.lines, {
     "mode: OpenTextMode ≈ Literal['r', 'w',",
     "      'x', 'a'] = \"r\"",
   })
@@ -725,10 +725,10 @@ do
     evaluated = "Literal[" .. table.concat(members, ", ") .. "]",
     default = '"r"',
   })
-  local capped = render.ladder(big, vim.tbl_extend("force", vbase, { max_width = 40 }))
+  local capped = render.typing_surface(big, vim.tbl_extend("force", vbase, { max_width = 40 }))
   local call = table.concat(capped.lines, "\n")
   check(
-    "ladder caps wrapped lines, then elides the shape",
+    "typing surface caps wrapped lines, then elides the shape",
     #capped.lines <= 3 and call:find("…%+") ~= nil and not call:find("'m20'")
   )
 
@@ -743,12 +743,12 @@ do
       { name = "env", type = { display = "str", category = "builtin" } },
     },
   })
-  local sfull = render.ladder(struct, { show_examples = false, example_kind = "heuristic", max_width = 60 })
-  eq_lines("ladder presents a class param's shape", sfull.lines, { "config: ServerConfig ≈ {host, port, env}" })
+  local sfull = render.typing_surface(struct, { show_examples = false, example_kind = "heuristic", max_width = 60 })
+  eq_lines("typing surface presents a class param's shape", sfull.lines, { "config: ServerConfig ≈ {host, port, env}" })
 
   -- signature block: K-consistent header — name(params) -> ret [i/m] — with
   -- the active param lit, above a rule
-  local pfull = render.ladder(
+  local pfull = render.typing_surface(
     node,
     vim.tbl_extend("force", base, {
       max_width = 60,
@@ -756,7 +756,7 @@ do
       params = { { name = "app", active = false }, { name = "host", active = false }, { name = "port", active = true } },
     })
   )
-  eq_lines("ladder signature block + rule + detail", pfull.lines, {
+  eq_lines("typing surface signature block + rule + detail", pfull.lines, {
     "run(app, host, port) -> None [2/2]",
     string.rep("─", 34),
     "port: int = 8000   e.g. 8080",
@@ -766,7 +766,7 @@ do
   for _, n in ipairs({ "app", "host", "port", "ws_max_size", "lifespan", "reload" }) do
     table.insert(wrap_params, { name = n, active = n == "port" })
   end
-  local pwrap = render.ladder(node, vim.tbl_extend("force", base, { max_width = 24, params = wrap_params }))
+  local pwrap = render.typing_surface(node, vim.tbl_extend("force", base, { max_width = 24, params = wrap_params }))
   local wall = table.concat(pwrap.lines, "\n")
   check(
     "signature block wraps so every name stays visible",
@@ -834,7 +834,7 @@ do
     local bare = model.new({ name = "object", kind = "param", type = { display = "_T", category = "typevar" } })
     local waiting = render.render({ bare }, opts({ example_kind = "llm", example_pending = pending }))
     local settled = render.render({ bare }, opts({ example_kind = "llm" }))
-    -- one full wavelength, so every rung of the ladder is on screen at once
+    -- one full wavelength, so every rung of the ramp is on screen at once
     check(
       "pending leaf with no heuristic shows the wave bar",
       waiting.lines[1]:find("▁") and waiting.lines[1]:find("▇") and waiting.lines[1]:find("▅")
@@ -844,7 +844,7 @@ do
       example_kind = "llm",
       example_pending = pending,
     })).lines[1]
-    check("bar uses the charset ladder", ascii:find("%.") and ascii:find("#") and not ascii:find("▇"))
+    check("bar uses the charset ramp", ascii:find("%.") and ascii:find("#") and not ascii:find("▇"))
     check("nothing pending, nothing shown", settled.lines[1]:find("▇") == nil)
     -- the type annotation always injects; the bar must not — it isn't code
     local bar_injected = false
@@ -1031,9 +1031,9 @@ do
     end
     return cells
   end
-  local ladder = { "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█" }
+  local ramp = { "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█" }
   local function rung(cell)
-    for i, glyph in ipairs(ladder) do
+    for i, glyph in ipairs(ramp) do
       if cell == glyph then
         return i
       end
@@ -1051,7 +1051,7 @@ do
   -- the taper runs from the edge to the first column that ever reaches full
   local plateau
   for i = 1, #peak do
-    if not plateau and peak[i] == #ladder then
+    if not plateau and peak[i] == #ramp then
       plateau = i
     end
   end
@@ -1062,8 +1062,8 @@ do
   local mid = plateau and peak[math.ceil(plateau / 2)] or 0
   check("the taper climbs fastest at the edge, not in the middle", mid >= 5)
   -- ...and it is still a taper, at both ends, not a square cut
-  check("the first column still fades in", peak[1] < #ladder)
-  check("the last column still fades out", (peak[#peak] or 0) < #ladder)
+  check("the first column still fades in", peak[1] < #ramp)
+  check("the last column still fades out", (peak[#peak] or 0) < #ramp)
 end
 
 -- An animating row is a picture of one value, and a picture that wraps is two
@@ -1233,12 +1233,12 @@ do
   check("...and the landing frame is the same width", W - vim.api.nvim_strwidth(after) <= 1)
   -- every column that is a block in BOTH frames has to be the SAME block:
   -- that is what "nothing moved sideways" means, cell by cell
-  local ladder = "[▁▂▃▄▅▆▇█]"
+  local ramp = "[▁▂▃▄▅▆▇█]"
   local moved, compared = false, 0
   for i = 1, math.min(vim.fn.strchars(before), vim.fn.strchars(after)) do
     local a = vim.fn.strcharpart(before, i - 1, 1)
     local b = vim.fn.strcharpart(after, i - 1, 1)
-    if a:match(ladder) and b:match(ladder) then
+    if a:match(ramp) and b:match(ramp) then
       compared = compared + 1
       if a ~= b then
         moved = true
@@ -1400,7 +1400,7 @@ end
 -- 13. find_break_point: the wrap decision every layout goes through
 --
 -- Five call sites depend on it — tree flow, docstring prose, header elision,
--- table cells, ladder detail — and until now none of them tested it directly.
+-- table cells, typing surface detail — and until now none of them tested it directly.
 -- Its contract is easy to get wrong from the outside, so pin it here: `limit`
 -- is a count of DISPLAY CELLS, the return is a 1-based INCLUSIVE BYTE index of
 -- the last character to keep, and the caller is expected to strip the leading
@@ -1548,14 +1548,14 @@ do
     type = { raw = "OpenTextMode", display = "OpenTextMode", category = "generic" },
     evaluated = "ünïcödé_ä_ünïcödé_ö_ünïcödé_ü_ünïcödé_é_ünïcödé_à_ünïcödé_è_ünïcödé_ù",
   })
-  local narrow = render.ladder(aliased, {
+  local narrow = render.typing_surface(aliased, {
     show_examples = false,
     example_kind = "heuristic",
     max_width = 28,
     style = styles.get("rounded"),
   })
-  check_utf8("ladder eliding an unbroken unicode shape", narrow)
-  check_injections("ladder eliding an unbroken unicode shape", narrow)
+  check_utf8("typing surface eliding an unbroken unicode shape", narrow)
+  check_injections("typing surface eliding an unbroken unicode shape", narrow)
 end
 
 print(failures == 0 and "RENDER ALL PASS" or ("RENDER " .. failures .. " FAILURES"))

@@ -33,7 +33,7 @@
 
 ---@class typescope.InsertModeConfig
 ---@field enabled boolean insert-mode typing surface (replaces signature help)
----@field max_width? number ladder width; >1: absolute columns, <=1: fraction of editor width (defaults to ui.max_width)
+---@field max_width? number typing surface width; >1: absolute columns, <=1: fraction of editor width (defaults to ui.max_width)
 
 ---@class typescope.Config
 ---@field trigger "hover"|"manual"
@@ -55,7 +55,7 @@ local defaults = {
   -- resolve the symbol under a resting cursor into the cache before any
   -- keypress, so the eventual K/open paints warm. No visible effect.
   prefetch = true,
-  -- typing surface (U6 ladder): param-names block + active-param detail
+  -- typing surface (U6): param-names block + active-param detail
   -- while the cursor is inside a call's parens — heuristics only, never
   -- focusable, zero manual controls. Opt-in while it bakes; turn off
   -- blink/core signature help when enabling. max_width (same units as

@@ -260,13 +260,13 @@ local WAVE_FREQ = 3.0 -- oscillations across the bar, at ANY width
 -- already reaches rung 7, so the edge softens without moving. The trailing end
 -- gets the same short taper and ends nearly square, which is the trade.
 local WAVE_ALPHA = 0.30
-local WAVE_STEPS = 8 -- ladder rungs; 8 reads as a curve where 5 read as steps
+local WAVE_STEPS = 8 -- ramp rungs; 8 reads as a curve where 5 read as steps
 -- Minimum bar width. Below this there is less than one wavelength to look at,
 -- so a narrow float still gets a bar worth watching.
 local PENDING_CELLS = 28
--- charset fallback matching the ladder's own `opts.style and ... or` idiom —
--- LadderOpts.style is optional
-local DEFAULT_BAR = { "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█" }
+-- charset fallback matching the typing surface's own `opts.style and ... or`
+-- idiom — TypingOpts.style is optional
+local DEFAULT_RAMP = { "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█" }
 
 --- Fifth element of a tail segment: the things only some segments carry.
 ---@class typescope.SegmentExtra
@@ -283,24 +283,24 @@ local DEFAULT_BAR = { "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█" }
 -- allowed to pop in at the end, once the value is real text.
 local CLIP = { clip = true }
 
----@param opts typescope.RenderOpts|typescope.LadderOpts
-local function ladder_of(opts)
-  return opts.style and opts.style.bar or DEFAULT_BAR
+---@param opts typescope.RenderOpts|typescope.TypingOpts
+local function ramp_of(opts)
+  return opts.style and opts.style.ramp or DEFAULT_RAMP
 end
 
---- Group for a bar cell at ladder rung `i`. Named here like every other group
+--- Group for a bar cell at ramp rung `i`. Named here like every other group
 --- in this file; highlights.lua defines one per rung, dim → bright.
 ---@param i integer
 local function rung_group(i)
-  return "TypeScopeExamplePending" .. math.max(1, math.min(#DEFAULT_BAR, i))
+  return "TypeScopeExamplePending" .. math.max(1, math.min(#DEFAULT_RAMP, i))
 end
 
 --- Collapse a per-cell height list into segments, merging runs of equal height
 --- so a 14-cell bar costs ~6 highlights rather than 14.
 ---@param heights integer[]
----@param ladder string[]
+---@param ramp string[]
 ---@return { [1]: string, [2]: string?, [3]: string?, [4]: boolean? }[]
-local function bar_segments(heights, ladder)
+local function bar_segments(heights, ramp)
   local segs, run, run_h = {}, {}, nil
   local function flush()
     if #run > 0 then
@@ -315,7 +315,7 @@ local function bar_segments(heights, ladder)
     run_h = h
     -- height 0 is empty space, not the shortest rung: it is what lets the
     -- taper fade to nothing at the ends and separates crest from crest
-    table.insert(run, h >= 1 and ladder[math.min(#ladder, h)] or " ")
+    table.insert(run, h >= 1 and ramp[math.min(#ramp, h)] or " ")
   end
   flush()
   return segs
@@ -396,7 +396,7 @@ end
 --- Is this leaf's LLM value still coming? Only llm mode has a pending state;
 --- a heuristic value is final the moment it exists.
 ---@param node typescope.Node
----@param opts typescope.RenderOpts|typescope.LadderOpts
+---@param opts typescope.RenderOpts|typescope.TypingOpts
 ---@return boolean
 local function is_pending(node, opts)
   return opts.example_kind == "llm" and opts.example_pending ~= nil and opts.example_pending(node)
@@ -404,7 +404,7 @@ end
 
 --- The value a node's example shows, if it has one at all.
 ---@param node typescope.Node
----@param opts typescope.RenderOpts|typescope.LadderOpts
+---@param opts typescope.RenderOpts|typescope.TypingOpts
 ---@return string?
 local function example_for(node, opts)
   if not opts.show_examples then
@@ -421,7 +421,7 @@ end
 
 -- How far the blocks have fallen at the end of the reveal: a full-height cell
 -- has to reach zero exactly as the animation finishes.
-local FALL_DISTANCE = #DEFAULT_BAR
+local FALL_DISTANCE = #DEFAULT_RAMP
 
 --- The landed value emerging from under the travelling wave. The wave FREEZES
 --- where it stood when the value arrived, then every block falls — like the
@@ -451,10 +451,10 @@ local FALL_DISTANCE = #DEFAULT_BAR
 ---@param value string? nil for a MISS: bar falls, nothing underneath
 ---@param progress number 0..1
 ---@param phase number the wave phase this froze at
----@param ladder string[]
+---@param ramp string[]
 ---@param base integer cells the pending bar filled, so the fall starts its width
 ---@return { [1]: string, [2]: string?, [3]: string?, [4]: boolean? }[]
-local function reveal_segments(value, progress, phase, ladder, base)
+local function reveal_segments(value, progress, phase, ramp, base)
   -- `at` is kept as well as `chars`: it is already the 1-based byte offset of
   -- every character, which is what an injection slice needs, so carrying it
   -- costs nothing where a second parallel array would cost one store per cell
@@ -521,8 +521,8 @@ local function reveal_segments(value, progress, phase, ladder, base)
       -- the artifact: every cell has a character, so nothing ever collapsed.
       key, text = chars[i] and "text" or "blank", chars[i] or " "
     else
-      rung = math.max(1, math.min(#ladder, math.ceil(height)))
-      key, text = "bar", ladder[rung]
+      rung = math.max(1, math.min(#ramp, math.ceil(height)))
+      key, text = "bar", ramp[rung]
     end
     if key ~= run_key or rung ~= run_rung then
       flush()
@@ -556,12 +556,12 @@ end
 --- starts the value straight after `e.g. `, and settling then moved it. Split
 --- like ordinary text, the two frames agree and nothing moves vertically.
 ---@param node typescope.Node
----@param opts typescope.RenderOpts|typescope.LadderOpts
+---@param opts typescope.RenderOpts|typescope.TypingOpts
 ---@param fill boolean? caller wraps segments (flow/wrap_segs) and can size a wave to the row
 ---@return { [1]: string, [2]: string?, [3]: string?, [4]: boolean? }[]
 local function example_segments(node, opts, fill)
   local value = example_for(node, opts)
-  local ladder = ladder_of(opts)
+  local ramp = ramp_of(opts)
   local phase = opts.example_phase or 0
 
   --- One segment standing for a wave whose width isn't known here. Only the
@@ -591,10 +591,10 @@ local function example_segments(node, opts, fill)
     -- as make the block grow a line under the cursor.
     if fill then
       return sized(function(cells)
-        return bar_segments(wave_heights(phase, cells), ladder)
+        return bar_segments(wave_heights(phase, cells), ramp)
       end)
     end
-    return bar_segments(wave_heights(phase, PENDING_CELLS), ladder)
+    return bar_segments(wave_heights(phase, PENDING_CELLS), ramp)
   end
 
   local progress, frozen, frozen_width = nil, 0, nil
@@ -610,10 +610,10 @@ local function example_segments(node, opts, fill)
       -- measured against a moving one, and frozen_wave rescales its wavelength
       -- to the new run every frame: the wave stretches as the window opens.
       return sized(function(cells)
-        return reveal_segments(value, progress, frozen or 0, ladder, cells)
+        return reveal_segments(value, progress, frozen or 0, ramp, cells)
       end, frozen_width)
     end
-    return reveal_segments(value, progress, frozen or 0, ladder, PENDING_CELLS)
+    return reveal_segments(value, progress, frozen or 0, ramp, PENDING_CELLS)
   end
   if not value then
     return {}
@@ -921,7 +921,7 @@ function M.render(roots, opts)
       -- drop the final (possibly cut-in-half) token so only whole params show
       header = body:sub(1, cut):gsub(",%s*[^,]*$", "") .. ", " .. suffix
     end
-    -- colors align with the insert ladder's signature block (Tony,
+    -- colors align with the typing surface's signature block (Tony,
     -- 2026-08-06): yellow reserved for the callable + parens, params in
     -- param color with the active one lit, the return as a real type with
     -- syntax injection. Elision marks (`=…`, trailing `…`) render as chrome
@@ -1413,9 +1413,9 @@ function M.render(roots, opts)
   -- rules snapped in by a dozen columns on that frame (Tony, reveal.mov).
   local rule_width = math.max(4, result.width, opts.window_width or 0)
   for _, lnum in ipairs(separators) do
-    local bar = string.rep(style.rule, rule_width)
-    result.lines[lnum] = bar
-    table.insert(result.highlights, { line = lnum - 1, col_start = 0, col_end = #bar, group = "TypeScopeChrome" })
+    local rule = string.rep(style.rule, rule_width)
+    result.lines[lnum] = rule
+    table.insert(result.highlights, { line = lnum - 1, col_start = 0, col_end = #rule, group = "TypeScopeChrome" })
   end
 
   return result
@@ -1465,9 +1465,9 @@ end
 -- past the cap does the shape start eliding members (Tony: wrap when out of
 -- room — a short union shows in full, a 53-member Literal still can't eat
 -- the float).
-local LADDER_MAX_LINES = 3
+local TYPING_MAX_LINES = 3
 
----@class typescope.LadderOpts
+---@class typescope.TypingOpts
 ---@field max_width integer
 ---@field show_examples boolean
 ---@field example_kind "heuristic"|"llm"
@@ -1480,19 +1480,19 @@ local LADDER_MAX_LINES = 3
 ---@field badge? string overload badge, e.g. "[2/2]" (signature block tail)
 ---@field params? { name: string, active: boolean }[] the signature's params
 
---- Insert-mode ladder (U6): a K-consistent signature block —
+--- Insert-mode typing surface (U6): a K-consistent signature block —
 --- `open(file, mode, …) -> TextIOWrapper [1/7]` with EVERY param name (no
 --- `=…`, wrapped freely so all names stay visible, active one highlighted) —
 --- a rule, then the active parameter's detail: type, SHAPE (alias/union
 --- evaluation like OpenTextMode's legal values, or a resolved class's field
 --- list), default, example. The detail WRAPS when out of room (hanging
---- indent, up to LADDER_MAX_LINES); beyond the cap the shape — the only
+--- indent, up to TYPING_MAX_LINES); beyond the cap the shape — the only
 --- unbounded segment — elides member-by-member. Zero manual density
 --- controls while the user is mid-call. Pure, like render().
 ---@param node typescope.Node the active param
----@param opts typescope.LadderOpts
+---@param opts typescope.TypingOpts
 ---@return typescope.RenderResult
-function M.ladder(node, opts)
+function M.typing_surface(node, opts)
   local eval_glyph = opts.style and opts.style.evaluated or "≈ "
   local type_text = node.type.display or node.type.raw or "?"
   if node.evaluated and type_text == "Any" then
@@ -1539,7 +1539,7 @@ function M.ladder(node, opts)
       seg(" = ", "TypeScopeChrome")
       seg(node.default, "TypeScopeDefault", "replace")
     end
-    -- fill=true, though LadderOpts carries no window_width: the insert ladder
+    -- fill=true, though TypingOpts carries no window_width: the typing surface
     -- is sized to its content on every keystroke rather than held at a
     -- high-water mark, so there is no edge to reach for and wave_cells falls
     -- back to the fixed bar. Opting in costs nothing and means the two
@@ -1557,10 +1557,10 @@ function M.ladder(node, opts)
   -- wrap segments into width-bounded lines with a hanging indent (mirrors
   -- render()'s flow: a split piece keeps its injection as a slice of the whole
   -- snippet, and atomic segments jump whole to the next line)
-  --- The ladder's own wrapper. Same contract as render's flow(), including the
-  --- segment extras: an animating example clips to one line instead of
-  --- wrapping into two pictures of itself, and a split piece keeps its
-  --- injection as a slice of the whole snippet.
+  --- The typing surface's own wrapper. Same contract as render's flow(),
+  --- including the segment extras: an animating example clips to one line
+  --- instead of wrapping into two pictures of itself, and a split piece keeps
+  --- its injection as a slice of the whole snippet.
   ---@param segs { [1]: string, [2]: string?, [3]: string?, [4]: boolean?, [5]: typescope.SegmentExtra? }[]
   ---@param cont_indent integer
   local function wrap_segs(segs, cont_indent)
@@ -1629,7 +1629,7 @@ function M.ladder(node, opts)
   end
 
   local detail = layout(shape)
-  if #detail > LADDER_MAX_LINES and shape then
+  if #detail > TYPING_MAX_LINES and shape then
     -- budget = the cap's capacity minus everything that isn't the shape;
     -- wrapping wastes cells at break points, so shrink in steps before
     -- giving the shape up entirely
@@ -1637,17 +1637,17 @@ function M.ladder(node, opts)
     for _, seg in ipairs(segs_for(nil)) do
       fixed = fixed + strwidth(seg[1])
     end
-    local capacity = LADDER_MAX_LINES * opts.max_width - cont_indent * (LADDER_MAX_LINES - 1)
+    local capacity = TYPING_MAX_LINES * opts.max_width - cont_indent * (TYPING_MAX_LINES - 1)
     for _, factor in ipairs({ 1, 0.85, 0.7 }) do
       local budget = math.floor((capacity - fixed) * factor)
       if budget >= 12 then
         detail = layout(elide_members(shape, budget))
-        if #detail <= LADDER_MAX_LINES then
+        if #detail <= TYPING_MAX_LINES then
           break
         end
       end
     end
-    if #detail > LADDER_MAX_LINES then
+    if #detail > TYPING_MAX_LINES then
       detail = layout(nil)
     end
   end
@@ -1718,11 +1718,11 @@ function M.ladder(node, opts)
     push(dline, node.id)
   end
   if rule_lnum then
-    local bar = string.rep(opts.style and opts.style.rule or "─", math.max(4, result.width))
-    result.lines[rule_lnum] = bar
+    local rule = string.rep(opts.style and opts.style.rule or "─", math.max(4, result.width))
+    result.lines[rule_lnum] = rule
     table.insert(
       result.highlights,
-      { line = rule_lnum - 1, col_start = 0, col_end = #bar, group = "TypeScopeChrome" }
+      { line = rule_lnum - 1, col_start = 0, col_end = #rule, group = "TypeScopeChrome" }
     )
   end
   return result
