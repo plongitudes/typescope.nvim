@@ -18,10 +18,7 @@ function M.check()
   if has_parser then
     health.ok("TreeSitter python parser installed")
   else
-    health.error(
-      "TreeSitter python parser not found",
-      { "Install with nvim-treesitter: :TSInstall python" }
-    )
+    health.error("TreeSitter python parser not found", { "Install with nvim-treesitter: :TSInstall python" })
   end
 
   -- basedpyright (required for type inference)
@@ -52,9 +49,7 @@ function M.check()
   health.ok("curl found")
 
   local url = ("http://%s:%d/api/version"):format(cfg.ollama.host, cfg.ollama.port)
-  local result = vim
-    .system({ "curl", "-sf", "--max-time", "2", url }, { text = true })
-    :wait()
+  local result = vim.system({ "curl", "-sf", "--max-time", "2", url }, { text = true }):wait()
   if result.code == 0 then
     health.ok(("Ollama reachable at %s:%d"):format(cfg.ollama.host, cfg.ollama.port))
   else

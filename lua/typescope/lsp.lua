@@ -295,8 +295,7 @@ function M.load_buf(uri)
     -- suppressing it would disable a plugin-provided reader and we would
     -- load nothing at all.
     local save = vim.o.eventignore
-    vim.o.eventignore =
-      "FileType,Syntax,BufRead,BufReadPre,BufReadPost,BufNewFile,BufEnter,BufWinEnter"
+    vim.o.eventignore = "FileType,Syntax,BufRead,BufReadPre,BufReadPost,BufNewFile,BufEnter,BufWinEnter"
     pcall(vim.fn.bufload, bufnr)
     vim.o.eventignore = save
     vim.api.nvim_del_augroup_by_id(group)

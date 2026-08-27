@@ -59,7 +59,8 @@ check("cls skipped in classmethods", #cinfo.params == 1 and cinfo.params[1].name
 check("not-a-function returns nil", py.function_info("x = 1\n", 0, 0) == nil)
 
 ---------------------------------------------------------------- annotation
-local ann_src = "def f(a: dict[str, pkg.Config], b: Optional[Retry], c: Literal['x, y'], d: dict[Cfg, Cfg]) -> None: ..."
+local ann_src =
+  "def f(a: dict[str, pkg.Config], b: Optional[Retry], c: Literal['x, y'], d: dict[Cfg, Cfg]) -> None: ..."
 local ainfo = py.function_info(ann_src, 0, 4)
 local ap = {}
 for _, entry in ipairs(ainfo.params) do
@@ -72,7 +73,8 @@ check("strings never chased (Literal commas safe)", #ap.c.refs == 0)
 check("duplicate refs deduped", #ap.d.refs == 1)
 
 ---------------------------------------------------------------- normalization
-local norm_src = "def g(a: typing.Optional[str], b: typing.Union['X', typing.Callable, str], c: typing.Dict[str, typing.List[int]], d: Optional[Union[int, str]], e: int | None) -> None: ..."
+local norm_src =
+  "def g(a: typing.Optional[str], b: typing.Union['X', typing.Callable, str], c: typing.Dict[str, typing.List[int]], d: Optional[Union[int, str]], e: int | None) -> None: ..."
 local ninfo = py.function_info(norm_src, 0, 4)
 local want_norm = {
   a = "str | None",
@@ -158,9 +160,15 @@ local rf = {}
 for _, f in ipairs(rec.fields) do
   rf[f.name] = f
 end
-check("Required[] badge + unwrap", rf.email.badge == "Required" and py.annotation(cls_src, rf.email.type_node).display == "str")
+check(
+  "Required[] badge + unwrap",
+  rf.email.badge == "Required" and py.annotation(cls_src, rf.email.type_node).display == "str"
+)
 check("total=False implies NotRequired", rf.name.badge == "NotRequired")
-check("NotRequired[] badge + unwrap", rf.age.badge == "NotRequired" and py.annotation(cls_src, rf.age.type_node).display == "int")
+check(
+  "NotRequired[] badge + unwrap",
+  rf.age.badge == "NotRequired" and py.annotation(cls_src, rf.age.type_node).display == "int"
+)
 check("total=True TypedDict has no badges", type_of("Strict").fields[1].badge == nil)
 
 local pt = type_of("Point")
@@ -169,7 +177,10 @@ check("NamedTuple category + fields", pt.category == "namedtuple" and #pt.fields
 local store = type_of("Store")
 check("Protocol category", store.category == "protocol")
 check("Protocol attribute extracted", store.fields[1].name == "root")
-check("Protocol method with self stripped", store.methods[1].name == "read" and store.methods[1].signature == "(path: str) -> bytes")
+check(
+  "Protocol method with self stripped",
+  store.methods[1].name == "read" and store.methods[1].signature == "(path: str) -> bytes"
+)
 check("Protocol dunder methods skipped", #store.methods == 1)
 
 check("plain class still yields fields", type_of("Vanilla").category == "class" and #type_of("Vanilla").fields == 1)
@@ -215,7 +226,10 @@ check(
   #child_bases == 2 and child_bases[1] == "Base" and child_bases[2] == "Mixin"
 )
 local sub_bases, sub = bases_of("Sub")
-check("dotted base kept, marker base sets category", #sub_bases == 1 and sub_bases[1] == "pkg.RemoteBase" and sub.category == "pydantic")
+check(
+  "dotted base kept, marker base sets category",
+  #sub_bases == 1 and sub_bases[1] == "pkg.RemoteBase" and sub.category == "pydantic"
+)
 local param_bases = bases_of("Param")
 check("parameterized base chases the head", #param_bases == 1 and param_bases[1] == "Base")
 
@@ -260,7 +274,11 @@ local function hov(value)
   return { "```python", value, "```" }
 end
 local hover_cases = {
-  { hov("(type alias) LoopSetupType: type[Literal['auto', 'none']]"), "LoopSetupType", "type[Literal['auto', 'none']]" },
+  {
+    hov("(type alias) LoopSetupType: type[Literal['auto', 'none']]"),
+    "LoopSetupType",
+    "type[Literal['auto', 'none']]",
+  },
   { hov("(parameter) count: int"), "count", "int" },
   { hov("(variable) x: dict[str, int]"), "x", "dict[str, int]" },
   { hov("(type variable) T"), "T", "T" },
@@ -282,19 +300,13 @@ check(
 
 ---------------------------------------------------------------- shape + docstring
 local shape_info = py.function_info("def f(a, /, b, *, c=1, **kw): ...", 0, 4)
-check(
-  "shape keeps separators and elides defaults",
-  table.concat(shape_info.shape, ", ") == "a, /, b, *, c=…, **kw"
-)
+check("shape keeps separators and elides defaults", table.concat(shape_info.shape, ", ") == "a, /, b, *, c=…, **kw")
 local m_shape = py.function_info("class C:\n    def m(self, x: int = 2): ...", 1, 8)
 check("shape skips self like the tree does", table.concat(m_shape.shape, ", ") == "x=…")
 
 local doc_src = 'def g():\n    """First line.\n\n    Indented body prose.\n    """\n    pass\n'
 local doc_info = py.function_info(doc_src, 0, 4)
-check(
-  "docstring extracted, dedented, quotes stripped",
-  doc_info.docstring == "First line.\n\nIndented body prose."
-)
+check("docstring extracted, dedented, quotes stripped", doc_info.docstring == "First line.\n\nIndented body prose.")
 check("no docstring -> nil", py.function_info("def h():\n    pass\n", 0, 4).docstring == nil)
 
 local cls_doc = py.type_at('class D:\n    """Class doc."""\n\n    x: int\n', 0, 7)

@@ -121,7 +121,10 @@ do
   vim.wait(2000, function()
     return table.concat(float_lines() or {}, "\n"):find("status") ~= nil
   end)
-  check("L resolves lazy nodes (returns expands to Response fields)", table.concat(float_lines(), "\n"):find("status") ~= nil)
+  check(
+    "L resolves lazy nodes (returns expands to Response fields)",
+    table.concat(float_lines(), "\n"):find("status") ~= nil
+  )
 end
 require("typescope").close()
 
@@ -353,7 +356,10 @@ vim.wait(2000, function()
   return float_lines() ~= nil
 end)
 local fresh = table.concat(float_lines() or {}, "\n")
-check("edit invalidates cache: fresh tree, returns collapsed again", fresh:find("returns") ~= nil and not fresh:find("status"))
+check(
+  "edit invalidates cache: fresh tree, returns collapsed again",
+  fresh:find("returns") ~= nil and not fresh:find("status")
+)
 require("typescope").close()
 vim.api.nvim_buf_set_lines(bufnr, 0, 1, false, {}) -- restore fixture
 vim.cmd("silent write")
@@ -636,7 +642,10 @@ do
         config_row = config_row or i
       end
     end
-    check("ledger rows are single lines (timeout: type + inline default)", timeout_row ~= nil and llines[timeout_row]:find("float") ~= nil and llines[timeout_row]:find("= 30%.0") ~= nil)
+    check(
+      "ledger rows are single lines (timeout: type + inline default)",
+      timeout_row ~= nil and llines[timeout_row]:find("float") ~= nil and llines[timeout_row]:find("= 30%.0") ~= nil
+    )
     check("ledger rows carry no expand hints or examples", not all:find("<CR>") and not all:find("localhost"))
 
     -- focus, rest on the timeout row: the detail block appears under it

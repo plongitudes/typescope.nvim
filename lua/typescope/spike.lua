@@ -12,6 +12,8 @@ local interact = require("typescope.interact")
 
 local M = {}
 
+-- hand-aligned fixture table: one field per line is unreadable
+-- stylua: ignore
 local function fixtures()
   return {
     {

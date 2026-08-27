@@ -91,7 +91,10 @@ local prompt = ollama.prompt({
   { id = "config.host", name = "host", display = "str" },
   { id = "config.port", name = "port", display = "int" },
 })
-check("prompt lists dotted paths with types", prompt:find("config%.host: str") ~= nil and prompt:find("config%.port: int") ~= nil)
+check(
+  "prompt lists dotted paths with types",
+  prompt:find("config%.host: str") ~= nil and prompt:find("config%.port: int") ~= nil
+)
 
 local parsed = ollama.parse([[
 Here are the values:
@@ -103,7 +106,10 @@ config.retry.backoff = 1.5
 not a value line
 ]])
 check("parse tolerates prose and fences", parsed["config.host"] == '"api.internal.example.io"')
-check("parse handles ints and nested paths", parsed["config.port"] == "8443" and parsed["config.retry.backoff"] == "1.5")
+check(
+  "parse handles ints and nested paths",
+  parsed["config.port"] == "8443" and parsed["config.retry.backoff"] == "1.5"
+)
 check("parse skips non-matching lines", parsed["not"] == nil)
 
 -- LLM caching discipline: misses get a sentinel (auto-run never re-asks),
@@ -151,7 +157,10 @@ do
   end
   local f1 = forest()
   examples.llm(f1, token, function() end)
-  check("miss run: one request, a filled, b empty", #calls == 1 and f1[1].example.llm == "42" and f1[2].example.llm == nil)
+  check(
+    "miss run: one request, a filled, b empty",
+    #calls == 1 and f1[1].example.llm == "42" and f1[2].example.llm == nil
+  )
 
   -- phase 2: a fresh open (same shapes) issues NO request — a from cache,
   -- b's sentinel stands
@@ -219,7 +228,10 @@ do
   local function wide()
     local nodes = {}
     for i = 1, 10 do
-      table.insert(nodes, model.new({ name = "p" .. i, kind = "param", type = { display = "int", category = "builtin" } }))
+      table.insert(
+        nodes,
+        model.new({ name = "p" .. i, kind = "param", type = { display = "int", category = "builtin" } })
+      )
     end
     return nodes
   end

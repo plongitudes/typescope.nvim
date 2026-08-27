@@ -11,7 +11,7 @@ function M.cmd(fixture_dir)
   local files = vim.fn.glob(fixture_dir .. "/*.py", false, true)
 
   local function word_at(fname, line, character)
-    local text = (vim.fn.readfile(fname)[line + 1]) or ""
+    local text = vim.fn.readfile(fname)[line + 1] or ""
     -- find the identifier covering `character` (fixtures are ASCII: byte == utf-16)
     local init = 1
     while true do

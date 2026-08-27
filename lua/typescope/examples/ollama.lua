@@ -287,10 +287,9 @@ local function unload_model(cfg)
   -- pcall, not just a code check: vim.system RAISES on a missing binary
   -- rather than returning nonzero, and the caller must still reach the reap
   local ok, out = pcall(function()
-    return vim.system(
-      { "curl", "-sf", "--max-time", "5", url, "-H", "Content-Type: application/json", "-d", body },
-      { text = true }
-    ):wait(6000)
+    return vim
+      .system({ "curl", "-sf", "--max-time", "5", url, "-H", "Content-Type: application/json", "-d", body }, { text = true })
+      :wait(6000)
   end)
   return ok and out.code == 0
 end

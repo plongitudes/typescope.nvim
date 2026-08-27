@@ -229,8 +229,7 @@ populate_from_class = function(ctx, target, cls, tbuf, depth, sub_ancestry)
             cls.category = bcls.category
             target.type.category = bcls.category
           end
-          local next_ancestry =
-            vim.tbl_extend("force", {}, base_ancestry, { [loc_key(brealloc)] = true })
+          local next_ancestry = vim.tbl_extend("force", {}, base_ancestry, { [loc_key(brealloc)] = true })
           for _, f in ipairs(bcls.fields) do
             if not seen_names[f.name] then
               seen_names[f.name] = true
@@ -524,11 +523,7 @@ function M.function_scope(client, bufnr, win, token, pos)
         table.insert(groups, group)
         table.insert(
           headers,
-          oinfo.name
-            .. "("
-            .. table.concat(oinfo.shape or {}, ", ")
-            .. ")"
-            .. (ret and (" -> " .. ret.display) or "")
+          oinfo.name .. "(" .. table.concat(oinfo.shape or {}, ", ") .. ")" .. (ret and (" -> " .. ret.display) or "")
         )
       end
     end
@@ -598,11 +593,7 @@ function M.function_scope(client, bufnr, win, token, pos)
 
   local ret = info.return_type and impl.annotation(fbuf, info.return_type).display
   local meta = {
-    header = info.name
-      .. "("
-      .. table.concat(info.shape or {}, ", ")
-      .. ")"
-      .. (ret and (" -> " .. ret) or ""),
+    header = info.name .. "(" .. table.concat(info.shape or {}, ", ") .. ")" .. (ret and (" -> " .. ret) or ""),
     docstring = info.docstring,
   }
   cache_put(cache_key, { roots = roots, meta = meta, tick = cache_tick })

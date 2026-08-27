@@ -368,11 +368,7 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
       -- dismissal. The scheduled check is bound to THIS session's window: a
       -- stale check surviving a close must not murder the next session.
       vim.schedule(function()
-        if
-          session
-          and session.handle.win == handle.win
-          and vim.api.nvim_get_current_win() ~= handle.win
-        then
+        if session and session.handle.win == handle.win and vim.api.nvim_get_current_win() ~= handle.win then
           M.close()
         end
       end)

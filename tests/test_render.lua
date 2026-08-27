@@ -69,12 +69,7 @@ local function check_injections(desc, result)
       bad = bad or ("slice %d..%d outside a %d-byte snippet"):format(from, to, #inj.text)
     elseif inj.col_start + (to - from) > #line then
       bad = bad
-        or ("line %d: col %d + %d bytes overruns a %d-byte line"):format(
-          inj.line,
-          inj.col_start,
-          to - from,
-          #line
-        )
+        or ("line %d: col %d + %d bytes overruns a %d-byte line"):format(inj.line, inj.col_start, to - from, #line)
     end
   end
   check(desc .. " keeps every injection inside its line", bad == nil)
@@ -186,13 +181,13 @@ end
 
 -- 1. left-aligned unicode, examples on
 eq_lines("left/unicode/examples", render.render(tree(), opts()).lines, {
-  '▾ config   ServerConfig',
+  "▾ config   ServerConfig",
   '  ├─ · host        str  "localhost"',
-  '  ├─ ▾ retry       RetryPolicy',
-  '  │ └─ · max_attempts  int = 3',
-  '  └─ · timeout_ms  int | None NotRequired = None',
-  '· opaque   Mystery [?]',
-  '▸ returns  Response  (<CR> to expand)',
+  "  ├─ ▾ retry       RetryPolicy",
+  "  │ └─ · max_attempts  int = 3",
+  "  └─ · timeout_ms  int | None NotRequired = None",
+  "· opaque   Mystery [?]",
+  "▸ returns  Response  (<CR> to expand)",
 })
 
 -- 2. right-aligned rounded, examples off
@@ -200,13 +195,13 @@ eq_lines(
   "right/rounded",
   render.render(tree(), opts({ style = styles.get("rounded"), align = "right", show_examples = false })).lines,
   {
-    ' ▾ config  ServerConfig',
-    '  ├─       · host  str',
-    '  ├─      ▾ retry  RetryPolicy',
-    '  │ ╰─ · max_attempts  int = 3',
-    '  ╰─ · timeout_ms  int | None NotRequired = None',
-    ' · opaque  Mystery [?]',
-    '▸ returns  Response  (<CR> to expand)',
+    " ▾ config  ServerConfig",
+    "  ├─       · host  str",
+    "  ├─      ▾ retry  RetryPolicy",
+    "  │ ╰─ · max_attempts  int = 3",
+    "  ╰─ · timeout_ms  int | None NotRequired = None",
+    " · opaque  Mystery [?]",
+    "▸ returns  Response  (<CR> to expand)",
   }
 )
 
@@ -215,31 +210,27 @@ eq_lines(
   "wrap-40 hanging indent",
   render.render(tree(), opts({ style = styles.get("rounded"), max_width = 40, show_examples = false })).lines,
   {
-    '▾ config   ServerConfig',
-    '  ├─ · host        str',
-    '  ├─ ▾ retry       RetryPolicy',
-    '  │ ╰─ · max_attempts  int = 3',
-    '  ╰─ · timeout_ms  int | None',
-    '                    NotRequired = None',
-    '· opaque   Mystery [?]',
-    '▸ returns  Response  (<CR> to expand)',
+    "▾ config   ServerConfig",
+    "  ├─ · host        str",
+    "  ├─ ▾ retry       RetryPolicy",
+    "  │ ╰─ · max_attempts  int = 3",
+    "  ╰─ · timeout_ms  int | None",
+    "                    NotRequired = None",
+    "· opaque   Mystery [?]",
+    "▸ returns  Response  (<CR> to expand)",
   }
 )
 
 -- 4. minimal style: indentation only
-eq_lines(
-  "minimal style",
-  render.render(tree(), opts({ style = styles.get("minimal"), show_examples = false })).lines,
-  {
-    '- config   ServerConfig',
-    '      host        str',
-    '    - retry       RetryPolicy',
-    '        max_attempts  int = 3',
-    '      timeout_ms  int | None NotRequired = None',
-    '  opaque   Mystery [?]',
-    '+ returns  Response  (<CR> to expand)',
-  }
-)
+eq_lines("minimal style", render.render(tree(), opts({ style = styles.get("minimal"), show_examples = false })).lines, {
+  "- config   ServerConfig",
+  "      host        str",
+  "    - retry       RetryPolicy",
+  "        max_attempts  int = 3",
+  "      timeout_ms  int | None NotRequired = None",
+  "  opaque   Mystery [?]",
+  "+ returns  Response  (<CR> to expand)",
+})
 
 -- 5. node mapping: dotted-path ids, grandchildren rooted correctly
 local r = render.render(tree(), opts())
@@ -282,9 +273,7 @@ for _, ij in ipairs(r.ts_injections) do
 end
 check(
   "injection modes (replace for types/defaults, overlay for examples)",
-  kinds["ServerConfig"] == "replace"
-    and kinds["3"] == "replace"
-    and kinds['"localhost"'] == "overlay"
+  kinds["ServerConfig"] == "replace" and kinds["3"] == "replace" and kinds['"localhost"'] == "overlay"
 )
 -- a split annotation still injects: each piece names the WHOLE annotation as
 -- its snippet and the byte slice of it that landed on that line, so a
@@ -357,10 +346,10 @@ eq_lines(
     }),
   }, opts({ style = styles.get("rounded"), max_width = 44, show_examples = false })).lines,
   {
-    '▾ px  Wrap',
-    '  ╰─ · proxy  ClassVar[dict[weakref.ref[Any]',
-    '              , weakref.ref[Proxy[Any]]]]',
-    '               ↑ReversibleProxy = {}',
+    "▾ px  Wrap",
+    "  ╰─ · proxy  ClassVar[dict[weakref.ref[Any]",
+    "              , weakref.ref[Proxy[Any]]]]",
+    "               ↑ReversibleProxy = {}",
   }
 )
 
@@ -385,8 +374,8 @@ eq_lines(
     }),
   }, opts({ style = styles.get("rounded"), show_examples = false })).lines,
   {
-    '· mode   LoopMode ≈ Literal[\'auto\', \'manual\'] = "auto"',
-    '· count  ≈ int = 3',
+    "· mode   LoopMode ≈ Literal['auto', 'manual'] = \"auto\"",
+    "· count  ≈ int = 3",
   }
 )
 
@@ -406,9 +395,9 @@ eq_lines(
     }),
   }, opts({ show_examples = false })).lines,
   {
-    '▾ cfg  Child',
-    '  ├─ · z  float',
-    '  └─ · x  int ↑Base',
+    "▾ cfg  Child",
+    "  ├─ · z  float",
+    "  └─ · x  int ↑Base",
   }
 )
 
@@ -416,66 +405,78 @@ eq_lines(
 local section_tree = { model.new({ name = "x", kind = "param", type = { display = "int", category = "builtin" } }) }
 eq_lines(
   "sections: header + collapsed docstring at bottom",
-  render.render(section_tree, opts({
-    style = styles.get("rounded"),
-    max_width = 40,
-    show_examples = false,
-    header = "f(x, *, y=…) -> str",
-    docstring = "First line of prose.\n\nSecond paragraph here.",
-    docstring_expanded = false,
-    docstring_pos = "bottom",
-  })).lines,
+  render.render(
+    section_tree,
+    opts({
+      style = styles.get("rounded"),
+      max_width = 40,
+      show_examples = false,
+      header = "f(x, *, y=…) -> str",
+      docstring = "First line of prose.\n\nSecond paragraph here.",
+      docstring_expanded = false,
+      docstring_pos = "bottom",
+    })
+  ).lines,
   {
-    'f(x, *, y=…) -> str',
-    '────────────────────',
-    '· x  int',
-    '────────────────────',
-    'First line of prose.',
+    "f(x, *, y=…) -> str",
+    "────────────────────",
+    "· x  int",
+    "────────────────────",
+    "First line of prose.",
   }
 )
 eq_lines(
   "sections: expanded docstring at top",
-  render.render(section_tree, opts({
-    style = styles.get("rounded"),
-    max_width = 40,
-    show_examples = false,
-    header = "f(x) -> str",
-    docstring = "First line of prose.\n\nSecond paragraph here.",
-    docstring_expanded = true,
-    docstring_pos = "top",
-  })).lines,
+  render.render(
+    section_tree,
+    opts({
+      style = styles.get("rounded"),
+      max_width = 40,
+      show_examples = false,
+      header = "f(x) -> str",
+      docstring = "First line of prose.\n\nSecond paragraph here.",
+      docstring_expanded = true,
+      docstring_pos = "top",
+    })
+  ).lines,
   {
-    'f(x) -> str',
-    'First line of prose.',
-    '',
-    'Second paragraph here.',
-    '──────────────────────',
-    '· x  int',
+    "f(x) -> str",
+    "First line of prose.",
+    "",
+    "Second paragraph here.",
+    "──────────────────────",
+    "· x  int",
   }
 )
 
 -- the docstring section's line range rides the result so interact can give
 -- it plain-movement semantics and jump `d` presses into it
 do
-  local bottom = render.render(section_tree, opts({
-    style = styles.get("rounded"),
-    max_width = 40,
-    show_examples = false,
-    header = "f(x, *, y=…) -> str",
-    docstring = "First line of prose.\n\nSecond paragraph here.",
-    docstring_expanded = false,
-    docstring_pos = "bottom",
-  }))
+  local bottom = render.render(
+    section_tree,
+    opts({
+      style = styles.get("rounded"),
+      max_width = 40,
+      show_examples = false,
+      header = "f(x, *, y=…) -> str",
+      docstring = "First line of prose.\n\nSecond paragraph here.",
+      docstring_expanded = false,
+      docstring_pos = "bottom",
+    })
+  )
   check("doc range: collapsed bottom section is the last line", bottom.doc_start == 5 and bottom.doc_end == 5)
-  local top = render.render(section_tree, opts({
-    style = styles.get("rounded"),
-    max_width = 40,
-    show_examples = false,
-    header = "f(x) -> str",
-    docstring = "First line of prose.\n\nSecond paragraph here.",
-    docstring_expanded = true,
-    docstring_pos = "top",
-  }))
+  local top = render.render(
+    section_tree,
+    opts({
+      style = styles.get("rounded"),
+      max_width = 40,
+      show_examples = false,
+      header = "f(x) -> str",
+      docstring = "First line of prose.\n\nSecond paragraph here.",
+      docstring_expanded = true,
+      docstring_pos = "top",
+    })
+  )
   check("doc range: expanded top section spans lines 2-4", top.doc_start == 2 and top.doc_end == 4)
   local none = render.render(section_tree, opts({ show_examples = false }))
   check("doc range: absent without a docstring", none.doc_start == nil and none.doc_end == nil)
@@ -491,9 +492,24 @@ do
       expanded = true,
       type = { raw = "ServerConfig", display = "ServerConfig", category = "dataclass" },
       children = {
-        { name = "host", kind = "field", type = { raw = "str", display = "str", category = "builtin" }, example = { heuristic = '"localhost"' } },
-        { name = "port", kind = "field", type = { raw = "int", display = "int", category = "builtin" }, default = "8000" },
-        { name = "env", kind = "field", type = { raw = "str", display = "str", category = "builtin" }, origin = "BaseConfig" },
+        {
+          name = "host",
+          kind = "field",
+          type = { raw = "str", display = "str", category = "builtin" },
+          example = { heuristic = '"localhost"' },
+        },
+        {
+          name = "port",
+          kind = "field",
+          type = { raw = "int", display = "int", category = "builtin" },
+          default = "8000",
+        },
+        {
+          name = "env",
+          kind = "field",
+          type = { raw = "str", display = "str", category = "builtin" },
+          origin = "BaseConfig",
+        },
       },
     }),
     model.new({
@@ -513,21 +529,24 @@ do
     }),
     model.new({ name = "returns", kind = "return", type = { raw = "None", display = "None", category = "builtin" } }),
   }
-  local tr = render.render(table_tree, opts({
-    style = styles.get("rounded"),
-    max_width = 78,
-    layout = "table",
-    show_examples = true,
-  }))
+  local tr = render.render(
+    table_tree,
+    opts({
+      style = styles.get("rounded"),
+      max_width = 78,
+      layout = "table",
+      show_examples = true,
+    })
+  )
   eq_lines("table layout golden", tr.lines, {
     "▾ config        ServerConfig                                                  ",
-    "  ├─ · host     str                                   \"localhost\"             ",
+    '  ├─ · host     str                                   "localhost"             ',
     "  ├─ · port     int                    = 8000                                 ",
     "  ╰─ · env      str                                                ↑BaseConfig",
-    "· host       *  str                    = \"127.0.0.1\"                          ",
-    "· lifespan   *  LifespanType ≈         = \"auto\"                               ",
-    "                Literal[\"auto\", \"on\",                                         ",
-    "                \"off\"]                                                        ",
+    '· host       *  str                    = "127.0.0.1"                          ',
+    '· lifespan   *  LifespanType ≈         = "auto"                               ',
+    '                Literal["auto", "on",                                         ',
+    '                "off"]                                                        ',
     "· returns       None                                                          ",
   })
   -- alternating rows: odd NODE rows (1st, 3rd, 5th...) carry the bg group at
@@ -540,8 +559,13 @@ do
   end
   check(
     "alternating rows on odd node rows, priority under text",
-    alt_lines[0] == 90 and alt_lines[2] == 90 and alt_lines[4] == 90 and alt_lines[8] == 90
-      and alt_lines[1] == nil and alt_lines[5] == nil and alt_lines[6] == nil
+    alt_lines[0] == 90
+      and alt_lines[2] == 90
+      and alt_lines[4] == 90
+      and alt_lines[8] == 90
+      and alt_lines[1] == nil
+      and alt_lines[5] == nil
+      and alt_lines[6] == nil
   )
   -- injections: unsplit default cell keeps replace; wrapped type cell drops
   local inj = {}
@@ -567,9 +591,24 @@ do
         expanded = true,
         type = { raw = "ServerConfig", display = "ServerConfig", category = "dataclass" },
         children = {
-          { name = "host", kind = "field", type = { raw = "str", display = "str", category = "builtin" }, example = { heuristic = '"localhost"' } },
-          { name = "port", kind = "field", type = { raw = "int", display = "int", category = "builtin" }, default = "8000" },
-          { name = "env", kind = "field", type = { raw = "str", display = "str", category = "builtin" }, origin = "BaseConfig" },
+          {
+            name = "host",
+            kind = "field",
+            type = { raw = "str", display = "str", category = "builtin" },
+            example = { heuristic = '"localhost"' },
+          },
+          {
+            name = "port",
+            kind = "field",
+            type = { raw = "int", display = "int", category = "builtin" },
+            default = "8000",
+          },
+          {
+            name = "env",
+            kind = "field",
+            type = { raw = "str", display = "str", category = "builtin" },
+            origin = "BaseConfig",
+          },
         },
       }),
       model.new({
@@ -583,7 +622,11 @@ do
         name = "ws",
         kind = "param",
         pass_mode = "*",
-        type = { raw = "type[Protocol] | WSProtocolType", display = "type[Protocol] | WSProtocolType", category = "generic" },
+        type = {
+          raw = "type[Protocol] | WSProtocolType",
+          display = "type[Protocol] | WSProtocolType",
+          category = "generic",
+        },
         evaluated = 'Literal["auto", "none"]',
         default = '"auto"',
         example = { heuristic = '"none"' },
@@ -596,13 +639,13 @@ do
   local lopts = opts({ style = styles.get("rounded"), max_width = 60, layout = "ledger" })
   local lr = render.render(ledger_tree(), lopts)
   eq_lines("ledger layout golden (no detail)", lr.lines, {
-    '▾   config     ServerConfig',
-    '  ├─ ·   host  str',
-    '  ├─ ·   port  int  = 8000',
-    '  ╰─ ·   env   str',
+    "▾   config     ServerConfig",
+    "  ├─ ·   host  str",
+    "  ├─ ·   port  int  = 8000",
+    "  ╰─ ·   env   str",
     '· * host       str  = "127.0.0.1"',
     '· * ws         type[Protocol] | WSProtocolType  = "auto"',
-    '·   returns    None',
+    "·   returns    None",
   })
   -- rows carry no examples, no origins, no ≈, no expand hints — detail's job
   local all = table.concat(lr.lines, "\n")
@@ -613,30 +656,45 @@ do
 
   -- detail on ws: inline default moves into the block; the ≈ line names the
   -- union member that answered (evaluated_owner), not the whole annotation
-  local dr = render.render(ledger_tree(), opts({ style = styles.get("rounded"), max_width = 60, layout = "ledger", detail_id = "ws" }))
+  local dr = render.render(
+    ledger_tree(),
+    opts({ style = styles.get("rounded"), max_width = 60, layout = "ledger", detail_id = "ws" })
+  )
   eq_lines("ledger detail block golden", dr.lines, {
-    '▾   config     ServerConfig',
-    '  ├─ ·   host  str',
-    '  ├─ ·   port  int  = 8000',
-    '  ╰─ ·   env   str',
+    "▾   config     ServerConfig",
+    "  ├─ ·   host  str",
+    "  ├─ ·   port  int  = 8000",
+    "  ╰─ ·   env   str",
     '· * host       str  = "127.0.0.1"',
-    '· * ws         type[Protocol] | WSProtocolType',
+    "· * ws         type[Protocol] | WSProtocolType",
     '  │ ≈ WSProtocolType = Literal["auto", "none"]',
     '  │ = "auto"   e.g. "none"',
-    '·   returns    None',
+    "·   returns    None",
   })
-  check("ledger detail lines map to their owner", dr.line_to_node[7] == "ws" and dr.line_to_node[8] == "ws" and dr.line_to_node[9] == "returns")
+  check(
+    "ledger detail lines map to their owner",
+    dr.line_to_node[7] == "ws" and dr.line_to_node[8] == "ws" and dr.line_to_node[9] == "returns"
+  )
 
   -- detail on an inherited field shows its origin
-  local er = render.render(ledger_tree(), opts({ style = styles.get("rounded"), max_width = 60, layout = "ledger", detail_id = "config.env" }))
+  local er = render.render(
+    ledger_tree(),
+    opts({ style = styles.get("rounded"), max_width = 60, layout = "ledger", detail_id = "config.env" })
+  )
   check("ledger detail shows origin", table.concat(er.lines, "\n"):find("↑BaseConfig") ~= nil)
 
   -- long identifiers middle-ellipsize at the 24-cell cap
-  local long = render.render(
-    { model.new({ name = "ws_per_message_deflate_enabled", kind = "param", type = { display = "bool", category = "builtin" } }) },
-    lopts
+  local long = render.render({
+    model.new({
+      name = "ws_per_message_deflate_enabled",
+      kind = "param",
+      type = { display = "bool", category = "builtin" },
+    }),
+  }, lopts)
+  check(
+    "ledger caps long names with middle ellipsis",
+    long.lines[1]:find("…") ~= nil and long.lines[1]:find("bool") ~= nil
   )
-  check("ledger caps long names with middle ellipsis", long.lines[1]:find("…") ~= nil and long.lines[1]:find("bool") ~= nil)
 end
 
 -- 12. insert typing surface (U6): one line, fixed degradation order
@@ -704,9 +762,19 @@ do
     evaluated = "Literal['r', 'w', 'x', 'a']",
     default = '"r"',
   })
-  local vbase = { show_examples = true, example_kind = "heuristic", style = styles.get("unicode"), fn_name = "open", badge = "[1/7]" }
+  local vbase = {
+    show_examples = true,
+    example_kind = "heuristic",
+    style = styles.get("unicode"),
+    fn_name = "open",
+    badge = "[1/7]",
+  }
   local vfull = render.typing_surface(mode, vim.tbl_extend("force", vbase, { max_width = 80 }))
-  eq_lines("typing surface presents valid values", vfull.lines, { "mode: OpenTextMode ≈ Literal['r', 'w', 'x', 'a'] = \"r\"" })
+  eq_lines(
+    "typing surface presents valid values",
+    vfull.lines,
+    { "mode: OpenTextMode ≈ Literal['r', 'w', 'x', 'a'] = \"r\"" }
+  )
   -- a modest overflow wraps with the FULL value set intact
   local vwrapped = render.typing_surface(mode, vim.tbl_extend("force", vbase, { max_width = 40 }))
   eq_lines("typing surface wraps full valid values", vwrapped.lines, {
@@ -744,7 +812,11 @@ do
     },
   })
   local sfull = render.typing_surface(struct, { show_examples = false, example_kind = "heuristic", max_width = 60 })
-  eq_lines("typing surface presents a class param's shape", sfull.lines, { "config: ServerConfig ≈ {host, port, env}" })
+  eq_lines(
+    "typing surface presents a class param's shape",
+    sfull.lines,
+    { "config: ServerConfig ≈ {host, port, env}" }
+  )
 
   -- signature block: K-consistent header — name(params) -> ret [i/m] — with
   -- the active param lit, above a rule
@@ -761,7 +833,10 @@ do
     string.rep("─", 34),
     "port: int = 8000   e.g. 8080",
   })
-  check("signature lines carry no node mapping; detail does", pfull.line_to_node[1] == nil and pfull.line_to_node[3] == "port")
+  check(
+    "signature lines carry no node mapping; detail does",
+    pfull.line_to_node[1] == nil and pfull.line_to_node[3] == "port"
+  )
   local wrap_params = {}
   for _, n in ipairs({ "app", "host", "port", "ws_max_size", "lifespan", "reload" }) do
     table.insert(wrap_params, { name = n, active = n == "port" })
@@ -814,19 +889,22 @@ do
     "llm mode: a still-coming example takes a pending group",
     any_pending_group(groups_for({ example_kind = "llm", example_pending = pending }))
   )
-  check(
-    "llm mode: a landed example takes the normal group",
-    groups_for({ example_kind = "llm", example_pending = function()
+  check("llm mode: a landed example takes the normal group", groups_for({
+    example_kind = "llm",
+    example_pending = function()
       return false
-    end }, '"example.com"')["TypeScopeExample"] == true
-  )
+    end,
+  }, '"example.com"')["TypeScopeExample"] == true)
   -- a heuristic value is final the moment it exists: nothing to wait for, so
   -- nothing to breathe even if a stale predicate says otherwise
   check(
     "heuristic mode never renders pending",
     groups_for({ example_pending = pending })["TypeScopeExamplePending"] == nil
   )
-  check("no predicate (spike, tests) renders normally", groups_for({ example_kind = "llm" })["TypeScopeExample"] == true)
+  check(
+    "no predicate (spike, tests) renders normally",
+    groups_for({ example_kind = "llm" })["TypeScopeExample"] == true
+  )
 
   -- a leaf no heuristic matches has no example line at all; while its value
   -- is coming, a bar holds the line open so the block doesn't grow one later
@@ -839,11 +917,14 @@ do
       "pending leaf with no heuristic shows the wave bar",
       waiting.lines[1]:find("▁") and waiting.lines[1]:find("▇") and waiting.lines[1]:find("▅")
     )
-    local ascii = render.render({ bare }, opts({
-      style = styles.get("ascii"),
-      example_kind = "llm",
-      example_pending = pending,
-    })).lines[1]
+    local ascii = render.render(
+      { bare },
+      opts({
+        style = styles.get("ascii"),
+        example_kind = "llm",
+        example_pending = pending,
+      })
+    ).lines[1]
     check("bar uses the charset ramp", ascii:find("%.") and ascii:find("#") and not ascii:find("▇"))
     check("nothing pending, nothing shown", settled.lines[1]:find("▇") == nil)
     -- the type annotation always injects; the bar must not — it isn't code
@@ -865,17 +946,20 @@ do
     node.example.llm = value
     local progress
     local function frame(over)
-      return render.render({ node }, opts(vim.tbl_extend("force", {
-        example_kind = "llm",
-        example_pending = function()
-          return false
-        end,
-        -- pin the frozen phase: which cells uncover first is a function of
-        -- where the wave stood, so an unpinned phase makes this test drift
-        example_reveal = function()
-          return progress, 0.3
-        end,
-      }, over or {})))
+      return render.render(
+        { node },
+        opts(vim.tbl_extend("force", {
+          example_kind = "llm",
+          example_pending = function()
+            return false
+          end,
+          -- pin the frozen phase: which cells uncover first is a function of
+          -- where the wave stood, so an unpinned phase makes this test drift
+          example_reveal = function()
+            return progress, 0.3
+          end,
+        }, over or {}))
+      )
     end
 
     progress = 0
@@ -886,7 +970,7 @@ do
 
     progress = 0.75
     local mid = frame()
-    check("mid-fall uncovers some of the value", mid.lines[1]:find('name', 1, true) ~= nil)
+    check("mid-fall uncovers some of the value", mid.lines[1]:find("name", 1, true) ~= nil)
     check("mid-fall still has blocks standing", mid.lines[1]:find("[▁▂▃▅▇]") ~= nil)
     check("mid-fall has not uncovered all of it", not mid.lines[1]:find(value, 1, true))
 
@@ -918,15 +1002,18 @@ do
     -- disappearing between two frames
     local missed = model.new({ name = "kwargs", kind = "param", type = { display = "T", category = "builtin" } })
     local function miss_frame(pr)
-      return render.render({ missed }, opts({
-        example_kind = "llm",
-        example_pending = function()
-          return false
-        end,
-        example_reveal = function()
-          return pr, 0.3
-        end,
-      })).lines[1]
+      return render.render(
+        { missed },
+        opts({
+          example_kind = "llm",
+          example_pending = function()
+            return false
+          end,
+          example_reveal = function()
+            return pr, 0.3
+          end,
+        })
+      ).lines[1]
     end
     check("a MISS still falls away rather than popping", miss_frame(0.1):find("[▁▂▃▅▇]") ~= nil)
     check("...and leaves nothing behind", not miss_frame(nil):find("[▁▂▃▅▇]"))
@@ -970,15 +1057,18 @@ do
     -- a pending node has no value yet, so a stale reveal must not fire
     progress = 0.5
     local bare = model.new({ name = "x", kind = "param", type = { display = "_T", category = "typevar" } })
-    local waiting = render.render({ bare }, opts({
-      example_kind = "llm",
-      example_pending = function()
-        return true
-      end,
-      example_reveal = function()
-        return progress
-      end,
-    }))
+    local waiting = render.render(
+      { bare },
+      opts({
+        example_kind = "llm",
+        example_pending = function()
+          return true
+        end,
+        example_reveal = function()
+          return progress
+        end,
+      })
+    )
     check(
       "pending beats reveal: the placeholder stays whole",
       rung_count(waiting.lines[1]) >= 3 and not waiting.lines[1]:find("John")
@@ -992,12 +1082,12 @@ do
     "pending example drops the syntax overlay",
     groups_for({ example_kind = "llm", example_pending = pending }).injected == false
   )
-  check(
-    "landed example keeps it",
-    groups_for({ example_kind = "llm", example_pending = function()
+  check("landed example keeps it", groups_for({
+    example_kind = "llm",
+    example_pending = function()
       return false
-    end }, '"example.com"').injected == true
-  )
+    end,
+  }, '"example.com"').injected == true)
 end
 
 -- The bar's left edge has to read as the value's left edge, and the taper is
@@ -1017,13 +1107,16 @@ do
   -- so its columns are the last PENDING_CELLS characters of the line
   local WIDTH = 28
   local function bar_at(phase)
-    local line = render.render({ bare }, opts({
-      example_kind = "llm",
-      example_pending = function()
-        return true
-      end,
-      example_phase = phase,
-    })).lines[1]
+    local line = render.render(
+      { bare },
+      opts({
+        example_kind = "llm",
+        example_pending = function()
+          return true
+        end,
+        example_phase = phase,
+      })
+    ).lines[1]
     local chars = vim.fn.strchars(line)
     local cells = {}
     for i = 1, WIDTH do
@@ -1075,12 +1168,15 @@ do
   local node = model.new({ name = "host", kind = "param", type = { display = "str", category = "builtin" } })
   node.example.llm = long
   local function frame(over)
-    return render.render({ node }, opts(vim.tbl_extend("force", {
-      layout = "ledger",
-      detail_all = true,
-      max_width = 40,
-      example_kind = "llm",
-    }, over)))
+    return render.render(
+      { node },
+      opts(vim.tbl_extend("force", {
+        layout = "ledger",
+        detail_all = true,
+        max_width = 40,
+        example_kind = "llm",
+      }, over))
+    )
   end
   local waiting = frame({
     example_pending = function()
@@ -1130,15 +1226,18 @@ do
   local value = '"https://api.example.com/data"'
   local node = model.new({ name = "url", kind = "param", type = { display = "str", category = "builtin" } })
   node.example.llm = value
-  local mid = render.render({ node }, opts({
-    example_kind = "llm",
-    example_pending = function()
-      return false
-    end,
-    example_reveal = function()
-      return 0.6, 0.3
-    end,
-  }))
+  local mid = render.render(
+    { node },
+    opts({
+      example_kind = "llm",
+      example_pending = function()
+        return false
+      end,
+      example_reveal = function()
+        return 0.6, 0.3
+      end,
+    })
+  )
   local slices, sound = 0, true
   for _, ij in ipairs(mid.ts_injections) do
     if ij.text == value then
@@ -1194,14 +1293,17 @@ do
   short.example.llm = '"GET"'
   local W = 64
   local function frame(over)
-    return render.render({ short }, opts(vim.tbl_extend("force", {
-      layout = "ledger",
-      detail_all = true,
-      max_width = 90,
-      window_width = W,
-      example_kind = "llm",
-      example_phase = 0.25,
-    }, over)))
+    return render.render(
+      { short },
+      opts(vim.tbl_extend("force", {
+        layout = "ledger",
+        detail_all = true,
+        max_width = 90,
+        window_width = W,
+        example_kind = "llm",
+        example_phase = 0.25,
+      }, over))
+    )
   end
   local waiting = frame({
     example_pending = function()
@@ -1259,21 +1361,24 @@ do
   node.example.llm = 'Response(status_code=200, content=b"{\'key\': \'value\'}", headers={"Content-Type": "app"})'
   local FROZEN = 64
   local function example_at(window, froze_at)
-    local r = render.render({ node }, opts({
-      layout = "ledger",
-      detail_all = true,
-      max_width = 90,
-      window_width = window,
-      example_kind = "llm",
-      example_phase = 0.25,
-      example_pending = function()
-        return false
-      end,
-      -- one fixed instant of the fall, sampled while the window eases open
-      example_reveal = function()
-        return 0.3, 0.25, froze_at
-      end,
-    }))
+    local r = render.render(
+      { node },
+      opts({
+        layout = "ledger",
+        detail_all = true,
+        max_width = 90,
+        window_width = window,
+        example_kind = "llm",
+        example_phase = 0.25,
+        example_pending = function()
+          return false
+        end,
+        -- one fixed instant of the fall, sampled while the window eases open
+        example_reveal = function()
+          return 0.3, 0.25, froze_at
+        end,
+      })
+    )
     for _, l in ipairs(r.lines) do
       if l:find("e.g.", 1, true) then
         return l
@@ -1334,7 +1439,7 @@ end
 -- label (Tony's call, reveal.mov f804->f805).
 do
   local node = model.new({ name = "returns", kind = "return", type = { display = "R", category = "class" } })
-  node.example.heuristic = 'Response(status_code=200, content=b"{\'data\': [{\'id\': 1, \'name\': \'Item 1\'}]}")'
+  node.example.heuristic = "Response(status_code=200, content=b\"{'data': [{'id': 1, 'name': 'Item 1'}]}\")"
   local r = render.render({ node }, opts({ layout = "ledger", detail_all = true, max_width = 64 }))
   local label
   for _, l in ipairs(r.lines) do
@@ -1473,7 +1578,8 @@ end
 do
   local uni_type = "Literal['ünïcödé_ä', 'ünïcödé_ö', 'ünïcödé_ü', 'ünïcödé_é']"
   local uni_name = "ünïcödé_pärämètre_trës_löng_nöm_ïcï"
-  local uni_doc = "Ouvre une connexion réseau — le délai s'exprime en secondes, au-delà de quoi l'appel échoue avec une erreur « timeout »."
+  local uni_doc =
+    "Ouvre une connexion réseau — le délai s'exprime en secondes, au-delà de quoi l'appel échoue avec une erreur « timeout »."
   local uni_header = "ouvrir(möde, hôte_très_long, délai) -> Réponse"
 
   local function uni_roots()
@@ -1534,10 +1640,7 @@ do
   -- startswith/endswith, not :sub(1, 3) — a byte slice of "ünïcödé" yields
   -- "ün", which is how this assertion got written wrong the first time
   local shown = ledger.lines[1]:match("^· (%S+)")
-  check(
-    "the capped name keeps both ends",
-    vim.startswith(shown, "ünïcödé") and vim.endswith(shown, "nöm_ïcï")
-  )
+  check("the capped name keeps both ends", vim.startswith(shown, "ünïcödé") and vim.endswith(shown, "nöm_ïcï"))
   check("...and spends its cell budget, not its byte budget", vim.api.nvim_strwidth(shown) == 24)
 
   -- elide_members' fallback: a shape with no bracket, no braces and no " | "

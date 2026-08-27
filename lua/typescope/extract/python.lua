@@ -12,6 +12,8 @@ local M = {}
 -- (stdlib included) gets a definition request; the typeshed guard in
 -- resolve.lua stops recursion into stub files.
 local BUILTINS = {}
+-- hand-wrapped word list: one name per line is unreadable
+-- stylua: ignore
 for _, name in ipairs({
   "str", "int", "float", "bool", "bytes", "bytearray", "complex", "None",
   "list", "dict", "tuple", "set", "frozenset", "type", "object", "memoryview",

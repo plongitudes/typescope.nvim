@@ -801,8 +801,7 @@ function M.render(roots, opts)
     -- method "signatures" like (path: str) -> bytes, class-root category
     -- labels like (pydantic), and overload shapes with elision marks aren't
     -- parseable expressions, so they keep block coloring
-    local injectable = (node.kind ~= "method" and node.kind ~= "type" and node.kind ~= "overload") and "replace"
-      or nil
+    local injectable = (node.kind ~= "method" and node.kind ~= "type" and node.kind ~= "overload") and "replace" or nil
     -- an unannotated param's declared type is only implicit Any; when we have
     -- pyright's inferred type, show just that instead of "Any ≈ T"
     if not (node.evaluated and type_text == "Any") then
@@ -997,8 +996,7 @@ function M.render(roots, opts)
     -- pass 1: collect visible rows as per-column segment lists
     local rows = {}
     local function collect(node, bars, branch, depth)
-      local marker = is_expandable(node) and (node.state.expanded and style.expanded or style.collapsed)
-        or style.leaf
+      local marker = is_expandable(node) and (node.state.expanded and style.expanded or style.collapsed) or style.leaf
       local name_group = node.kind == "return" and "TypeScopeKeyword"
         or node.kind == "type" and "TypeScopeType"
         or node.kind == "param" and "TypeScopeParam"
@@ -1129,8 +1127,7 @@ function M.render(roots, opts)
             current, cur_w = {}, 0
           else
             local cut = math.max(1, find_break_point(text, avail))
-            local clean = text:sub(cut, cut):match("[%s,]") ~= nil
-              or text:sub(cut + 1, cut + 1):match("%s") ~= nil
+            local clean = text:sub(cut, cut):match("[%s,]") ~= nil or text:sub(cut + 1, cut + 1):match("%s") ~= nil
             if cur_w > 0 and not clean then
               -- forced mid-word cut on a shared slice reads terribly — give
               -- the segment a fresh slice with the full column width instead
@@ -1256,8 +1253,7 @@ function M.render(roots, opts)
       if r.depth > 0 then
         line:add(r.branch, "TypeScopeChrome")
       end
-      local marker = is_expandable(node) and (node.state.expanded and style.expanded or style.collapsed)
-        or style.leaf
+      local marker = is_expandable(node) and (node.state.expanded and style.expanded or style.collapsed) or style.leaf
       line:add(marker, "TypeScopeChrome")
       if has_mode then
         if node.pass_mode then
@@ -1285,8 +1281,8 @@ function M.render(roots, opts)
         type_text = node.evaluated
       end
       local injectable = not type_is_evaluation
-        and (node.kind ~= "method" and node.kind ~= "type" and node.kind ~= "overload")
-        and "replace"
+          and (node.kind ~= "method" and node.kind ~= "type" and node.kind ~= "overload")
+          and "replace"
         or nil
       local type_group = type_is_evaluation and "TypeScopeEvaluated" or "TypeScopeType"
 
@@ -1720,10 +1716,7 @@ function M.typing_surface(node, opts)
   if rule_lnum then
     local rule = string.rep(opts.style and opts.style.rule or "─", math.max(4, result.width))
     result.lines[rule_lnum] = rule
-    table.insert(
-      result.highlights,
-      { line = rule_lnum - 1, col_start = 0, col_end = #rule, group = "TypeScopeChrome" }
-    )
+    table.insert(result.highlights, { line = rule_lnum - 1, col_start = 0, col_end = #rule, group = "TypeScopeChrome" })
   end
   return result
 end

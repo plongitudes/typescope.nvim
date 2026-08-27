@@ -1,0 +1,17 @@
+# Formatting contract. Run `stylua lua/ tests/` before opening a PR; CI runs
+# `stylua --check` on the same paths.
+#
+# column_width is 120 because the code already agrees with it: lines sit at
+# p50=31, p90=77, p99=102 columns, and of 100/120/140 it is the width that
+# rewrites the fewest existing files (9, against 13 and 11).
+#
+# Two hand-aligned tables opt out with `-- stylua: ignore`: the builtins list in
+# extract/python.lua and the fixture table in spike.lua. Exploding either to one
+# field per line is strictly harder to read than the hand-wrapping it has.
+column_width = 120
+line_endings = "Unix"
+indent_type = "Spaces"
+indent_width = 2
+quote_style = "AutoPreferDouble"
+call_parentheses = "Always"
+collapse_simple_statement = "Never"

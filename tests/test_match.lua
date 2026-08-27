@@ -58,7 +58,10 @@ local fetch = {
 check("int literal picks the int overload", match.pick(fetch, args({ "integer" })) == 1)
 check("string literal disqualifies scalar-only int", match.pick(fetch, args({ "string" })) == 2)
 check("arity overflow disqualifies", match.pick(fetch, args({ "string", "string" })) == 2)
-check("alias annotation stays neutral (never disqualifies)", match.pick(fetch, args({ "string" }, { { name = "mode", kind = "string" } })) == 2)
+check(
+  "alias annotation stays neutral (never disqualifies)",
+  match.pick(fetch, args({ "string" }, { { name = "mode", kind = "string" } })) == 2
+)
 
 -- keyword-name membership
 local kw = {

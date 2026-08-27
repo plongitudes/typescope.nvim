@@ -169,7 +169,9 @@ local function validate(cfg)
   check("prefetch", cfg.prefetch, "boolean")
   check("insert_mode", cfg.insert_mode, "table")
   check("insert_mode.enabled", cfg.insert_mode.enabled, "boolean")
-  if cfg.insert_mode.max_width ~= nil and (type(cfg.insert_mode.max_width) ~= "number" or cfg.insert_mode.max_width <= 0) then
+  if
+    cfg.insert_mode.max_width ~= nil and (type(cfg.insert_mode.max_width) ~= "number" or cfg.insert_mode.max_width <= 0)
+  then
     error("typescope.setup: `insert_mode.max_width` must be a positive number (<=1 = fraction of editor width)", 0)
   end
   check("depth", cfg.depth, "positive_integer")
