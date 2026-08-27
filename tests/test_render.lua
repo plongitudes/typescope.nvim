@@ -1563,8 +1563,20 @@ do
 
   -- and the cut lands on a character boundary, never inside one — the other
   -- half of what the byte-indexed scan got wrong
+  -- NOT vim.str_utfindex: its signature changed between 0.10 and 0.11 (the
+  -- reason lsp.lua:33 carries a shim), and the 0.11 form errors on 0.10 —
+  -- which took this whole file down on the CI floor while passing locally.
+  -- str_utf_pos is stable across both; the lead byte gives the length, the
+  -- same inline decode render.lua uses.
   local function ends_clean(s)
-    return #s == 0 or vim.str_utfindex(s, "utf-8", #s, false) ~= nil
+    if #s == 0 then
+      return true
+    end
+    local at = vim.str_utf_pos(s)
+    local start = at[#at]
+    local lead = s:byte(start)
+    local len = (lead < 0x80 and 1) or (lead < 0xE0 and 2) or (lead < 0xF0 and 3) or 4
+    return start + len - 1 == #s
   end
   check("the cut never splits a character", ends_clean(accented:sub(1, accented_cut)))
   -- the no-whitespace fallback is where splitting actually used to happen:
