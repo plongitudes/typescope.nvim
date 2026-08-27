@@ -199,7 +199,7 @@ Defaults in full: >lua
 
       ui = {
         style = "rounded",
-        layout = "tree",
+        layout = "ledger",
         animations = true,
         align = "left",
         max_width = 0.5,
@@ -264,20 +264,25 @@ ui.hint ~
 ==============================================================================
 8. LAYOUTS                                                *typescope-layouts*
 
-Set `ui.layout`. Same data, three shapes.
+Set `ui.layout`. Same data, different shapes.
+
+ledger ~
+    The default. One compact line per parameter (name, type, short default).
+    The row under the cursor expands into a detail block — evaluated shape,
+    example, origin — which follows as the cursor moves. L opens every row's
+    detail block as a transient peek; the next cursor move ends it.
 
 tree ~
     Flowing segments; type, default and example trail the name and wrap with
-    a hanging indent when they run out of room. The default.
+    a hanging indent when they run out of room.
 
+                                                    *typescope-layout-table*
 table ~
-    True columns — name, mutability, type, default, example, origin — with
-    alternating row backgrounds.
+    DEPRECATED. It will be removed in the next release.
 
-ledger ~
-    One compact line per parameter (name, type, short default). The row
-    under the cursor expands into a detail block — evaluated shape, example,
-    origin — which follows as the cursor moves.
+    True columns — name, mutability, type, default, example, origin — with
+    alternating row backgrounds. It still works and still validates, but
+    setting it emits a warning once per session. Use "ledger" or "tree".
 
 ==============================================================================
 9. INSERT MODE                                       *typescope-insert-mode*

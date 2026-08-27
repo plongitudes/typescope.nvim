@@ -7,6 +7,14 @@
 local root = vim.fn.getcwd()
 local fixture_dir = root .. "/tests/fixtures"
 
+-- Most of this suite asserts on INLINE content — an example beside its leaf,
+-- an origin tag on an inherited field — which is the tree layout's shape. The
+-- default is "ledger", where those live in the cursor-follow detail block and
+-- only one row's is on screen at a time, so these sections pin tree
+-- explicitly. They are testing the resolve/render pipeline, not the layout.
+-- Ledger has its own section further down, which sets it back.
+require("typescope").setup({ ui = { layout = "tree" } })
+
 local failures = 0
 local function check(desc, cond)
   print((cond and "PASS " or "FAIL ") .. desc)
@@ -769,7 +777,7 @@ require("typescope").setup({ ui = { focus = false } })
 fw = focus_open()
 check("ui.focus=false config: open() stays momentary", fw ~= nil and vim.api.nvim_get_current_win() == focus_srcwin)
 require("typescope").close()
-require("typescope").setup({})
+require("typescope").setup({ ui = { layout = "tree" } })
 
 -- hover-backed evaluated leaves: alias annotations decorate with the
 -- evaluated type; unannotated params show pyright's inference
@@ -1006,7 +1014,10 @@ end
 -- editor so the landing frame has somewhere to go; restored below.
 local prev_columns = vim.o.columns
 vim.o.columns = 200
-require("typescope").setup({ ollama = { enabled = true, port = fake_port, timeout_ms = 3000 } })
+require("typescope").setup({
+  ui = { layout = "tree" },
+  ollama = { enabled = true, port = fake_port, timeout_ms = 3000 },
+})
 for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
   if l:find("handle = create_server") then
     vim.api.nvim_win_set_cursor(0, { i, 12 })
@@ -1080,7 +1091,10 @@ do
     sock:read_start(function() end) -- swallow the request, never respond
   end)
 end
-require("typescope").setup({ ollama = { enabled = true, port = silent_port, timeout_ms = 1000 } })
+require("typescope").setup({
+  ui = { layout = "tree" },
+  ollama = { enabled = true, port = silent_port, timeout_ms = 1000 },
+})
 require("typescope").open()
 vim.wait(2000, function()
   return float_lines() ~= nil
@@ -1113,7 +1127,7 @@ require("typescope").close()
 
 -- unreachable ollama: E falls back gracefully, heuristics stay
 require("typescope.examples")._clear_llm_cache()
-require("typescope").setup({ ollama = { enabled = true, port = 1, timeout_ms = 1000 } })
+require("typescope").setup({ ui = { layout = "tree" }, ollama = { enabled = true, port = 1, timeout_ms = 1000 } })
 require("typescope").open()
 vim.wait(2000, function()
   return float_lines() ~= nil
@@ -1134,6 +1148,7 @@ require("typescope").close()
 
 -- example_mode = "llm": generation fires automatically on open, no E needed
 require("typescope").setup({
+  ui = { layout = "tree" },
   example_mode = "llm",
   ollama = { enabled = true, port = fake_port, timeout_ms = 3000 },
 })
