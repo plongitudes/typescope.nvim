@@ -676,6 +676,60 @@ do
     dr.line_to_node[7] == "ws" and dr.line_to_node[8] == "ws" and dr.line_to_node[9] == "returns"
   )
 
+  -- A stub placeholder default stays on the ROW, focused or not. The detail
+  -- block exists to hold a value too long to sit inline, and `…` is one cell:
+  -- moving it there repeats a marker rather than expanding one, and makes it hop
+  -- off the row as the cursor passes. A block left with nothing else to say does
+  -- not open at all.
+  do
+    local ph = {
+      model.new({
+        name = "level",
+        kind = "param",
+        default = "…",
+        example = { heuristic = '"INFO"' },
+        type = { display = "str | int", category = "generic" },
+      }),
+      model.new({
+        name = "exception",
+        kind = "param",
+        default = "…",
+        type = { display = "bool", category = "builtin" },
+      }),
+      model.new({
+        name = "fmt",
+        kind = "param",
+        default = '"{time} {level} {message}"',
+        type = { display = "str", category = "builtin" },
+      }),
+    }
+    local function lines_for(focus)
+      local r = render.render(ph, opts({ layout = "ledger", max_width = 62, detail_id = focus }))
+      return table.concat(r.lines, "\n")
+    end
+    local unfocused = lines_for(nil)
+    check("a placeholder default shows inline when unfocused", unfocused:find("level.*= …") ~= nil)
+
+    local on_level = lines_for("level")
+    check("...and stays on the row when focused", on_level:find("level.*= …") ~= nil)
+    check("...with the block carrying only the example", on_level:find("e%.g%.") ~= nil)
+    -- counted across the whole float, since the other two rows carry a marker
+    -- too: focusing must not ADD one by echoing it into the block
+    check(
+      "...not repeating the placeholder inside it",
+      select(2, on_level:gsub("= …", "")) == select(2, unfocused:gsub("= …", ""))
+    )
+
+    -- nothing to add, so no block at all: focused renders identically
+    check("a placeholder-only row opens no detail block", lines_for("exception") == unfocused)
+
+    -- a REAL default is what the block is for, and still expands into it
+    check(
+      "a real long default still expands in the block",
+      lines_for("fmt"):find('= "{time} {level} {message}"') ~= nil
+    )
+  end
+
   -- detail on an inherited field shows its origin
   local er = render.render(
     ledger_tree(),

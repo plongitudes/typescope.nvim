@@ -283,6 +283,10 @@ local DEFAULT_RAMP = { "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█" }
 -- allowed to pop in at the end, once the value is real text.
 local CLIP = { clip = true }
 
+-- extract/python.lua normalises a stub's `= ...` to this. Not a value: it means
+-- "has a default, unspecified", which is why it never moves into a detail block.
+local STUB_DEFAULT = "…"
+
 ---@param opts typescope.RenderOpts|typescope.TypingOpts
 local function ramp_of(opts)
   return opts.style and opts.style.ramp or DEFAULT_RAMP
@@ -1298,17 +1302,27 @@ function M.render(roots, opts)
         tail_w = tail_w + strwidth(s[1])
       end
 
-      -- inline default only on non-detail rows (the block carries the full
-      -- value); long defaults elide to `=…` rather than widening every row
+      -- Inline default only on non-detail rows: the block carries the full
+      -- value, and long defaults elide to `=…` inline rather than widening
+      -- every row.
+      --
+      -- A stub placeholder is the exception, and stays on the row even when
+      -- focused. The block's whole justification is holding a value too long to
+      -- sit inline; `…` is one cell and would always have fit, so moving it
+      -- there repeats a marker instead of expanding one — and makes it hop off
+      -- the row and into the block as the cursor passes. Left inline it does not
+      -- move, and a block with nothing else to say does not open at all.
+      local placeholder = node.default == STUB_DEFAULT
+      local default_inline = node.default ~= nil and (not detail or placeholder)
       local default_text = nil
-      if node.default and not detail then
+      if default_inline then
         default_text = strwidth(node.default) <= 12 and node.default or nil
       end
       local budget = opts.max_width - line.width - tail_w
-      local def_w = default_text and (4 + strwidth(default_text)) or (node.default and not detail and 5 or 0)
+      local def_w = default_text and (4 + strwidth(default_text)) or (default_inline and 5 or 0)
       if strwidth(type_text) + def_w > budget then
         default_text = nil -- degrade the default before touching the type
-        def_w = node.default and not detail and 5 or 0
+        def_w = default_inline and 5 or 0
       end
       if strwidth(type_text) + def_w > budget then
         -- budget, def_w and the ellipsis are all measured in cells, so the
@@ -1320,7 +1334,7 @@ function M.render(roots, opts)
       for _, s in ipairs(tail) do
         line:add(s[1], s[2])
       end
-      if node.default and not detail then
+      if default_inline then
         line:add("  = ", "TypeScopeChrome")
         if default_text then
           line:add(default_text, "TypeScopeDefault", "replace")
@@ -1352,7 +1366,9 @@ function M.render(roots, opts)
           detail_line(segs)
         end
         local info = {}
-        if node.default then
+        -- the placeholder already sits on the row above and is not a value the
+        -- block can expand; repeating it here is the line that says nothing
+        if node.default and not placeholder then
           table.insert(info, { "= ", "TypeScopeChrome" })
           table.insert(info, { node.default, "TypeScopeDefault", "replace" })
         end
