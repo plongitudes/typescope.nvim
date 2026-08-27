@@ -13,7 +13,7 @@ brew install stylua luacheck   # or your platform's equivalent
 CI runs exactly these, and nothing else. Run them locally and you will not be surprised:
 
 ```sh
-./tests/run.sh          # all six suites, headless
+./tests/run.sh          # all seven suites, headless
 luacheck lua/ tests/    # 0 warnings, 0 errors
 stylua --check lua/ tests/
 ```
@@ -34,6 +34,7 @@ Some things this suite learned the hard way:
 - **Prefer invariants to goldens for anything positional.** `check_injections` asserts that every emitted injection describes a slice that fits its line, across every result. A golden asserting the text would not have caught the bug it was written for.
 - **Sweep widths rather than picking one.** A truncation only misbehaves at the widths where its cut lands mid-character. Section 14 sweeps every layout across widths 20..80 for this reason.
 - **Headless float geometry is not real geometry.** With no UI attached there is no anchor to measure against, so assert on `nvim_win_get_config` rather than on positions a headless probe reports.
+- **`tests/fixtures/shapes.py` is the capability sheet.** It records every class shape the extractor reads *and* the ones it doesn't, as `typescope:` marker comments that `test_shapes.lua` asserts against. Markers reading `fields=NONE` document real gaps on purpose: closing one turns that suite red until the marker is updated, which is how the sheet stays honest. Add a marker whenever you teach the extractor a new shape.
 
 ## Style
 

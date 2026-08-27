@@ -344,7 +344,7 @@ Reports Neovim version, the Python parser, basedpyright (active client, or just 
 ## Development
 
 ```sh
-./tests/run.sh      # all six suites, headless
+./tests/run.sh      # all seven suites, headless
 stylua lua/ tests/  # formatting; run it twice, it needs two passes to converge
 ```
 

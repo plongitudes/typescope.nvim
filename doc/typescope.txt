@@ -413,7 +413,7 @@ also checks for curl and probes the server for reachability.
 ==============================================================================
 14. DEVELOPMENT                                       *typescope-development*
 >
-    ./tests/run.sh          all six suites, headless
+    ./tests/run.sh          all seven suites, headless
     stylua lua/ tests/      formatting
 <
 tests/run.sh adds your local site directory and nvim-treesitter to the
