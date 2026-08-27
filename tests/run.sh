@@ -15,6 +15,13 @@ for suite in tests/test_extract.lua tests/test_match.lua tests/test_render.lua t
   echo "$out" | grep -E "FAIL|ALL PASS|FAILURES"
   if ! echo "$out" | grep -q "ALL PASS"; then
     fail=1
+    # A suite that ERRORS never prints its summary line, and the grep above
+    # shows nothing at all — which reads as silence rather than as a failure.
+    # That is how a 0.10-only incompatibility hid behind a green local run.
+    # Dump everything when a suite does not report, so CI is diagnosable.
+    echo "--- $suite did not report ALL PASS; full output follows ---"
+    echo "$out"
+    echo "--- end $suite ---"
   fi
 done
 
