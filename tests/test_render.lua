@@ -800,6 +800,23 @@ do
     #capped.lines <= 3 and call:find("…%+") ~= nil and not call:find("'m20'")
   )
 
+  -- max_detail_lines (10f) moves that cap. The same node at the same width
+  -- gets more lines AND keeps more members, because the elision budget is
+  -- computed from the cap: capacity = max_lines * width - indent * (max_lines-1).
+  -- Asserting both halves matters — a cap that only changed the line count
+  -- while still eliding to three lines' worth of members would be a knob that
+  -- does half its job.
+  local roomy = render.typing_surface(big, vim.tbl_extend("force", vbase, { max_width = 40, max_detail_lines = 6 }))
+  local roomy_call = table.concat(roomy.lines, "\n")
+  check("max_detail_lines raises the line cap", #roomy.lines > #capped.lines and #roomy.lines <= 6)
+  check("a raised cap keeps more members", #roomy_call > #call)
+
+  -- and downward: 1 line leaves no room to wrap into, so the shape goes
+  -- entirely rather than the detail spilling past the cap
+  local tight = render.typing_surface(big, vim.tbl_extend("force", vbase, { max_width = 40, max_detail_lines = 1 }))
+  check("max_detail_lines lowers the cap too", #tight.lines <= 1)
+  check("a cap of 1 drops the shape rather than overflowing", not table.concat(tight.lines, "\n"):find("'m01'"))
+
   -- a resolved class param presents its field shape the same way
   local struct = model.new({
     name = "config",

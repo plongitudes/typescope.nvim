@@ -150,6 +150,7 @@ local function typing_result(st)
   local cfg = config.get()
   return require("typescope.render").typing_surface(node, {
     max_width = math.min(config.resolved_max_width(cfg.insert_mode.max_width), vim.o.columns - 6),
+    max_detail_lines = cfg.insert_mode.max_detail_lines,
     show_examples = cfg.show_examples and cfg.example_mode ~= "none",
     example_kind = "heuristic", -- LLM values decorate if already cached, never requested
     style = require("typescope.styles").get(cfg.ui.style),

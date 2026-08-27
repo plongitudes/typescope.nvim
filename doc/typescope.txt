@@ -185,6 +185,7 @@ Defaults in full: >lua
       insert_mode = {
         enabled = false,
         max_width = nil,
+        max_detail_lines = 3,
       },
 
       ollama = {
@@ -301,6 +302,16 @@ Off by default while it bakes.
 
 NOTE: turn off your existing signature help (blink.cmp, nvim-cmp, or core)
 when enabling this, or two floats will contend for the same space.
+
+                                              *typescope-max-detail-lines*
+insert_mode.max_detail_lines ~
+    Caps the DETAIL only, not the surface. The signature block above it
+    wraps as far as it needs to keep every parameter name visible.
+
+    Past the cap the shape — the one unbounded part — elides member by
+    member rather than the detail growing, so a short union still shows in
+    full while a 53-member Literal cannot eat the float. Raise it if you
+    work with big Literals and want more of them at a glance.
 
 ==============================================================================
 10. EXAMPLES                                             *typescope-examples*

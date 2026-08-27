@@ -34,6 +34,7 @@
 ---@class typescope.InsertModeConfig
 ---@field enabled boolean insert-mode typing surface (replaces signature help)
 ---@field max_width? number typing surface width; >1: absolute columns, <=1: fraction of editor width (defaults to ui.max_width)
+---@field max_detail_lines integer cap on the wrapped active-param detail before the shape elides
 
 ---@class typescope.Config
 ---@field trigger "hover"|"manual"
@@ -60,7 +61,11 @@ local defaults = {
   -- focusable, zero manual controls. Opt-in while it bakes; turn off
   -- blink/core signature help when enabling. max_width (same units as
   -- ui.max_width) sizes just this surface; nil inherits ui.max_width.
-  insert_mode = { enabled = false, max_width = nil },
+  -- max_detail_lines caps the WRAPPED DETAIL only, not the surface: the
+  -- signature block above it wraps as far as it needs to keep every param
+  -- name visible. Past the cap the shape (the one unbounded segment) elides
+  -- member-by-member rather than the detail growing.
+  insert_mode = { enabled = false, max_width = nil, max_detail_lines = 3 },
   depth = 2,
   show_examples = true,
   -- "heuristic": pattern-table examples, E generates LLM values on demand
@@ -170,6 +175,7 @@ local function validate(cfg)
   check("prefetch", cfg.prefetch, "boolean")
   check("insert_mode", cfg.insert_mode, "table")
   check("insert_mode.enabled", cfg.insert_mode.enabled, "boolean")
+  check("insert_mode.max_detail_lines", cfg.insert_mode.max_detail_lines, "positive_integer")
   if
     cfg.insert_mode.max_width ~= nil and (type(cfg.insert_mode.max_width) ~= "number" or cfg.insert_mode.max_width <= 0)
   then

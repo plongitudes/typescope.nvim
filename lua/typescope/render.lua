@@ -1460,10 +1460,11 @@ end
 -- past the cap does the shape start eliding members (Tony: wrap when out of
 -- room — a short union shows in full, a 53-member Literal still can't eat
 -- the float).
-local TYPING_MAX_LINES = 3
+local TYPING_MAX_LINES = 3 -- default; insert_mode.max_detail_lines overrides
 
 ---@class typescope.TypingOpts
 ---@field max_width integer
+---@field max_detail_lines? integer cap on the WRAPPED DETAIL only, not the signature block (default 3)
 ---@field show_examples boolean
 ---@field example_kind "heuristic"|"llm"
 ---@field example_pending? fun(node: typescope.Node): boolean leaves whose LLM value is still coming (38c); injected so render stays pure
@@ -1481,7 +1482,7 @@ local TYPING_MAX_LINES = 3
 --- a rule, then the active parameter's detail: type, SHAPE (alias/union
 --- evaluation like OpenTextMode's legal values, or a resolved class's field
 --- list), default, example. The detail WRAPS when out of room (hanging
---- indent, up to TYPING_MAX_LINES); beyond the cap the shape — the only
+--- indent, up to opts.max_detail_lines); beyond the cap the shape — the only
 --- unbounded segment — elides member-by-member. Zero manual density
 --- controls while the user is mid-call. Pure, like render().
 ---@param node typescope.Node the active param
@@ -1623,8 +1624,12 @@ function M.typing_surface(node, opts)
     return wrap_segs(segs_for(shape_text), cont_indent)
   end
 
+  -- Caps the DETAIL only. The signature block above it wraps freely — every
+  -- param name has to stay visible — so this is not a cap on the surface.
+  local max_lines = opts.max_detail_lines or TYPING_MAX_LINES
+
   local detail = layout(shape)
-  if #detail > TYPING_MAX_LINES and shape then
+  if #detail > max_lines and shape then
     -- budget = the cap's capacity minus everything that isn't the shape;
     -- wrapping wastes cells at break points, so shrink in steps before
     -- giving the shape up entirely
@@ -1632,17 +1637,17 @@ function M.typing_surface(node, opts)
     for _, seg in ipairs(segs_for(nil)) do
       fixed = fixed + strwidth(seg[1])
     end
-    local capacity = TYPING_MAX_LINES * opts.max_width - cont_indent * (TYPING_MAX_LINES - 1)
+    local capacity = max_lines * opts.max_width - cont_indent * (max_lines - 1)
     for _, factor in ipairs({ 1, 0.85, 0.7 }) do
       local budget = math.floor((capacity - fixed) * factor)
       if budget >= 12 then
         detail = layout(elide_members(shape, budget))
-        if #detail <= TYPING_MAX_LINES then
+        if #detail <= max_lines then
           break
         end
       end
     end
-    if #detail > TYPING_MAX_LINES then
+    if #detail > max_lines then
       detail = layout(nil)
     end
   end

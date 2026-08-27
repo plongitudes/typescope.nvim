@@ -128,6 +128,7 @@ require("typescope").setup({
   insert_mode = {
     enabled = false,         -- the insert-mode typing surface; replaces signature help
     max_width = nil,         -- same units as ui.max_width; nil inherits it
+    max_detail_lines = 3,    -- cap on the wrapped detail before the shape elides
   },
 
   ollama = {
@@ -220,6 +221,8 @@ Press `L` for a transient peek that opens *every* row's detail block at once; th
 `insert_mode.enabled = true` replaces your signature help with a *typing surface*: every parameter name on one wrapped block, the active one highlighted, a rule, then the active parameter's detail — type, evaluated shape, default, example. It follows `textDocument/signatureHelp` silently, including overload changes, and repositions on every keystroke so it never covers the line you are typing on or the one below it.
 
 It has no keymaps and is never focusable, by design. If you enable it, **turn off your existing signature help** (blink.cmp's, nvim-cmp's, or core's) or you will have two floats fighting over the same space.
+
+`max_detail_lines` caps the *detail* only — the signature block above it wraps as far as it needs to keep every parameter name visible, so this is not a cap on the surface as a whole. Past the cap, the shape (the one unbounded part) elides member-by-member rather than the detail growing: a short union still shows in full, a 53-member `Literal` still can't eat the float. Raise it if you work with big `Literal`s and want more of them at a glance.
 
 Off by default while it bakes.
 
