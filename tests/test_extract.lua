@@ -344,4 +344,34 @@ check("call_args empty call", ca_empty ~= nil and #ca_empty.positional == 0 and 
 check("call_args splat defeats positional counting", py.call_args(call_src, 2, 10) == nil)
 check("call_args not-a-call", py.call_args("x = 1\n", 0, 0) == nil)
 
+-- Stub `= ...` is "has a default, value unspecified", not a default of Ellipsis.
+-- Normalised to the same elision glyph the header builds for an elided default,
+-- so one idea has one spelling. NOT dropped: it is what distinguishes an
+-- optional parameter from a required one in the row.
+do
+  local src = table.concat({
+    "class Stub:",
+    "    stub_field: int = ...",
+    '    real_field: str = "INFO"',
+    'def add(sink, *, level: str = ..., fmt: str = "{time}", flag: bool = True) -> int: ...',
+  }, "\n")
+  local info = py.function_info(src, 3, 5)
+  local d = {}
+  for _, p2 in ipairs(info.params) do
+    d[p2.name] = p2.default or false
+  end
+  check("a required param has no default marker", d.sink == false, tostring(d.sink))
+  check("a stub ellipsis default normalises to the elision glyph", d.level == "…", tostring(d.level))
+  check("a real string default survives", d.fmt == '"{time}"', tostring(d.fmt))
+  check("a real bool default survives", d.flag == "True", tostring(d.flag))
+
+  local cls = py.type_at(src, 0, 7)
+  local f = {}
+  for _, fl in ipairs(cls.fields) do
+    f[fl.name] = fl.default or false
+  end
+  check("class fields normalise too", f.stub_field == "…", tostring(f.stub_field))
+  check("...without touching real ones", f.real_field == '"INFO"', tostring(f.real_field))
+end
+
 print(failures == 0 and "EXTRACT ALL PASS" or ("EXTRACT " .. failures .. " FAILURES"))

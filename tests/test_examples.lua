@@ -153,6 +153,25 @@ do
     heuristic_for("email", 'Literal["user@example.com"]') == '"user@example.com"'
   )
   check("a class named SelfEmployed is still asked", heuristic_for("email", "SelfEmployed") ~= nil)
+
+  -- An unspecified default is exactly the case worth showing an example FOR, so
+  -- neither spelling of the stub placeholder may suppress one. The normalised
+  -- glyph arrived with the render fix and would otherwise have read as a real
+  -- default here, silently dropping the example from every stub-defaulted param.
+  local function with_default(default)
+    local n = model.new({
+      name = "level",
+      kind = "param",
+      default = default,
+      type = { display = "str", category = "builtin" },
+    })
+    examples.annotate({ n })
+    return n.example.heuristic
+  end
+  check("the normalised stub default still gets an example", with_default("…") ~= nil)
+  check("...and the raw one", with_default("...") ~= nil)
+  check("a None default still gets one", with_default("None") ~= nil)
+  check("a REAL default suppresses it", with_default('"WARN"') == nil)
 end
 
 -- LLM caching discipline: misses get a sentinel (auto-run never re-asks),

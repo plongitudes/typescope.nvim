@@ -395,15 +395,31 @@ function M.hover()
   end
   M.open({
     silent = true,
-    on_unresolved = function()
+    on_unresolved = function(reason, why)
       vim.lsp.buf.hover()
+      -- "absent" means there was nothing here for TypeScope — a variable, a
+      -- keyword, a non-Python buffer. Silence is correct: this is bound to K,
+      -- and announcing itself on every miss would make it unusable.
+      --
+      -- "empty" is different in kind. TypeScope found the function, understood
+      -- it, and DECIDED there was nothing to draw (no parameters, no return
+      -- annotation). Without this line that decision is invisible, and a
+      -- deliberate decline looks identical to never having run — which is
+      -- exactly what a receiver-only method like `def m(self)` produces.
+      --
+      -- Echoed, not notified: the message line clears itself on the next
+      -- keystroke, where a notification would stack up behind a key you press
+      -- all day.
+      if why == "empty" and reason then
+        vim.api.nvim_echo({ { "typescope: " .. reason, "Comment" } }, false, {})
+      end
     end,
   })
 end
 
 --- Open the TypeScope float for the function under the cursor; if already
 --- open, focus it (arming the tree keymaps).
----@param opts? { silent?: boolean, on_unresolved?: fun(), focus?: boolean } silent: no notifications (hover trigger); on_unresolved: called instead when the pipeline can't produce a tree; focus: override ui.focus for this open
+---@param opts? { silent?: boolean, on_unresolved?: fun(reason: string?, why: string?), focus?: boolean } silent: no notifications (hover trigger); on_unresolved: called instead when the pipeline can't produce a tree, with the reason and its kind ("stale"|"absent"|"empty"); focus: override ui.focus for this open
 function M.open(opts)
   opts = opts or {}
   if session and vim.api.nvim_win_is_valid(session.handle.win) then
@@ -435,13 +451,13 @@ function M.open(opts)
   open_token = token
   async.run(function()
     local resolve = require("typescope.resolve")
-    local roots, meta_or_err = resolve.function_scope(client, bufnr, win, token)
+    local roots, meta_or_err, why = resolve.function_scope(client, bufnr, win, token)
     if async.stale(token) then
       return
     end
     if not roots then
       if opts.on_unresolved then
-        opts.on_unresolved()
+        opts.on_unresolved(meta_or_err, why)
       elseif not opts.silent then
         vim.notify("typescope: " .. tostring(meta_or_err), vim.log.levels.INFO)
       end

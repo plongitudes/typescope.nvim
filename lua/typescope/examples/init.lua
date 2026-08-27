@@ -124,7 +124,12 @@ local function is_unbound_notation(display)
 end
 
 local function eligible(node)
-  local has_real_default = node.default ~= nil and node.default ~= "None" and node.default ~= "..."
+  -- "…" is the normalised stub placeholder (extract/python.lua's default_text)
+  -- and "..." is the raw form, still reachable from a source file rather than a
+  -- stub. Neither is a value, so neither suppresses an example: a parameter
+  -- whose default is unspecified is exactly one worth showing an example for.
+  local d = node.default
+  local has_real_default = d ~= nil and d ~= "None" and d ~= "..." and d ~= "…"
   -- _lazy placeholders are unresolved structure (an alias name standing in
   -- for a type nobody has chased yet) — an example for one is speculation,
   -- and prompting a slow local model for speculation is what made K on

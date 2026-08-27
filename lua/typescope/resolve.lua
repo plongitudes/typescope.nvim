@@ -372,21 +372,29 @@ end
 --- the insert-mode surface resolves the call's callee, not the cursor
 ---@return typescope.Node[]? roots
 ---@return table|string|nil meta_or_err on success: { header?: string, docstring?: string }; on failure: error message
+--- Third return value classifies the decline, so a caller can tell "there is
+--- nothing here for TypeScope" from "TypeScope looked, understood, and had
+--- nothing to draw" — indistinguishable to the user otherwise:
+---   "stale"  a newer request superseded this one; never worth reporting
+---   "absent" not a Python buffer, not a symbol, or not a function/class. K's
+---            job, and saying so on every hover would be unbearable
+---   "empty"  a function WAS resolved and carries no parameters and no return
+---            annotation. A real decision, currently invisible on the hover path
 function M.function_scope(client, bufnr, win, token, pos)
   local ft = vim.bo[bufnr].filetype
   local impl = extract.get(ft)
   if not impl then
-    return nil, ("no extractor for filetype %q"):format(ft)
+    return nil, ("no extractor for filetype %q"):format(ft), "absent"
   end
   local ctx = { client = client, token = token, impl = impl, enrich = {} }
 
   pos = pos or vim.api.nvim_win_get_cursor(win)
   local loc = lsp.definition(client, bufnr, pos[1] - 1, pos[2], token)
   if async.stale(token) then
-    return nil, "stale"
+    return nil, "stale", "stale"
   end
   if not loc then
-    return nil, "no definition found for symbol under cursor"
+    return nil, "no definition found for symbol under cursor", "absent"
   end
 
   local fbuf = lsp.load_buf(loc.uri)
@@ -429,12 +437,12 @@ function M.function_scope(client, bufnr, win, token, pos)
       })
       populate_from_class(ctx, root, cls, tbuf, 1, { [loc_key(realloc)] = true })
       if async.stale(token) then
-        return nil, "stale"
+        return nil, "stale", "stale"
       end
       if #root.children > 0 then
         run_enrichment(ctx)
         if async.stale(token) then
-          return nil, "stale"
+          return nil, "stale", "stale"
         end
         -- category may have been corrected by the base walk (UserCreate case)
         root.type.display = header()
@@ -457,7 +465,7 @@ function M.function_scope(client, bufnr, win, token, pos)
   if not info or unannotated(info) then
     local decl = lsp.locate(client, bufnr, pos[1] - 1, pos[2], token, "textDocument/declaration")
     if async.stale(token) then
-      return nil, "stale"
+      return nil, "stale", "stale"
     end
     if decl and loc_key(decl) ~= loc_key(loc) then
       local dbuf = lsp.load_buf(decl.uri)
@@ -473,7 +481,7 @@ function M.function_scope(client, bufnr, win, token, pos)
     end
   end
   if not info then
-    return nil, "symbol does not resolve to a function definition or class"
+    return nil, "symbol does not resolve to a function definition or class", "absent"
   end
 
   -- overloads (U4): sibling @overload defs become stacked group roots, each
@@ -553,7 +561,7 @@ function M.function_scope(client, bufnr, win, token, pos)
     if ann and #ann.refs > 0 then
       attach_type(ctx, node, fbuf, ann.refs, 1, {})
       if async.stale(token) then
-        return nil, "stale"
+        return nil, "stale", "stale"
       end
     elseif not p.type_node and p.name_row then
       -- unannotated param: pyright still infers a type — hover the name
@@ -576,18 +584,18 @@ function M.function_scope(client, bufnr, win, token, pos)
     if #ann.refs > 0 then
       attach_type(ctx, node, fbuf, ann.refs, 1, {})
       if async.stale(token) then
-        return nil, "stale"
+        return nil, "stale", "stale"
       end
     end
     table.insert(roots, node)
   end
 
   if #roots == 0 then
-    return nil, ("%s has no parameters or return annotation"):format(info.name)
+    return nil, ("%s has no parameters or return annotation"):format(info.name), "empty"
   end
   run_enrichment(ctx)
   if async.stale(token) then
-    return nil, "stale"
+    return nil, "stale", "stale"
   end
   require("typescope.examples").annotate(roots)
 

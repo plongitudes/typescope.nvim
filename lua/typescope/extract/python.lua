@@ -49,6 +49,27 @@ local function clean(s)
   return (s:gsub("%s+", " "))
 end
 
+-- Stub files write `= ...` for "has a default, value unspecified", and echoing
+-- that verbatim renders as though the default IS Ellipsis. It is not a value —
+-- `unwrap_default` already returns nil for the `Field(...)` sentinel, and
+-- examples/init.lua's has_real_default already excludes "...". Only the RENDER
+-- disagreed.
+--
+-- Normalised to the same `…` the header already builds for an elided default
+-- (`entry.name .. "=…"`), so one idea has one spelling. Deliberately NOT dropped
+-- entirely: `= …` is what distinguishes an optional parameter from a required
+-- one in the row — in `log.add`, `sink` is bare and every other parameter is
+-- defaulted.
+---@param s string?
+---@return string?
+local function default_text(s)
+  if s == nil then
+    return nil
+  end
+  local c = clean(s)
+  return c == "..." and "…" or c
+end
+
 local function walk_up(node, want)
   while node do
     if node:type() == want then
@@ -174,14 +195,14 @@ function M.function_info(src, row, col)
         shape_token = entry.name
       elseif t == "default_parameter" then
         name_node = field1(p, "name")
-        entry = { name = text(name_node, src), default = clean(text(field1(p, "value"), src)) }
+        entry = { name = text(name_node, src), default = default_text(text(field1(p, "value"), src)) }
         shape_token = entry.name .. "=…"
       elseif t == "typed_default_parameter" then
         name_node = field1(p, "name")
         entry = {
           name = text(name_node, src),
           type_node = field1(p, "type"),
-          default = clean(text(field1(p, "value"), src)),
+          default = default_text(text(field1(p, "value"), src)),
         }
         shape_token = entry.name .. "=…"
       elseif t == "list_splat_pattern" or t == "dictionary_splat_pattern" then
@@ -804,7 +825,7 @@ function M.type_at(src, row, col)
             table.insert(result.fields, {
               name = fname,
               type_node = inner,
-              default = right and unwrap_default(right, src) or nil,
+              default = right and default_text(unwrap_default(right, src)) or nil,
               badge = badge,
             })
           end
