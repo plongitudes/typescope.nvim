@@ -1,5 +1,7 @@
 # Agent Instructions
 
+> **Human contributors: see [CONTRIBUTING.md](CONTRIBUTING.md) instead.** This file is instructions for AI coding agents working in this repo, and its workflow rules (including the push requirements below) are aimed at them, not at you.
+
 This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
 
 ## Quick Reference
