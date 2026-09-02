@@ -269,6 +269,47 @@ check("position on RHS is not the alias name", py.alias_at(alias_src, 1, 12) == 
 local tstmt_rhs = py.alias_at("type Vec = list[float]\n", 0, 5)
 check("3.12 type statement alias", tstmt_rhs ~= nil and tstmt_rhs:type() == "type")
 
+---------------------------------------------------------------- declaration_at
+-- The guard that keeps an attribute's definition from walking up to whatever
+-- method it happens to sit in (typescope.nvim-ced). It must fire on annotated
+-- declarations and on nothing else — a `def` name and a typed parameter are
+-- the two that MUST stay nil, because those are the cases the walk-up gets
+-- right today.
+local decl_src = [[
+class Bar:
+    def __init__(self, inflow: dict, bar: Bar) -> None:
+        self.bar: Bar = Bar()
+        self.strong: str = "bar string"
+        self.untyped = compute()
+        local_ann: Widget = Widget()
+
+field: Widget = Widget()
+plain = 42
+
+def test():
+    pass
+]]
+local function decl(row, col)
+  local d = py.declaration_at(decl_src, row, col)
+  return d and d.name or nil
+end
+-- fires: the shapes whose definition is a declaration
+check("annotated self attribute", decl(2, 13) == "self.bar")
+check("annotated self attribute, builtin type", decl(3, 13) == "self.strong")
+check("annotated local inside a method", decl(5, 8) == "local_ann")
+check("annotated assignment at class level", decl(7, 0) == "field")
+-- the type node is what the caller resolves, so it has to be the annotation
+local d = py.declaration_at(decl_src, 2, 13)
+check("returns the annotation node", d ~= nil and d.type_node:type() == "type")
+-- does NOT fire: everything the existing walk-up already answers correctly
+check("a def name is not a declaration", decl(10, 4) == nil)
+check("a typed parameter is not a declaration", decl(1, 23) == nil)
+check("an untyped assignment has nothing to report", decl(4, 13) == nil)
+check("a plain value assignment likewise", decl(8, 0) == nil)
+-- the RHS of an annotated assignment walks up to the very same node; answering
+-- there would be an accident rather than a read
+check("position on the RHS is not the declaration", decl(2, 24) == nil)
+
 ---------------------------------------------------------------- hover parsing
 local function hov(value)
   return { "```python", value, "```" }

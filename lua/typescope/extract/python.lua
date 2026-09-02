@@ -360,6 +360,49 @@ end
 ---@param row integer
 ---@param col integer
 ---@return TSNode? rhs
+--- The annotated declaration whose target sits at (row, col), if any.
+---
+--- Exists because `definition` on a variable or attribute lands where it was
+--- DECLARED — `self.bar: Bar = Bar()` — which is inside a method. A walk up to
+--- the enclosing function_definition therefore always succeeds and always
+--- wins, so TypeScope drew __init__ instead of the type actually hovered.
+--- Callers ask this BEFORE function_info and hand a hit to the class branch.
+---
+--- Deliberately narrow: nil unless the position is on the left of an
+--- ANNOTATED assignment. A `def` name's parent is function_definition rather
+--- than assignment, so hovering a function name is unaffected by
+--- construction; a plain `x = 42` carries no annotation to report and keeps
+--- falling through to K.
+---@param src integer|string
+---@param row integer 0-based
+---@param col integer 0-based byte
+---@return { name: string, type_node: TSNode }?
+function M.declaration_at(src, row, col)
+  local node = node_at(src, row, col)
+  if not node then
+    return nil
+  end
+  local assign = walk_up(node, "assignment")
+  if not assign then
+    return nil
+  end
+  local left, ann = field1(assign, "left"), field1(assign, "type")
+  if not left or not ann then
+    return nil
+  end
+  -- the position must be on the declared name, not somewhere in the RHS:
+  -- `Bar()` on the right of `self.bar: Bar = Bar()` walks up to this very same
+  -- assignment, and answering with Bar there would be an accident, not a read.
+  local srow, scol, erow, ecol = left:range()
+  if row < srow or row > erow then
+    return nil
+  end
+  if (row == srow and col < scol) or (row == erow and col > ecol) then
+    return nil
+  end
+  return { name = text(left, src), type_node = ann }
+end
+
 function M.alias_at(src, row, col)
   local node = node_at(src, row, col)
   if not node then

@@ -363,6 +363,57 @@ attach_type = function(ctx, node, src_buf, refs, depth, ancestry, force_single)
   end
 end
 
+--- Draw a class's own structure as the entire float: the type IS the answer.
+--- Shared by the two ways of arriving at one — the cursor landing on a class
+--- (`Foo()`), and an annotated declaration resolving to it (`florble.bar`).
+--- class_at_location handles the import hop and the typeshed guard, so `str`
+--- won't explode here.
+---@return typescope.Node[]? roots
+---@return table? meta
+---@return string? why "stale" only; nil means "no class shape here"
+local function class_scope(ctx, loc, cache_key, cache_tick)
+  local cls, tbuf, realloc = class_at_location(ctx, loc, 0)
+  if not cls or not (#cls.fields > 0 or #cls.methods > 0 or #(cls.bases or {}) > 0) then
+    return nil
+  end
+  -- header declares the ancestry up top: (pydantic ← UserBase)
+  local function header()
+    local names = {}
+    for _, base in ipairs(cls.bases or {}) do
+      table.insert(names, base.name)
+    end
+    return "(" .. cls.category .. (#names > 0 and " ← " .. table.concat(names, ", ") or "") .. ")"
+  end
+  local root = model.new({
+    name = cls.class_name,
+    kind = "type",
+    expanded = true,
+    type = {
+      raw = cls.class_name,
+      display = header(),
+      category = cls.category,
+    },
+  })
+  populate_from_class(ctx, root, cls, tbuf, 1, { [loc_key(realloc)] = true })
+  if async.stale(ctx.token) then
+    return nil, nil, "stale"
+  end
+  if #root.children == 0 then
+    return nil
+  end
+  run_enrichment(ctx)
+  if async.stale(ctx.token) then
+    return nil, nil, "stale"
+  end
+  -- category may have been corrected by the base walk (UserCreate case)
+  root.type.display = header()
+  require("typescope.examples").annotate({ root })
+  -- no call-shape header for a class hover: the root row is the header
+  local roots, meta = { root }, { docstring = cls.docstring }
+  cache_put(cache_key, { roots = roots, meta = meta, tick = cache_tick })
+  return roots, meta
+end
+
 --- Full pipeline for the function under the cursor. Coroutine context only.
 ---@param client vim.lsp.Client
 ---@param bufnr integer source buffer
@@ -378,8 +429,10 @@ end
 ---   "stale"  a newer request superseded this one; never worth reporting
 ---   "absent" not a Python buffer, not a symbol, or not a function/class. K's
 ---            job, and saying so on every hover would be unbearable
----   "empty"  a function WAS resolved and carries no parameters and no return
----            annotation. A real decision, currently invisible on the hover path
+---   "empty"  a symbol WAS resolved and understood, and has nothing to draw:
+---            a function with no parameters and no return annotation, or a
+---            declaration whose type carries no structure (`self.x: str`). A
+---            real decision, invisible on the hover path without saying so
 function M.function_scope(client, bufnr, win, token, pos)
   local ft = vim.bo[bufnr].filetype
   local impl = extract.get(ft)
@@ -410,48 +463,56 @@ function M.function_scope(client, bufnr, win, token, pos)
   end
 
   local frow, fcol = lsp.range_start(fbuf, loc.range)
-  local info = impl.function_info(fbuf, frow, fcol)
-  if not info then
-    -- A class under the cursor is the most TypeScope-shaped thing there is:
-    -- show the type's own structure directly (class_at_location handles the
-    -- import hop and the typeshed guard, so `str` won't explode here).
-    local cls, tbuf, realloc = class_at_location(ctx, loc, 0)
-    if cls and (#cls.fields > 0 or #cls.methods > 0 or #(cls.bases or {}) > 0) then
-      -- header declares the ancestry up top: (pydantic ← UserBase)
-      local function header()
-        local names = {}
-        for _, base in ipairs(cls.bases or {}) do
-          table.insert(names, base.name)
-        end
-        return "(" .. cls.category .. (#names > 0 and " ← " .. table.concat(names, ", ") or "") .. ")"
-      end
-      local root = model.new({
-        name = cls.class_name,
-        kind = "type",
-        expanded = true,
-        type = {
-          raw = cls.class_name,
-          display = header(),
-          category = cls.category,
-        },
-      })
-      populate_from_class(ctx, root, cls, tbuf, 1, { [loc_key(realloc)] = true })
+
+  -- `definition` on a variable or attribute lands on its DECLARATION, and for
+  -- `self.bar: Bar = Bar()` that sits inside __init__. function_info below
+  -- walks up to the nearest function_definition, so for an attribute that walk
+  -- ALWAYS succeeds and always wins — TypeScope then draws, confidently, a
+  -- symbol the user did not hover. So ask first whether the definition IS a
+  -- declaration, and if it is, resolve what it was declared AS.
+  local declared = impl.declaration_at and impl.declaration_at(fbuf, frow, fcol)
+  if declared then
+    local ann = impl.annotation(fbuf, declared.type_node)
+    -- A pure builtin annotation (`self.strong: str`) resolves to no refs at
+    -- all. There is no structure to draw — but falling through would answer
+    -- with the enclosing method, which is the exact confusion this guard
+    -- exists to stop. Decline instead: K still falls through to the LSP, which
+    -- says `(variable) strong: str`, and that is the honest answer.
+    if #ann.refs == 0 then
+      return nil, ("%s is %s, which has no structure to show"):format(declared.name, ann.display), "empty"
+    end
+    -- One ref only. A union (`x: A | B`) has more, and a class float has a
+    -- single root, so there is no shape for it to become here; it keeps its
+    -- existing behaviour rather than growing a half-designed union root.
+    -- Refs that resolve to nothing must also fall through, because that is how
+    -- an annotated alias (`X: TypeAlias = Foo`) reaches the alias path below.
+    if #ann.refs == 1 then
+      local tloc = lsp.definition(client, fbuf, ann.refs[1].row, ann.refs[1].col, token)
       if async.stale(token) then
         return nil, "stale", "stale"
       end
-      if #root.children > 0 then
-        run_enrichment(ctx)
-        if async.stale(token) then
+      if tloc then
+        local roots, meta, why = class_scope(ctx, tloc, cache_key, cache_tick)
+        if why == "stale" then
           return nil, "stale", "stale"
         end
-        -- category may have been corrected by the base walk (UserCreate case)
-        root.type.display = header()
-        require("typescope.examples").annotate({ root })
-        -- no call-shape header for a class hover: the root row is the header
-        local roots, meta = { root }, { docstring = cls.docstring }
-        cache_put(cache_key, { roots = roots, meta = meta, tick = cache_tick })
-        return roots, meta
+        if roots then
+          return roots, meta
+        end
       end
+    end
+  end
+
+  local info = impl.function_info(fbuf, frow, fcol)
+  if not info then
+    -- A class under the cursor is the most TypeScope-shaped thing there is:
+    -- show the type's own structure directly.
+    local roots, meta, why = class_scope(ctx, loc, cache_key, cache_tick)
+    if why == "stale" then
+      return nil, "stale", "stale"
+    end
+    if roots then
+      return roots, meta
     end
   end
 
