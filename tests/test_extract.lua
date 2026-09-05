@@ -310,6 +310,40 @@ check("a plain value assignment likewise", decl(8, 0) == nil)
 -- there would be an accident rather than a read
 check("position on the RHS is not the declaration", decl(2, 24) == nil)
 
+-- typescope.nvim-olj: what the declaration guard ROUTES on. A count test says
+-- `dict[str, A]`, `list[A]` and `A | None` are single-class declarations —
+-- each carries exactly one non-builtin ref, dict/list/str/None all being
+-- BUILTINS — and the float then loses the container or the nullability. The
+-- test that tells them apart is attach_type's: one ref AND a display equal to
+-- that ref's name.
+local wrap_src = [[
+class Holder:
+    def __init__(self) -> None:
+        self.plain: A = A()
+        self.mapping: dict[str, A] = {}
+        self.opt: A | None = None
+        self.both: A | B = A()
+]]
+local function wrap_ann(row)
+  local wd = py.declaration_at(wrap_src, row, 13)
+  return wd and py.annotation(wrap_src, wd.type_node) or nil
+end
+-- covers = the annotation IS that one class, so the class float is the answer
+local function covers(row)
+  local a = wrap_ann(row)
+  return a ~= nil and #a.refs == 1 and a.display == a.refs[1].name
+end
+check("a plain class covers its whole annotation", covers(2))
+check("a wrapped class does not cover it", not covers(3))
+check("an optional class does not cover it", not covers(4))
+check("a two-class union does not cover it", not covers(5))
+-- the halves of the test, separately: ref COUNT alone cannot tell 2 from 3/4
+check("dict[str, A] still has exactly one ref", #wrap_ann(3).refs == 1)
+check("A | None still has exactly one ref", #wrap_ann(4).refs == 1)
+check("the container survives in the display", wrap_ann(3).display == "dict[str, A]")
+check("the nullability survives in the display", wrap_ann(4).display == "A | None")
+check("a union keeps both refs and both names", #wrap_ann(5).refs == 2 and wrap_ann(5).display == "A | B")
+
 ---------------------------------------------------------------- hover parsing
 local function hov(value)
   return { "```python", value, "```" }

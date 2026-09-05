@@ -481,12 +481,15 @@ function M.function_scope(client, bufnr, win, token, pos)
     if #ann.refs == 0 then
       return nil, ("%s is %s, which has no structure to show"):format(declared.name, ann.display), "empty"
     end
-    -- One ref only. A union (`x: A | B`) has more, and a class float has a
-    -- single root, so there is no shape for it to become here; it keeps its
-    -- existing behaviour rather than growing a half-designed union root.
+    -- One ref that IS the whole annotation (`self.bar: Bar`): the class is the
+    -- answer and class_scope draws it as the entire float. `dict[str, Bar]`,
+    -- `list[Bar]` and `Bar | None` carry exactly one non-builtin ref too, but
+    -- the wrapper is part of what the symbol IS — collapsing to Bar there
+    -- heads the float with a type the symbol does not have (olj). Same test
+    -- attach_type uses for `single`; do not re-derive half of it.
     -- Refs that resolve to nothing must also fall through, because that is how
     -- an annotated alias (`X: TypeAlias = Foo`) reaches the alias path below.
-    if #ann.refs == 1 then
+    if #ann.refs == 1 and ann.display == ann.refs[1].name then
       local tloc = lsp.definition(client, fbuf, ann.refs[1].row, ann.refs[1].col, token)
       if async.stale(token) then
         return nil, "stale", "stale"
@@ -500,6 +503,28 @@ function M.function_scope(client, bufnr, win, token, pos)
           return roots, meta
         end
       end
+    else
+      -- Wrapped or multi-class: the declaration itself is the root row, the
+      -- annotation is its type, and attach_type nests a child per member —
+      -- the same tree the parameter path already builds for `m: dict[str, A]`.
+      local node = model.new({
+        name = declared.name,
+        kind = "field",
+        type = type_info(ann.display, ann.refs),
+      })
+      attach_type(ctx, node, fbuf, ann.refs, 1, {})
+      if async.stale(token) then
+        return nil, "stale", "stale"
+      end
+      node.state.expanded = #node.children > 0
+      run_enrichment(ctx)
+      if async.stale(token) then
+        return nil, "stale", "stale"
+      end
+      require("typescope.examples").annotate({ node })
+      local roots, meta = { node }, {}
+      cache_put(cache_key, { roots = roots, meta = meta, tick = cache_tick })
+      return roots, meta
     end
   end
 
