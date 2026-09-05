@@ -450,7 +450,13 @@ end
 ---@param lines string[] hover markdown lines
 ---@param name string the symbol that was hovered
 ---@return string?
-function M.evaluated_from_hover(lines, name)
+--- The code block of a pyright hover, joined into one line. Pyright PRETTY-
+--- PRINTS a long signature across several lines, so the join has to happen
+--- before any parse: `def f(` / `  a: int` / `) -> None` is one signature, not
+--- three lines of anything.
+---@param lines string[] hover markdown lines
+---@return string?
+local function hover_code(lines)
   local code = {}
   local inside = false
   for _, l in ipairs(lines) do
@@ -464,7 +470,12 @@ function M.evaluated_from_hover(lines, name)
     end
   end
   local sig = vim.trim(table.concat(code, " "))
-  if sig == "" then
+  return sig ~= "" and sig or nil
+end
+
+function M.evaluated_from_hover(lines, name)
+  local sig = hover_code(lines)
+  if not sig then
     return nil
   end
   if sig:sub(1, 1) == "(" then
@@ -473,6 +484,34 @@ function M.evaluated_from_hover(lines, name)
   local last = name:match("[%w_]+$") or name
   local rest = sig:match("^" .. vim.pesc(last) .. "%s*[:=]%s*(.+)$")
   local out = clean(rest or sig)
+  return out ~= "" and out or nil
+end
+
+--- The RETURN type out of a pyright hover for a `def` (typescope.nvim-0mv).
+--- evaluated_from_hover answers with the WHOLE signature here -- there is no
+--- `name: type` shape to strip off a `def` -- so an unannotated return needs
+--- its own read. The parameter list is skipped with %b() rather than by
+--- searching for `->`, because a default value or a Callable parameter can
+--- carry an arrow of its own before the signature's.
+---@param lines string[] hover markdown lines
+---@param name string the function that was hovered
+---@return string? the text after the signature's own arrow
+function M.return_from_hover(lines, name)
+  local sig = hover_code(lines)
+  if not sig then
+    return nil
+  end
+  if sig:sub(1, 1) == "(" then
+    sig = sig:gsub("^%b()%s*", "") -- the `(function)` / `(method)` kind prefix
+  end
+  local last = name:match("[%w_]+$") or name
+  local _, rest = sig:match("^def%s+" .. vim.pesc(last) .. "%s*(%b())%s*%->%s*(.+)$")
+  if not rest then
+    return nil
+  end
+  -- pyright appends `(+3 overloads)` to a signature that is one of several
+  rest = rest:gsub("%s*%(%+%d+%s+overloads?%)%s*$", "")
+  local out = clean(rest)
   return out ~= "" and out or nil
 end
 

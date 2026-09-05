@@ -118,8 +118,25 @@ end
 ---@param node typescope.Node
 ---@param src_buf integer
 ---@param refs table[] annotation refs (position candidates, tried in order)
-local function queue_enrichment(ctx, node, src_buf, refs)
-  table.insert(ctx.enrich, { node = node, src_buf = src_buf, refs = refs })
+---@param parse? "return" read the RETURN type out of a `def` hover instead of
+--- the whole evaluated shape (typescope.nvim-0mv)
+local function queue_enrichment(ctx, node, src_buf, refs, parse)
+  table.insert(ctx.enrich, { node = node, src_buf = src_buf, refs = refs, parse = parse })
+end
+
+--- Is an inferred return type worth a row? `None` is what EVERY function
+--- without a return statement infers, `Any`/`Unknown` is pyright saying it does
+--- not know, and `Self@C` is a diagnostic notation rather than a Python type.
+--- Announcing those is worse than declining -- and keeping `None` out is also
+--- what keeps a receiver-only `def n(self): pass` reporting itself as empty,
+--- the last verified repro for that decline (typescope.nvim-0mv WATCH OUT).
+---@param t string?
+---@return boolean
+local function informative_return(t)
+  if not t or t == "" then
+    return false
+  end
+  return t ~= "None" and t ~= "Any" and t ~= "Unknown" and not t:find("Self@", 1, true)
 end
 
 --- Fire every queued enrichment hover concurrently, then apply the first
@@ -136,7 +153,7 @@ local function run_enrichment(ctx)
       table.insert(cands, { ref = item.refs[i] })
       total = total + 1
     end
-    table.insert(jobs, { node = item.node, src_buf = item.src_buf, cands = cands })
+    table.insert(jobs, { node = item.node, src_buf = item.src_buf, cands = cands, parse = item.parse })
   end
   ctx.enrich = {}
   if total == 0 then
@@ -170,7 +187,8 @@ local function run_enrichment(ctx)
   for _, job in ipairs(jobs) do
     for _, cand in ipairs(job.cands) do
       local lines = lsp.hover_result_lines(cand.result)
-      local evaluated = lines and ctx.impl.evaluated_from_hover(lines, cand.ref.name)
+      local read = job.parse == "return" and ctx.impl.return_from_hover or ctx.impl.evaluated_from_hover
+      local evaluated = lines and read(lines, cand.ref.name)
       if
         evaluated
         and evaluated ~= job.node.type.display
@@ -676,12 +694,36 @@ function M.function_scope(client, bufnr, win, token, pos)
     table.insert(roots, node)
   end
 
-  if #roots == 0 then
-    return nil, ("%s has no parameters or return annotation"):format(info.name), "empty"
+  -- No return ANNOTATION does not mean no return type: pyright has already
+  -- worked one out and is sitting on it (typescope.nvim-0mv). Ask by hovering
+  -- the `def` name -- frow/fcol, which is where definition landed and where a
+  -- stub hop above would have re-aimed us -- and join the same parallel
+  -- enrichment fan-out the unannotated params use, so this costs a request in
+  -- an existing batch rather than a new round trip. The row is PROVISIONAL:
+  -- most inferences are worthless (`-> None`, `-> Any`), and a float that
+  -- announces those is worse than one that declines.
+  local inferred
+  if not info.return_type then
+    inferred = model.new({
+      name = "returns",
+      kind = "return",
+      type = { raw = "Any", display = "Any", category = "builtin" },
+    })
+    queue_enrichment(ctx, inferred, fbuf, { { name = info.name, row = frow, col = fcol } }, "return")
+    table.insert(roots, inferred)
   end
+
   run_enrichment(ctx)
   if async.stale(token) then
     return nil, "stale", "stale"
+  end
+  if inferred and not informative_return(inferred.evaluated) then
+    table.remove(roots) -- appended last, so this is it
+    inferred = nil
+  end
+
+  if #roots == 0 then
+    return nil, ("%s has no parameters or return annotation"):format(info.name), "empty"
   end
   require("typescope.examples").annotate(roots)
 

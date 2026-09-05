@@ -366,6 +366,37 @@ for _, case in ipairs(hover_cases) do
 end
 check("empty hover yields nil", py.evaluated_from_hover({ "```python", "```" }, "x") == nil)
 
+-- typescope.nvim-0mv: an unannotated return has to be read out of the hover's
+-- SIGNATURE, which evaluated_from_hover hands back whole because a `def` has
+-- no `name: type` shape to strip. Measured hovers, basedpyright 2026-09-04.
+local return_cases = {
+  { hov("(function) def test() -> tuple[Bar, None]"), "test", "tuple[Bar, None]" },
+  { hov("(method) def m(self: Self@E) -> None"), "m", "None" },
+  { hov("(function) def vacation(destination: PurePath) -> Any"), "vacation", "Any" },
+  -- an arrow inside the PARAMETER list must not end the match early
+  { hov("(function) def f(cb: Callable[[int], str] = lambda x: str(x)) -> bool"), "f", "bool" },
+  { hov("(function) def g() -> Callable[[int], None]"), "g", "Callable[[int], None]" },
+  -- pyright pretty-prints a long signature over several lines; the join has to
+  -- happen before the parse, and %b() has to survive it
+  {
+    { "```python", "(method) def bar_method_a(", "    self: Self@Bar,", "    numpy_test: Any", ") -> None", "```" },
+    "bar_method_a",
+    "None",
+  },
+  { hov("(function) def open(file: str) -> TextIOWrapper (+3 overloads)"), "open", "TextIOWrapper" },
+  -- a dotted ref (`pkg.inner`) matches on its final name, as elsewhere
+  { hov("(function) def inner(self) -> int"), "pkg.inner", "int" },
+}
+for _, case in ipairs(return_cases) do
+  local got = py.return_from_hover(case[1], case[2])
+  check(("return parse %s -> %s"):format(case[2], case[3]), got == case[3], got)
+end
+-- shapes that are NOT a def signature answer nothing rather than guessing
+check("a variable hover has no return type", py.return_from_hover(hov("(variable) x: dict[str, int]"), "x") == nil)
+check("a class hover has no return type", py.return_from_hover(hov("(class) Widget"), "Widget") == nil)
+check("an annotationless def answers nothing", py.return_from_hover(hov("(function) def f(a)"), "f") == nil)
+check("empty hover yields no return type", py.return_from_hover({ "```python", "```" }, "f") == nil)
+
 -- name positions recorded for unannotated params
 local pos_info = py.function_info("def f(plain, typed: int): ...", 0, 4)
 check(
