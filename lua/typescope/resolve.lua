@@ -746,7 +746,6 @@ function M.function_scope(client, bufnr, win, token, pos)
   end
   if inferred and not informative_inference(inferred.evaluated) then
     table.remove(roots) -- appended last, so this is it
-    inferred = nil
   end
 
   if #roots == 0 then
