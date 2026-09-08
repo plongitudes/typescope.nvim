@@ -387,7 +387,14 @@ function M.declaration_at(src, row, col)
     return nil
   end
   local left, ann = field1(assign, "left"), field1(assign, "type")
-  if not left or not ann then
+  if not left then
+    return nil
+  end
+  -- An UNANNOTATED assignment is still a declaration; pyright has inferred a
+  -- type for it and TypeScope can ask (typescope.nvim-0mv). Reported only for
+  -- ATTRIBUTES: a bare `X = SomeClass` is how an alias reaches alias_at later
+  -- in resolve's chain, and claiming it here would take that path away.
+  if not ann and left:type() ~= "attribute" then
     return nil
   end
   -- the position must be on the declared name, not somewhere in the RHS:
@@ -400,7 +407,11 @@ function M.declaration_at(src, row, col)
   if (row == srow and col < scol) or (row == erow and col > ecol) then
     return nil
   end
-  return { name = text(left, src), type_node = ann }
+  -- where a hover answers: the FINAL identifier, so `self.numpy_test` asks
+  -- about numpy_test rather than about self
+  local name_node = left:type() == "attribute" and field1(left, "attribute") or left
+  local nrow, ncol = name_node:range()
+  return { name = text(left, src), type_node = ann, name_row = nrow, name_col = ncol }
 end
 
 function M.alias_at(src, row, col)

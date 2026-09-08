@@ -124,7 +124,7 @@ local function queue_enrichment(ctx, node, src_buf, refs, parse)
   table.insert(ctx.enrich, { node = node, src_buf = src_buf, refs = refs, parse = parse })
 end
 
---- Is an inferred return type worth a row? `None` is what EVERY function
+--- Is an inferred type worth a row? `None` is what EVERY function
 --- without a return statement infers, `Any`/`Unknown` is pyright saying it does
 --- not know, and `Self@C` is a diagnostic notation rather than a Python type.
 --- Announcing those is worse than declining -- and keeping `None` out is also
@@ -132,7 +132,7 @@ end
 --- the last verified repro for that decline (typescope.nvim-0mv WATCH OUT).
 ---@param t string?
 ---@return boolean
-local function informative_return(t)
+local function informative_inference(t)
   if not t or t == "" then
     return false
   end
@@ -489,6 +489,33 @@ function M.function_scope(client, bufnr, win, token, pos)
   -- symbol the user did not hover. So ask first whether the definition IS a
   -- declaration, and if it is, resolve what it was declared AS.
   local declared = impl.declaration_at and impl.declaration_at(fbuf, frow, fcol)
+  if declared and not declared.type_node then
+    -- `self.numpy_test = numpy.f2py.run_main(...)`: no annotation to read, but
+    -- pyright has already worked the type out (typescope.nvim-0mv). Ask by
+    -- hovering the attribute's own name. There are no positions inside a hover
+    -- string, so there is nothing to chase — this is a leaf row carrying the
+    -- evaluated type, which is the honest limit of what one hover buys.
+    local node = model.new({
+      name = declared.name,
+      kind = "field",
+      type = { raw = "Any", display = "Any", category = "builtin" },
+    })
+    queue_enrichment(ctx, node, fbuf, { { name = declared.name, row = declared.name_row, col = declared.name_col } })
+    run_enrichment(ctx)
+    if async.stale(token) then
+      return nil, "stale", "stale"
+    end
+    if informative_inference(node.evaluated) then
+      require("typescope.examples").annotate({ node })
+      local roots, meta = { node }, {}
+      cache_put(cache_key, { roots = roots, meta = meta, tick = cache_tick })
+      return roots, meta
+    end
+    -- Nothing known. Falling through would answer with the enclosing method,
+    -- which is the confusion this guard exists to stop, so decline instead —
+    -- K still falls through to the LSP's own word on it.
+    return nil, ("%s has no annotation and nothing was inferred for it"):format(declared.name), "empty"
+  end
   if declared then
     local ann = impl.annotation(fbuf, declared.type_node)
     -- A pure builtin annotation (`self.strong: str`) resolves to no refs at
@@ -717,7 +744,7 @@ function M.function_scope(client, bufnr, win, token, pos)
   if async.stale(token) then
     return nil, "stale", "stale"
   end
-  if inferred and not informative_return(inferred.evaluated) then
+  if inferred and not informative_inference(inferred.evaluated) then
     table.remove(roots) -- appended last, so this is it
     inferred = nil
   end

@@ -304,8 +304,23 @@ check("returns the annotation node", d ~= nil and d.type_node:type() == "type")
 -- does NOT fire: everything the existing walk-up already answers correctly
 check("a def name is not a declaration", decl(10, 4) == nil)
 check("a typed parameter is not a declaration", decl(1, 23) == nil)
-check("an untyped assignment has nothing to report", decl(4, 13) == nil)
-check("a plain value assignment likewise", decl(8, 0) == nil)
+check("a plain value assignment has nothing to report", decl(8, 0) == nil)
+-- typescope.nvim-0mv: an unannotated ATTRIBUTE is still a declaration. There is
+-- no type node to read, but pyright has inferred one and resolve can hover for
+-- it — where the old contract reported nothing and let the walk-up answer with
+-- the enclosing __init__.
+local ud = py.declaration_at(decl_src, 4, 13)
+check("an untyped attribute is a declaration", ud ~= nil and ud.name == "self.untyped")
+check("with no type node to read", ud ~= nil and ud.type_node == nil)
+-- the hover has to land on the final identifier: asking at `self` answers
+-- about the class, not about the attribute
+check("and a hover position on its own name", ud ~= nil and ud.name_row == 4 and ud.name_col == 13)
+check("annotated declarations carry the position too", d ~= nil and d.name_row == 2 and d.name_col == 13)
+-- but NOT for a bare identifier: `X = SomeClass` is how an alias reaches
+-- alias_at further down resolve's chain, and claiming it here would take that
+-- path away from it
+check("an unannotated local is left alone", py.declaration_at("def f():\n    x = compute()\n", 1, 4) == nil)
+check("an alias-shaped assignment is left alone", py.declaration_at("X = SomeClass\n", 0, 0) == nil)
 -- the RHS of an annotated assignment walks up to the very same node; answering
 -- there would be an accident rather than a read
 check("position on the RHS is not the declaration", decl(2, 24) == nil)
