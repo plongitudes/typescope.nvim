@@ -451,16 +451,6 @@ function M.alias_at(src, row, col)
   return type_shaped and right or nil
 end
 
---- Extract the evaluated type from a pyright hover response for `name`.
---- Pyright renders hovers like:
----   (type alias) LoopSetupType: type[Literal['auto', 'none']]
----   (parameter) count: int
----   (variable) x: dict[str, int]
---- Returns the right-hand side, or the whole signature when it has no
---- name-prefix shape, or nil when the hover holds nothing useful.
----@param lines string[] hover markdown lines
----@param name string the symbol that was hovered
----@return string?
 --- The code block of a pyright hover, joined into one line. Pyright PRETTY-
 --- PRINTS a long signature across several lines, so the join has to happen
 --- before any parse: `def f(` / `  a: int` / `) -> None` is one signature, not
@@ -484,6 +474,16 @@ local function hover_code(lines)
   return sig ~= "" and sig or nil
 end
 
+--- Extract the evaluated type from a pyright hover response for `name`.
+--- Pyright renders hovers like:
+---   (type alias) LoopSetupType: type[Literal['auto', 'none']]
+---   (parameter) count: int
+---   (variable) x: dict[str, int]
+--- Returns the right-hand side, or the whole signature when it has no
+--- name-prefix shape, or nil when the hover holds nothing useful.
+---@param lines string[] hover markdown lines
+---@param name string the symbol that was hovered
+---@return string?
 function M.evaluated_from_hover(lines, name)
   local sig = hover_code(lines)
   if not sig then

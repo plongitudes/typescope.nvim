@@ -109,6 +109,17 @@ local function type_info(display, refs)
   }
 end
 
+-- Node ids are dotted paths, and both consumers of that shape split on the
+-- dot: model.parent strips the last segment, and the collapse-all cursor-
+-- follow takes the first one to find the root. An attribute declaration's
+-- name is raw source text, though — `self.foo` arrives already carrying a
+-- dot, which would make the root's own id read as two segments. Root the
+-- tree at the last segment so the id stays one identifier; `name` keeps the
+-- full text, because `self.foo` is what the user hovered and wants to see.
+local function declared_id(name)
+  return name:match("[%w_]+$") or name
+end
+
 --- Structural resolution came up empty for a node (alias, TypeVar,
 --- unresolvable, unannotated param): queue it for hover enrichment. The
 --- hovers all fire in PARALLEL at the end of the pipeline (U2) — they are
@@ -432,6 +443,36 @@ local function class_scope(ctx, loc, cache_key, cache_tick)
   return roots, meta
 end
 
+--- Draw the declaration itself as the root row: `self.foo` heads the float,
+--- its annotation is the type, and attach_type nests a child per member of
+--- that annotation. The fallback shape whenever the annotation is not simply
+--- one drawable class — and, when attach_type can reach nothing (typeshed),
+--- an honest leaf row saying what the symbol was declared as.
+---@return typescope.Node[]? roots
+---@return table? meta
+---@return string? why "stale" only
+local function declaration_scope(ctx, declared, ann, fbuf, token, cache_key, cache_tick)
+  local node = model.new({
+    id = declared_id(declared.name),
+    name = declared.name,
+    kind = "field",
+    type = type_info(ann.display, ann.refs),
+  })
+  attach_type(ctx, node, fbuf, ann.refs, 1, {})
+  if async.stale(token) then
+    return nil, nil, "stale"
+  end
+  node.state.expanded = #node.children > 0
+  run_enrichment(ctx)
+  if async.stale(token) then
+    return nil, nil, "stale"
+  end
+  require("typescope.examples").annotate({ node })
+  local roots, meta = { node }, {}
+  cache_put(cache_key, { roots = roots, meta = meta, tick = cache_tick })
+  return roots, meta
+end
+
 --- Full pipeline for the function under the cursor. Coroutine context only.
 ---@param client vim.lsp.Client
 ---@param bufnr integer source buffer
@@ -496,6 +537,7 @@ function M.function_scope(client, bufnr, win, token, pos)
     -- string, so there is nothing to chase — this is a leaf row carrying the
     -- evaluated type, which is the honest limit of what one hover buys.
     local node = model.new({
+      id = declared_id(declared.name),
       name = declared.name,
       kind = "field",
       type = { raw = "Any", display = "Any", category = "builtin" },
@@ -548,27 +590,33 @@ function M.function_scope(client, bufnr, win, token, pos)
           return roots, meta
         end
       end
+      -- class_scope declined: the annotation names one class, but not one with
+      -- structure to draw — a typeshed/stdlib class (TextIO, Path), an empty
+      -- class, or a plain `A = B` used as an alias. Falling through is right at
+      -- MODULE level, which is how the annotated alias above reaches the alias
+      -- path. Inside a method there is always an enclosing function for
+      -- function_info to find, so the same fall-through answers with __init__ —
+      -- the confusion this whole guard exists to stop.
+      if impl.function_info(fbuf, frow, fcol) then
+        -- Draw the declaration itself instead. attach_type computes the same
+        -- `single` test this arm branched on, so it populates the row IN PLACE
+        -- rather than nesting a redundant `Bar` under `self.bar` — and where
+        -- it can reach nothing, the leaf row still says what the symbol was
+        -- declared as, which beats answering with the enclosing method.
+        local droots, dmeta, dwhy = declaration_scope(ctx, declared, ann, fbuf, token, cache_key, cache_tick)
+        if dwhy == "stale" then
+          return nil, "stale", "stale"
+        end
+        return droots, dmeta
+      end
     else
-      -- Wrapped or multi-class: the declaration itself is the root row, the
-      -- annotation is its type, and attach_type nests a child per member —
-      -- the same tree the parameter path already builds for `m: dict[str, A]`.
-      local node = model.new({
-        name = declared.name,
-        kind = "field",
-        type = type_info(ann.display, ann.refs),
-      })
-      attach_type(ctx, node, fbuf, ann.refs, 1, {})
-      if async.stale(token) then
+      -- Wrapped or multi-class: the declaration is the root row and the
+      -- annotation is its type — the same tree the parameter path already
+      -- builds for `m: dict[str, A]`.
+      local roots, meta, why = declaration_scope(ctx, declared, ann, fbuf, token, cache_key, cache_tick)
+      if why == "stale" then
         return nil, "stale", "stale"
       end
-      node.state.expanded = #node.children > 0
-      run_enrichment(ctx)
-      if async.stale(token) then
-        return nil, "stale", "stale"
-      end
-      require("typescope.examples").annotate({ node })
-      local roots, meta = { node }, {}
-      cache_put(cache_key, { roots = roots, meta = meta, tick = cache_tick })
       return roots, meta
     end
   end
