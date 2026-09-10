@@ -28,10 +28,25 @@
 
 local M = {}
 
+-- One segment of an id. Ids are dot-separated paths, so a segment must not
+-- itself contain a dot — but names routinely do: an attribute declaration
+-- carries raw source text (`self.foo`) and an annotation ref keeps its dotted
+-- vocabulary (`pkg.Config`). Fold the dots rather than cutting at the last
+-- one, which would collapse the two variants of `dict[pkg.Config,
+-- other.Config]` onto one id and make find() answer with whichever attached
+-- last. Not `[%w_]+$` either — that is the *last identifier*, a different
+-- question, and it drops out from under a subscript (`self.data["k"]`) or a
+-- non-ASCII name, handing back the dotted string this exists to prevent.
+-- Ids are internal: nothing renders them, so the spelling only has to be
+-- stable and unique among siblings.
+local function segment(name)
+  return name and (name:gsub("%.", "_"))
+end
+
 -- Rewrite a subtree's ids to be rooted under `prefix` — ids are dotted paths
 -- and every structural attach must keep the whole subtree consistent.
 local function reid(node, prefix)
-  node.id = prefix .. "." .. node.name
+  node.id = prefix .. "." .. segment(node.name)
   for _, child in ipairs(node.children) do
     reid(child, node.id)
   end
@@ -42,7 +57,7 @@ end
 ---@return typescope.Node
 function M.new(spec)
   local node = {
-    id = spec.id or spec.name,
+    id = spec.id or segment(spec.name),
     kind = spec.kind or "field",
     name = spec.name,
     type = spec.type or { raw = "?", display = "?", category = "unresolved" },
