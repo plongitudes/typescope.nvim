@@ -15,6 +15,7 @@ local M = {}
 ---@field client vim.lsp.Client
 ---@field token typescope.CancelToken
 ---@field impl table language extractor
+---@field defs table<string, table|false> memoized definitions, one pass wide
 
 local function loc_key(loc)
   return loc.uri .. "#" .. loc.range.start.line
@@ -57,6 +58,26 @@ local function is_typeshed(uri)
   return uri:find("/lib/python[%d%.]+/") ~= nil and not uri:find("site-packages", 1, true)
 end
 
+--- Definition of a fixed position, memoized for the life of one resolution.
+--- A single hover asks the same question more than once: the declaration arm
+--- resolves a ref to see whether class_scope can draw it, and when class_scope
+--- declines, attach_type resolves that identical position again on its way to
+--- drawing the declaration — and a base walk re-asks for every level it
+--- revisits. A definition cannot change inside one pass, and ctx is built per
+--- hover, which is what bounds this table.
+---@param ctx typescope.ResolveCtx
+---@return table? loc
+local function definition(ctx, buf, row, col)
+  local key = ("%d#%d#%d"):format(buf, row, col)
+  local hit = ctx.defs[key]
+  if hit == nil then
+    -- `false` so a genuine miss memoizes too, instead of re-asking every time
+    hit = lsp.definition(ctx.client, buf, row, col, ctx.token) or false
+    ctx.defs[key] = hit
+  end
+  return hit or nil
+end
+
 --- Resolve a location to a classified type, hopping one aliased/`TYPE_CHECKING`
 --- import if definition landed on the import statement instead of the class.
 ---@param ctx typescope.ResolveCtx
@@ -74,7 +95,7 @@ local function class_at_location(ctx, loc, hops)
     return cls, bufnr, loc
   end
   if marker == "import" and hops < 1 then
-    local hop = lsp.definition(ctx.client, bufnr, row, col, ctx.token)
+    local hop = definition(ctx, bufnr, row, col)
     if hop and loc_key(hop) ~= loc_key(loc) then
       return class_at_location(ctx, hop, hops + 1)
     end
@@ -237,7 +258,7 @@ populate_from_class = function(ctx, target, cls, tbuf, depth, sub_ancestry)
       if async.stale(ctx.token) then
         return
       end
-      local bloc = lsp.definition(ctx.client, cbuf, base.row, base.col, ctx.token)
+      local bloc = definition(ctx, cbuf, base.row, base.col)
       if bloc and not base_ancestry[loc_key(bloc)] then
         local bcls, bbuf, brealloc = class_at_location(ctx, bloc, 0)
         if bcls then
@@ -323,7 +344,7 @@ attach_type = function(ctx, node, src_buf, refs, depth, ancestry, force_single)
     if async.stale(ctx.token) then
       return
     end
-    local loc = lsp.definition(ctx.client, src_buf, ref.row, ref.col, ctx.token)
+    local loc = definition(ctx, src_buf, ref.row, ref.col)
     local cls, tbuf, realloc
     if loc and not ancestry[loc_key(loc)] and not async.stale(ctx.token) then
       cls, tbuf, realloc = class_at_location(ctx, loc, 0)
@@ -486,7 +507,7 @@ function M.function_scope(client, bufnr, win, token, pos)
   if not impl then
     return nil, ("no extractor for filetype %q"):format(ft), "absent"
   end
-  local ctx = { client = client, token = token, impl = impl, enrich = {} }
+  local ctx = { client = client, token = token, impl = impl, enrich = {}, defs = {} }
 
   pos = pos or vim.api.nvim_win_get_cursor(win)
   local loc = lsp.definition(client, bufnr, pos[1] - 1, pos[2], token)
@@ -554,7 +575,7 @@ function M.function_scope(client, bufnr, win, token, pos)
     -- heads the float with a type the symbol does not have (olj). Same test
     -- attach_type uses for `single`; do not re-derive half of it.
     if #ann.refs == 1 and ann.display == ann.refs[1].name then
-      local tloc = lsp.definition(client, fbuf, ann.refs[1].row, ann.refs[1].col, token)
+      local tloc = definition(ctx, fbuf, ann.refs[1].row, ann.refs[1].col)
       if async.stale(token) then
         return nil, "stale", "stale"
       end
@@ -839,7 +860,7 @@ function M.recurse(client, node, token, cb)
     -- pierce = true: see class_at_location — explicit expansion may enter
     -- typeshed (open()'s returns showing TextIOWrapper's structure is the
     -- whole point of the keypress)
-    local ctx = { client = client, token = token, impl = lazy.impl, enrich = {}, pierce = true }
+    local ctx = { client = client, token = token, impl = lazy.impl, enrich = {}, defs = {}, pierce = true }
     local bufnr = lsp.load_buf(lazy.uri)
     attach_type(ctx, node, bufnr, lazy.refs, 1, lazy.ancestry or {})
     run_enrichment(ctx)
