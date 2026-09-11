@@ -304,11 +304,60 @@ check("returns the annotation node", d ~= nil and d.type_node:type() == "type")
 -- does NOT fire: everything the existing walk-up already answers correctly
 check("a def name is not a declaration", decl(10, 4) == nil)
 check("a typed parameter is not a declaration", decl(1, 23) == nil)
-check("an untyped assignment has nothing to report", decl(4, 13) == nil)
-check("a plain value assignment likewise", decl(8, 0) == nil)
+check("a plain value assignment has nothing to report", decl(8, 0) == nil)
+-- typescope.nvim-0mv: an unannotated ATTRIBUTE is still a declaration. There is
+-- no type node to read, but pyright has inferred one and resolve can hover for
+-- it — where the old contract reported nothing and let the walk-up answer with
+-- the enclosing __init__.
+local ud = py.declaration_at(decl_src, 4, 13)
+check("an untyped attribute is a declaration", ud ~= nil and ud.name == "self.untyped")
+check("with no type node to read", ud ~= nil and ud.type_node == nil)
+-- the hover has to land on the final identifier: asking at `self` answers
+-- about the class, not about the attribute
+check("and a hover position on its own name", ud ~= nil and ud.name_row == 4 and ud.name_col == 13)
+check("annotated declarations carry the position too", d ~= nil and d.name_row == 2 and d.name_col == 13)
+-- but NOT for a bare identifier: `X = SomeClass` is how an alias reaches
+-- alias_at further down resolve's chain, and claiming it here would take that
+-- path away from it
+check("an unannotated local is left alone", py.declaration_at("def f():\n    x = compute()\n", 1, 4) == nil)
+check("an alias-shaped assignment is left alone", py.declaration_at("X = SomeClass\n", 0, 0) == nil)
 -- the RHS of an annotated assignment walks up to the very same node; answering
 -- there would be an accident rather than a read
 check("position on the RHS is not the declaration", decl(2, 24) == nil)
+
+-- typescope.nvim-olj: what the declaration guard ROUTES on. A count test says
+-- `dict[str, A]`, `list[A]` and `A | None` are single-class declarations —
+-- each carries exactly one non-builtin ref, dict/list/str/None all being
+-- BUILTINS — and the float then loses the container or the nullability. The
+-- test that tells them apart is attach_type's: one ref AND a display equal to
+-- that ref's name.
+local wrap_src = [[
+class Holder:
+    def __init__(self) -> None:
+        self.plain: A = A()
+        self.mapping: dict[str, A] = {}
+        self.opt: A | None = None
+        self.both: A | B = A()
+]]
+local function wrap_ann(row)
+  local wd = py.declaration_at(wrap_src, row, 13)
+  return wd and py.annotation(wrap_src, wd.type_node) or nil
+end
+-- covers = the annotation IS that one class, so the class float is the answer
+local function covers(row)
+  local a = wrap_ann(row)
+  return a ~= nil and #a.refs == 1 and a.display == a.refs[1].name
+end
+check("a plain class covers its whole annotation", covers(2))
+check("a wrapped class does not cover it", not covers(3))
+check("an optional class does not cover it", not covers(4))
+check("a two-class union does not cover it", not covers(5))
+-- the halves of the test, separately: ref COUNT alone cannot tell 2 from 3/4
+check("dict[str, A] still has exactly one ref", #wrap_ann(3).refs == 1)
+check("A | None still has exactly one ref", #wrap_ann(4).refs == 1)
+check("the container survives in the display", wrap_ann(3).display == "dict[str, A]")
+check("the nullability survives in the display", wrap_ann(4).display == "A | None")
+check("a union keeps both refs and both names", #wrap_ann(5).refs == 2 and wrap_ann(5).display == "A | B")
 
 ---------------------------------------------------------------- hover parsing
 local function hov(value)
@@ -331,6 +380,37 @@ for _, case in ipairs(hover_cases) do
   check(("hover parse %s -> %s"):format(case[2], case[3]), got == case[3], got)
 end
 check("empty hover yields nil", py.evaluated_from_hover({ "```python", "```" }, "x") == nil)
+
+-- typescope.nvim-0mv: an unannotated return has to be read out of the hover's
+-- SIGNATURE, which evaluated_from_hover hands back whole because a `def` has
+-- no `name: type` shape to strip. Measured hovers, basedpyright 2026-09-04.
+local return_cases = {
+  { hov("(function) def test() -> tuple[Bar, None]"), "test", "tuple[Bar, None]" },
+  { hov("(method) def m(self: Self@E) -> None"), "m", "None" },
+  { hov("(function) def vacation(destination: PurePath) -> Any"), "vacation", "Any" },
+  -- an arrow inside the PARAMETER list must not end the match early
+  { hov("(function) def f(cb: Callable[[int], str] = lambda x: str(x)) -> bool"), "f", "bool" },
+  { hov("(function) def g() -> Callable[[int], None]"), "g", "Callable[[int], None]" },
+  -- pyright pretty-prints a long signature over several lines; the join has to
+  -- happen before the parse, and %b() has to survive it
+  {
+    { "```python", "(method) def bar_method_a(", "    self: Self@Bar,", "    numpy_test: Any", ") -> None", "```" },
+    "bar_method_a",
+    "None",
+  },
+  { hov("(function) def open(file: str) -> TextIOWrapper (+3 overloads)"), "open", "TextIOWrapper" },
+  -- a dotted ref (`pkg.inner`) matches on its final name, as elsewhere
+  { hov("(function) def inner(self) -> int"), "pkg.inner", "int" },
+}
+for _, case in ipairs(return_cases) do
+  local got = py.return_from_hover(case[1], case[2])
+  check(("return parse %s -> %s"):format(case[2], case[3]), got == case[3], got)
+end
+-- shapes that are NOT a def signature answer nothing rather than guessing
+check("a variable hover has no return type", py.return_from_hover(hov("(variable) x: dict[str, int]"), "x") == nil)
+check("a class hover has no return type", py.return_from_hover(hov("(class) Widget"), "Widget") == nil)
+check("an annotationless def answers nothing", py.return_from_hover(hov("(function) def f(a)"), "f") == nil)
+check("empty hover yields no return type", py.return_from_hover({ "```python", "```" }, "f") == nil)
 
 -- name positions recorded for unannotated params
 local pos_info = py.function_info("def f(plain, typed: int): ...", 0, 4)

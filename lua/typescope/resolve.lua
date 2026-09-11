@@ -15,6 +15,7 @@ local M = {}
 ---@field client vim.lsp.Client
 ---@field token typescope.CancelToken
 ---@field impl table language extractor
+---@field defs table<string, table|false> memoized definitions, one pass wide
 
 local function loc_key(loc)
   return loc.uri .. "#" .. loc.range.start.line
@@ -57,6 +58,26 @@ local function is_typeshed(uri)
   return uri:find("/lib/python[%d%.]+/") ~= nil and not uri:find("site-packages", 1, true)
 end
 
+--- Definition of a fixed position, memoized for the life of one resolution.
+--- A single hover asks the same question more than once: the declaration arm
+--- resolves a ref to see whether class_scope can draw it, and when class_scope
+--- declines, attach_type resolves that identical position again on its way to
+--- drawing the declaration — and a base walk re-asks for every level it
+--- revisits. A definition cannot change inside one pass, and ctx is built per
+--- hover, which is what bounds this table.
+---@param ctx typescope.ResolveCtx
+---@return table? loc
+local function definition(ctx, buf, row, col)
+  local key = ("%d#%d#%d"):format(buf, row, col)
+  local hit = ctx.defs[key]
+  if hit == nil then
+    -- `false` so a genuine miss memoizes too, instead of re-asking every time
+    hit = lsp.definition(ctx.client, buf, row, col, ctx.token) or false
+    ctx.defs[key] = hit
+  end
+  return hit or nil
+end
+
 --- Resolve a location to a classified type, hopping one aliased/`TYPE_CHECKING`
 --- import if definition landed on the import statement instead of the class.
 ---@param ctx typescope.ResolveCtx
@@ -74,7 +95,7 @@ local function class_at_location(ctx, loc, hops)
     return cls, bufnr, loc
   end
   if marker == "import" and hops < 1 then
-    local hop = lsp.definition(ctx.client, bufnr, row, col, ctx.token)
+    local hop = definition(ctx, bufnr, row, col)
     if hop and loc_key(hop) ~= loc_key(loc) then
       return class_at_location(ctx, hop, hops + 1)
     end
@@ -118,8 +139,25 @@ end
 ---@param node typescope.Node
 ---@param src_buf integer
 ---@param refs table[] annotation refs (position candidates, tried in order)
-local function queue_enrichment(ctx, node, src_buf, refs)
-  table.insert(ctx.enrich, { node = node, src_buf = src_buf, refs = refs })
+---@param parse? "return" read the RETURN type out of a `def` hover instead of
+--- the whole evaluated shape (typescope.nvim-0mv)
+local function queue_enrichment(ctx, node, src_buf, refs, parse)
+  table.insert(ctx.enrich, { node = node, src_buf = src_buf, refs = refs, parse = parse })
+end
+
+--- Is an inferred type worth a row? `None` is what EVERY function
+--- without a return statement infers, `Any`/`Unknown` is pyright saying it does
+--- not know, and `Self@C` is a diagnostic notation rather than a Python type.
+--- Announcing those is worse than declining -- and keeping `None` out is also
+--- what keeps a receiver-only `def n(self): pass` reporting itself as empty,
+--- the last verified repro for that decline (typescope.nvim-0mv WATCH OUT).
+---@param t string?
+---@return boolean
+local function informative_inference(t)
+  if not t or t == "" then
+    return false
+  end
+  return t ~= "None" and t ~= "Any" and t ~= "Unknown" and not t:find("Self@", 1, true)
 end
 
 --- Fire every queued enrichment hover concurrently, then apply the first
@@ -136,7 +174,7 @@ local function run_enrichment(ctx)
       table.insert(cands, { ref = item.refs[i] })
       total = total + 1
     end
-    table.insert(jobs, { node = item.node, src_buf = item.src_buf, cands = cands })
+    table.insert(jobs, { node = item.node, src_buf = item.src_buf, cands = cands, parse = item.parse })
   end
   ctx.enrich = {}
   if total == 0 then
@@ -170,7 +208,8 @@ local function run_enrichment(ctx)
   for _, job in ipairs(jobs) do
     for _, cand in ipairs(job.cands) do
       local lines = lsp.hover_result_lines(cand.result)
-      local evaluated = lines and ctx.impl.evaluated_from_hover(lines, cand.ref.name)
+      local read = job.parse == "return" and ctx.impl.return_from_hover or ctx.impl.evaluated_from_hover
+      local evaluated = lines and read(lines, cand.ref.name)
       if
         evaluated
         and evaluated ~= job.node.type.display
@@ -219,7 +258,7 @@ populate_from_class = function(ctx, target, cls, tbuf, depth, sub_ancestry)
       if async.stale(ctx.token) then
         return
       end
-      local bloc = lsp.definition(ctx.client, cbuf, base.row, base.col, ctx.token)
+      local bloc = definition(ctx, cbuf, base.row, base.col)
       if bloc and not base_ancestry[loc_key(bloc)] then
         local bcls, bbuf, brealloc = class_at_location(ctx, bloc, 0)
         if bcls then
@@ -305,7 +344,7 @@ attach_type = function(ctx, node, src_buf, refs, depth, ancestry, force_single)
     if async.stale(ctx.token) then
       return
     end
-    local loc = lsp.definition(ctx.client, src_buf, ref.row, ref.col, ctx.token)
+    local loc = definition(ctx, src_buf, ref.row, ref.col)
     local cls, tbuf, realloc
     if loc and not ancestry[loc_key(loc)] and not async.stale(ctx.token) then
       cls, tbuf, realloc = class_at_location(ctx, loc, 0)
@@ -414,6 +453,35 @@ local function class_scope(ctx, loc, cache_key, cache_tick)
   return roots, meta
 end
 
+--- Draw the declaration itself as the root row: `self.foo` heads the float,
+--- its annotation is the type, and attach_type nests a child per member of
+--- that annotation. The fallback shape whenever the annotation is not simply
+--- one drawable class — and, when attach_type can reach nothing (typeshed),
+--- an honest leaf row saying what the symbol was declared as.
+---@return typescope.Node[]? roots
+---@return table? meta
+---@return string? why "stale" only
+local function declaration_scope(ctx, declared, ann, fbuf, token, cache_key, cache_tick)
+  local node = model.new({
+    name = declared.name,
+    kind = "field",
+    type = type_info(ann.display, ann.refs),
+  })
+  attach_type(ctx, node, fbuf, ann.refs, 1, {})
+  if async.stale(token) then
+    return nil, nil, "stale"
+  end
+  node.state.expanded = #node.children > 0
+  run_enrichment(ctx)
+  if async.stale(token) then
+    return nil, nil, "stale"
+  end
+  require("typescope.examples").annotate({ node })
+  local roots, meta = { node }, {}
+  cache_put(cache_key, { roots = roots, meta = meta, tick = cache_tick })
+  return roots, meta
+end
+
 --- Full pipeline for the function under the cursor. Coroutine context only.
 ---@param client vim.lsp.Client
 ---@param bufnr integer source buffer
@@ -439,7 +507,7 @@ function M.function_scope(client, bufnr, win, token, pos)
   if not impl then
     return nil, ("no extractor for filetype %q"):format(ft), "absent"
   end
-  local ctx = { client = client, token = token, impl = impl, enrich = {} }
+  local ctx = { client = client, token = token, impl = impl, enrich = {}, defs = {} }
 
   pos = pos or vim.api.nvim_win_get_cursor(win)
   local loc = lsp.definition(client, bufnr, pos[1] - 1, pos[2], token)
@@ -471,23 +539,43 @@ function M.function_scope(client, bufnr, win, token, pos)
   -- symbol the user did not hover. So ask first whether the definition IS a
   -- declaration, and if it is, resolve what it was declared AS.
   local declared = impl.declaration_at and impl.declaration_at(fbuf, frow, fcol)
+  if declared and not declared.type_node then
+    -- `self.numpy_test = numpy.f2py.run_main(...)`: no annotation to read, but
+    -- pyright has already worked the type out (typescope.nvim-0mv). Ask by
+    -- hovering the attribute's own name. There are no positions inside a hover
+    -- string, so there is nothing to chase — this is a leaf row carrying the
+    -- evaluated type, which is the honest limit of what one hover buys.
+    local node = model.new({
+      name = declared.name,
+      kind = "field",
+      type = { raw = "Any", display = "Any", category = "builtin" },
+    })
+    queue_enrichment(ctx, node, fbuf, { { name = declared.name, row = declared.name_row, col = declared.name_col } })
+    run_enrichment(ctx)
+    if async.stale(token) then
+      return nil, "stale", "stale"
+    end
+    if informative_inference(node.evaluated) then
+      require("typescope.examples").annotate({ node })
+      local roots, meta = { node }, {}
+      cache_put(cache_key, { roots = roots, meta = meta, tick = cache_tick })
+      return roots, meta
+    end
+    -- Nothing known. Falling through would answer with the enclosing method,
+    -- which is the confusion this guard exists to stop, so decline instead —
+    -- K still falls through to the LSP's own word on it.
+    return nil, ("%s has no annotation and nothing was inferred for it"):format(declared.name), "empty"
+  end
   if declared then
     local ann = impl.annotation(fbuf, declared.type_node)
-    -- A pure builtin annotation (`self.strong: str`) resolves to no refs at
-    -- all. There is no structure to draw — but falling through would answer
-    -- with the enclosing method, which is the exact confusion this guard
-    -- exists to stop. Decline instead: K still falls through to the LSP, which
-    -- says `(variable) strong: str`, and that is the honest answer.
-    if #ann.refs == 0 then
-      return nil, ("%s is %s, which has no structure to show"):format(declared.name, ann.display), "empty"
-    end
-    -- One ref only. A union (`x: A | B`) has more, and a class float has a
-    -- single root, so there is no shape for it to become here; it keeps its
-    -- existing behaviour rather than growing a half-designed union root.
-    -- Refs that resolve to nothing must also fall through, because that is how
-    -- an annotated alias (`X: TypeAlias = Foo`) reaches the alias path below.
-    if #ann.refs == 1 then
-      local tloc = lsp.definition(client, fbuf, ann.refs[1].row, ann.refs[1].col, token)
+    -- One ref that IS the whole annotation (`self.bar: Bar`): the class is the
+    -- answer and class_scope draws it as the entire float. `dict[str, Bar]`,
+    -- `list[Bar]` and `Bar | None` carry exactly one non-builtin ref too, but
+    -- the wrapper is part of what the symbol IS — collapsing to Bar there
+    -- heads the float with a type the symbol does not have (olj). Same test
+    -- attach_type uses for `single`; do not re-derive half of it.
+    if #ann.refs == 1 and ann.display == ann.refs[1].name then
+      local tloc = definition(ctx, fbuf, ann.refs[1].row, ann.refs[1].col)
       if async.stale(token) then
         return nil, "stale", "stale"
       end
@@ -501,6 +589,23 @@ function M.function_scope(client, bufnr, win, token, pos)
         end
       end
     end
+    -- Everything else a declaration can be, and they all want the same shape:
+    -- a pure builtin (`self.strong: str`), a wrapper (`dict[str, A]`), a union,
+    -- or the one class class_scope just declined to draw — typeshed-blocked
+    -- (TextIO, Path), empty, or an alias assignment. The declaration is the
+    -- root row and its annotation is the type; attach_type nests a child per
+    -- member and hops aliases transparently (that is where alias_at lives —
+    -- there is no alias path further down). Where it reaches nothing, and a
+    -- builtin has no refs to chase at all, the leaf still says what the symbol
+    -- was declared as. Never fall through from here: below, function_info
+    -- walks up to the enclosing method and class_scope to the enclosing class,
+    -- and answering with the container is the confusion this guard exists to
+    -- stop.
+    local roots, meta, why = declaration_scope(ctx, declared, ann, fbuf, token, cache_key, cache_tick)
+    if why == "stale" then
+      return nil, "stale", "stale"
+    end
+    return roots, meta
   end
 
   local info = impl.function_info(fbuf, frow, fcol)
@@ -651,12 +756,35 @@ function M.function_scope(client, bufnr, win, token, pos)
     table.insert(roots, node)
   end
 
-  if #roots == 0 then
-    return nil, ("%s has no parameters or return annotation"):format(info.name), "empty"
+  -- No return ANNOTATION does not mean no return type: pyright has already
+  -- worked one out and is sitting on it (typescope.nvim-0mv). Ask by hovering
+  -- the `def` name -- frow/fcol, which is where definition landed and where a
+  -- stub hop above would have re-aimed us -- and join the same parallel
+  -- enrichment fan-out the unannotated params use, so this costs a request in
+  -- an existing batch rather than a new round trip. The row is PROVISIONAL:
+  -- most inferences are worthless (`-> None`, `-> Any`), and a float that
+  -- announces those is worse than one that declines.
+  local inferred
+  if not info.return_type then
+    inferred = model.new({
+      name = "returns",
+      kind = "return",
+      type = { raw = "Any", display = "Any", category = "builtin" },
+    })
+    queue_enrichment(ctx, inferred, fbuf, { { name = info.name, row = frow, col = fcol } }, "return")
+    table.insert(roots, inferred)
   end
+
   run_enrichment(ctx)
   if async.stale(token) then
     return nil, "stale", "stale"
+  end
+  if inferred and not informative_inference(inferred.evaluated) then
+    table.remove(roots) -- appended last, so this is it
+  end
+
+  if #roots == 0 then
+    return nil, ("%s has no parameters or return annotation"):format(info.name), "empty"
   end
   require("typescope.examples").annotate(roots)
 
@@ -732,7 +860,7 @@ function M.recurse(client, node, token, cb)
     -- pierce = true: see class_at_location — explicit expansion may enter
     -- typeshed (open()'s returns showing TextIOWrapper's structure is the
     -- whole point of the keypress)
-    local ctx = { client = client, token = token, impl = lazy.impl, enrich = {}, pierce = true }
+    local ctx = { client = client, token = token, impl = lazy.impl, enrich = {}, defs = {}, pierce = true }
     local bufnr = lsp.load_buf(lazy.uri)
     attach_type(ctx, node, bufnr, lazy.refs, 1, lazy.ancestry or {})
     run_enrichment(ctx)
