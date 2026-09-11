@@ -5,6 +5,18 @@
 
 local M = {}
 
+-- Request counters. A test that asserts on ROUND TRIPS — the per-pass
+-- definition memo — cannot see them from the client side, so the server
+-- tallies what it was actually asked. Suites that ignore these are unaffected.
+---@type table<string, integer>
+M.counts = {}
+
+function M.reset_counts()
+  M.counts = { definition = 0, declaration = 0, hover = 0, signatureHelp = 0 }
+end
+
+M.reset_counts()
+
 ---@param fixture_dir string absolute path containing .py fixtures
 ---@return fun(dispatchers: table): table cmd for vim.lsp.start
 function M.cmd(fixture_dir)
@@ -64,8 +76,18 @@ function M.cmd(fixture_dir)
   -- definition mimics basedpyright's runtime-literal answer: a module-level
   -- alias assignment wins over the def it aliases. declaration is the static
   -- answer: class/def sites only (the "stub" universe).
+  -- the declaration shapes come LAST: they only answer where class/def/alias
+  -- found nothing, so no existing fixture changes which site it resolves to.
+  --   `self.bar: Bar = Bar()`   attribute declaration inside a method
+  --   `handle: TextIO`          class-body or module-level annotated name
   local function find_definition(word)
-    return find_by_patterns(word, { "^WORD%s*=", "^%s*class%s+WORD%f[%W]", "^%s*def%s+WORD%f[%W]" }, ordered(false))
+    return find_by_patterns(word, {
+      "^WORD%s*=",
+      "^%s*class%s+WORD%f[%W]",
+      "^%s*def%s+WORD%f[%W]",
+      "^%s*self%.WORD%s*[:=]",
+      "^%s*WORD%s*:%s*%w",
+    }, ordered(false))
   end
   local function find_declaration(word)
     return find_by_patterns(word, { "^%s*class%s+WORD%f[%W]", "^%s*def%s+WORD%f[%W]" }, ordered(true))
@@ -102,6 +124,10 @@ function M.cmd(fixture_dir)
     local srv = {}
 
     function srv.request(method, params, callback)
+      local short = method:match("^textDocument/(.+)$")
+      if short and M.counts[short] then
+        M.counts[short] = M.counts[short] + 1
+      end
       if method == "initialize" then
         callback(nil, {
           capabilities = {
