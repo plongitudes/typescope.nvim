@@ -279,7 +279,7 @@ tree ~
 
                                                     *typescope-layout-table*
 table ~
-    DEPRECATED. It will be removed in the next release.
+    DEPRECATED. It will be removed in v0.2.0.
 
     True columns — name, mutability, type, default, example, origin — with
     alternating row backgrounds. It still works and still validates, but

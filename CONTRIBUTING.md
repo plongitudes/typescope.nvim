@@ -13,7 +13,7 @@ brew install stylua luacheck   # or your platform's equivalent
 CI runs exactly these, and nothing else. Run them locally and you will not be surprised:
 
 ```sh
-./tests/run.sh          # all seven suites, headless
+./tests/run.sh          # every suite, headless
 luacheck lua/ tests/    # 0 warnings, 0 errors
 stylua --check lua/ tests/
 ```

@@ -206,7 +206,7 @@ Press `L` for a transient peek that opens *every* row's detail block at once; th
 · timeout  float = 30.0  30.0
 ```
 
-**`table`** — *deprecated; it will be removed in the next release.* True columns with alternating row backgrounds. It still works and still validates, but setting it emits a warning once. Use `ledger` or `tree`:
+**`table`** — *deprecated; it will be removed in v0.2.0.* True columns with alternating row backgrounds. It still works and still validates, but setting it emits a warning once. Use `ledger` or `tree`:
 
 ```
 ▾ config       ServerConfig
@@ -344,7 +344,7 @@ Reports Neovim version, the Python parser, basedpyright (active client, or just 
 ## Development
 
 ```sh
-./tests/run.sh      # all seven suites, headless
+./tests/run.sh      # every suite, headless
 stylua lua/ tests/  # formatting; run it twice, it needs two passes to converge
 ```
 
