@@ -299,6 +299,36 @@ function M.load_buf(uri)
     pcall(vim.fn.bufload, bufnr)
     vim.o.eventignore = save
     vim.api.nvim_del_augroup_by_id(group)
+
+    -- The buffer outlives the parse. Loaded, it is what vim.uri_to_bufnr hands
+    -- the NEXT thing that asks for this file -- gd, :e, a picker -- and a
+    -- loaded buffer is never read again, so nothing ever runs what we
+    -- skipped. The user lands in a python file with filetype "": no syntax,
+    -- no treesitter, no LSP, and no swapfile on a file they are now editing.
+    -- Heal it the first time the buffer reaches a window. That is the moment
+    -- someone actually looks at it, and the second-server cost above becomes
+    -- the cost gd would have paid on its own.
+    --
+    -- BufReadPost, not `filetype detect`: filetype detection is one
+    -- subscriber to that event, next to editorconfig, last-position restore,
+    -- and whatever the user hooked. Replaying the event we suppressed
+    -- restores all of them, and processes the modeline -- which is why
+    -- swapfile is restored first, so a modeline's noswapfile still wins.
+    -- BufWinEnter rather than BufEnter because show_document({focus=false})
+    -- opens a window it never enters.
+    if vim.api.nvim_buf_is_loaded(bufnr) then
+      vim.api.nvim_create_autocmd("BufWinEnter", {
+        group = vim.api.nvim_create_augroup("TypeScopeSilentLoad", { clear = false }),
+        buffer = bufnr,
+        once = true,
+        callback = function()
+          vim.bo[bufnr].swapfile = vim.go.swapfile
+          vim.api.nvim_buf_call(bufnr, function()
+            vim.cmd("doautocmd BufReadPost")
+          end)
+        end,
+      })
+    end
   end
   return bufnr
 end
