@@ -1,0 +1,119 @@
+program ready in 176 ms; rss 158 MB
+
+== def use(...) — function under cursor   (53:4, node 38)
+  control (printType): (b: Box[ServerConfig], c: Color, d: Derived) -> Response
+  def use @ probe_fixture.py:53:4
+    · b  Box[ServerConfig]
+    · c  Color
+    · d  Derived
+    · returns  Response
+
+== b: Box[ServerConfig] — generic with T substituted?   (53:8, node 38)
+  control (printType): Box[ServerConfig]
+  instance of
+  class Box[T] specialized [ServerConfig] @ probe_fixture.py:26:6
+    bases: Generic
+    · item  ServerConfig   [instance]
+    · count  int   [instance]
+
+== c: Color — enum members?   (53:30, node 38)
+  control (printType): Color
+  instance of
+  class Color (enum) @ probe_fixture.py:15:6
+    bases: Enum
+    · RED  =  1   [inferred, enum member]
+    · GREEN  =  2   [inferred, enum member]
+    · name ↑Enum  str   [property]
+    · value ↑Enum  Any   [property]
+    · _name_ ↑Enum  str   [instance]
+    · _value_ ↑Enum  Any   [instance]
+    · _ignore_ ↑Enum  str | list[str]   [instance]
+    · _order_ ↑Enum  str   [instance]
+    · _missing_ ↑Enum  (cls: type[Self@Enum], value: object) -> Any   [method]
+    · _generate_next_value_ ↑Enum  (name: str, start: int, count: int, last_values: list[Any]) -> Any   [method]
+    · _add_value_alias_ ↑Enum  (self: Self@Enum, value: Any) -> None   [method]
+    · _add_alias_ ↑Enum  (self: Self@Enum, name: str) -> None   [method]
+
+== d: Derived — inherited fields with origin?   (53:40, node 38)
+  control (printType): Derived
+  instance of
+  class Derived @ probe_fixture.py:43:6
+    bases: ServerConfig
+    · debug  bool   [instance]
+    · host ↑ServerConfig  str   [instance]
+    · port ↑ServerConfig  int   [instance]
+
+== resp = fetch("x") — unannotated local, structure not prose?   (54:4, node 38)
+  control (printType): Response
+  instance of
+  class Response @ probe_fixture.py:31:6
+    bases: object
+    · status  int   [instance]
+    · ok  bool   [property]
+    · body  bytes   [instance]
+    · parsed  dict[str, int]   [instance, inferred]
+
+== return resp — the same local at a use site   (56:15, node 38)
+  control (printType): Response
+  instance of
+  class Response @ probe_fixture.py:31:6
+    bases: object
+    · status  int   [instance]
+    · ok  bool   [property]
+    · body  bytes   [instance]
+    · parsed  dict[str, int]   [instance, inferred]
+
+== n = first([1,2,3]) — TypeVar solved at the call site?   (63:0, node 38)
+  control (printType): int
+  instance of
+  class int @ builtins.pyi:253:6
+    bases: object
+    · as_integer_ratio  (self: Self@int) -> tuple[int, Literal[1]]   [method]
+    · real  int   [property]
+    · imag  Literal[0]   [property]
+    · numerator  int   [property]
+    · denominator  Literal[1]   [property]
+    · conjugate  (self: Self@int) -> int   [method]
+    · bit_length  (self: Self@int) -> int   [method]
+    · bit_count  (self: Self@int) -> int   [method]
+    · to_bytes  (self: Self@int, length: SupportsIndex = 1, byteorder: Literal['little', 'big'] = "big", *, signed: bool = False) -> bytes   [method]
+    · from_bytes  (cls: type[Self@int], bytes: Iterable[SupportsIndex] | SupportsBytes | ReadableBuffer, byteorder: Literal['little', 'big'] = "big", *, signed: bool = False) -> Self@int   [method]
+    · is_integer  (self: Self@int) -> Literal[True]   [method]
+
+== def first — TypeVar unsolved at the def   (60:4, node 38)
+  control (printType): (xs: list[T@first]) -> T@first
+  def first @ probe_fixture.py:60:4
+    · xs  list[T@first]
+    · returns  T@first
+
+== maybe = fetch_maybe() — declared union, before narrowing   (64:0, node 38)
+  control (printType): Response | None
+  union
+    instance of
+    class Response @ probe_fixture.py:31:6
+      bases: object
+      · status  int   [instance]
+      · ok  bool   [property]
+      · body  bytes   [instance]
+      · parsed  dict[str, int]   [instance, inferred]
+    instance of
+    class NoneType @ types.pyi:713:6
+      bases: object
+
+== narrowed = maybe — narrowing inside `if maybe is not None`   (66:15, node 38)
+  control (printType): Response
+  instance of
+  class Response @ probe_fixture.py:31:6
+    bases: object
+    · status  int   [instance]
+    · ok  bool   [property]
+    · body  bytes   [instance]
+    · parsed  dict[str, int]   [instance, inferred]
+
+== Response.ok — property   (39:8, node 38)
+  control (printType): (self: Self@Response) -> bool
+  def ok @ probe_fixture.py:39:8
+    · self  Self@Response   [inferred]
+    · returns  bool
+
+done; rss 159 MB
