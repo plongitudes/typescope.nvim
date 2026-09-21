@@ -1,0 +1,173 @@
+# The type oracle: replacing the syntax-reading resolver
+
+Status: **draft for review**, 2026-09-21. Written after the three spikes on `dev/oracle-spikes` (findings under `spikes/`). Everything marked **DECISION** needs Tony's answer before the loop starts; each carries the default this document is written against, so a "yes to all defaults" is a complete answer.
+
+## 1. Why
+
+TypeScope's resolver reads annotation *syntax* at definition sites (`extract/python.lua` over treesitter) and uses basedpyright only to navigate and, as a fallback, to narrate types in hover prose that regexes take apart. Every type pyright *computes* rather than the author *wrote* is a dead end: enums, specialized generics, unannotated locals and parameters (which today draw the enclosing function), properties, `Self`, forward-ref strings, narrowing. Covering them one by one is open-ended. A checker's type model is closed and small; asking a checker for structure turns an unbounded coverage problem into a bounded one. Spike 1 showed the whole class walk is ~80 lines against an evaluator and none of the gaps needed a special case.
+
+## 2. Decision record
+
+**DECISION 1 — backend: pyrefly, as a separate binary.** Default: yes.
+
+| | RAM | distribution | coverage | coupling |
+| --- | --- | --- | --- | --- |
+| pyrefly binary | +136 MB (spike 3, kitchen) | one static binary per platform; user's LSP unchanged | full, with a 10-line patch | non-public API + the patch until upstreamed |
+| basedpyright wrapper | +0 MB | user swaps LSP cmd to our node package | full, same checker as diagnostics | non-public API, pinned tag |
+| node sidecar | +427 MB | node + 18 MB JS | full | non-public API |
+| incremental fixes | +0 | none | partial, forever | none |
+
+pyrefly wins on the axis Tony named as the objection — distribution — and is the cheapest second process by 3×. The wrapper is the engineering-clean answer but asks users to replace basedpyright with our package, which is the uphill climb. The node sidecar is dominated. The costs accepted with pyrefly: a source patch rebuilt from source per pyrefly release (3.5 min cold), a second checker whose answers may drift from basedpyright's around plugins (pydantic not yet probed — see §10), and a Rust toolchain in the release pipeline only (users get a binary).
+
+**DECISION 2 — install: TypeScope downloads the release binary on first use.** Default: yes, with a manual override.
+
+Into `stdpath("data")/typescope/`, from GitHub Releases, verified against a checksum published alongside, platform-selected (`darwin-arm64`, `darwin-x86_64`, `linux-x86_64`, `linux-arm64`). `:checkhealth` reports the binary's version and path; `config.oracle.path` overrides the download for people who build it themselves; `config.oracle.download = false` turns the download off and makes health say what to install. This is how mason and several plugins already behave, so users have a model for it.
+
+**DECISION 3 — one code path: the treesitter resolver is deleted, the binary is a hard requirement.** Default: yes.
+
+Two paths (oracle when present, old resolver when not) would keep the plugin working for people who won't install a binary, at the cost of maintaining the syntax reader — the very thing this rewrite retires — behind every future feature. basedpyright is already a hard requirement; the binary joins it. `extract/python.lua` shrinks to `call_args` (call-site argument kinds for overload matching, pure treesitter, cheap) and is otherwise deleted; `resolve.lua` becomes an oracle client.
+
+**DECISION 4 — what a class shows by default: data first, methods on demand.** Default: fields, properties and enum members are rows; methods are collected under one collapsed `▸ methods (n)` row per class. TypedDict/dataclass/pydantic/NamedTuple floats look as they do today. Protocols show their methods expanded, as today. This answers ym4 without turning every float into an API listing. `_`-prefixed names are dropped; dunders are dropped; the MRO walk stops at `object`, `Enum`, `BaseModel`, `Protocol`, `Generic` (the marker bases already in `MARKER_BASES`), which keeps Enum's twenty internals and pydantic's model machinery out of the float.
+
+**DECISION 5 — hovering a class *call* draws the constructor.** Default: yes. `Recipe(` draws `__init__`'s parameters (the receiver dropped) as the roots and the instance shape as `returns`; hovering the class name in an annotation or a declaration draws the shape as today. pyrefly answers `type[Recipe]` for both, so the distinction is made on the nvim side from the call-site tree (`extract.call_args` already finds the enclosing call).
+
+**DECISION 6 — upstream the pyrefly patch.** Default: not in this plan's scope; the release pipeline applies the patch. Whether and under whose name a PR is opened is a separate conversation. The patch is written so it can be dropped without a code change the day a `pub fn` lands.
+
+**DECISION 7 — this is v0.2.0.** Default: yes. New hard requirement, removal of the deprecated `table` layout (hdt) rides along, changelog entry says what changed for a user in one paragraph.
+
+**DECISION 8 — insert-mode surface ported in the same rewrite.** Default: yes. `insert.lua` calls `function_scope` and `evaluate`; the second disappears (evaluated types arrive inline) and the first keeps its signature. It is a small port and leaving it on the old resolver would contradict decision 3.
+
+## 3. Architecture
+
+```
+  nvim                                          typescope-oracle (Rust binary)
+  ┌──────────────────────────────┐              ┌──────────────────────────────┐
+  │ init / interact / render     │              │ lsp_server loop              │
+  │   float, keys, examples      │              │   initialize: textDocumentSync│
+  │            │                 │              │   didOpen/didChange/didClose  │
+  │            ▼                 │   LSP over   │        │                      │
+  │ resolve.lua (oracle client)  │◄────stdio───►│        ▼                      │
+  │   typescope/structure        │              │ pyrefly State + overlays      │
+  │            │                 │              │   Transaction::set_memory     │
+  │ lsp.lua: basedpyright client │              │   get_type_at                 │
+  │   signatureHelp only         │              │   attributes_of_type (patch)  │
+  └──────────────────────────────┘              │        │                      │
+                                                │        ▼                      │
+                                                │ structure walk → JSON Node    │
+                                                └──────────────────────────────┘
+```
+
+The oracle speaks **LSP**, not a bespoke protocol, and advertises **no capabilities except document sync**, so it never competes with basedpyright for hover, definition or diagnostics. That choice buys, for free from `vim.lsp`: spawn and restart, root detection, `didOpen`/`didChange` carrying *unsaved buffer contents*, cancellation, and `lsp.client_for`-style discovery. The one custom request is `typescope/structure`. basedpyright stays attached for `signatureHelp` (the `activeParameter` the ledger opens on) and for everything K falls through to.
+
+Both halves are pinned to each other by a protocol version in the `initialize` result (`serverInfo.version` and a `typescope.protocol` field); the client refuses a mismatch with a health-style message rather than mis-rendering.
+
+## 4. The contract: `typescope/structure`
+
+Request:
+
+```jsonc
+{
+  "textDocument": { "uri": "file:///…/recipe_service.py" },
+  "position": { "line": 113, "character": 4 },   // 0-based, UTF-16 like LSP
+  "depth": 2,                                    // config.depth; how far to nest before returning lazy nodes
+  "members": "data"                              // "data" | "all" — decision 4; "all" is what expanding the methods row asks
+}
+```
+
+Response: `null` when nothing is under the cursor (K's job), otherwise a **Scope**:
+
+```jsonc
+{
+  "scope": "function" | "class" | "declaration" | "constructor" | "empty",
+  "header": "get_recipe_by_id(db, recipe_id) -> Recipe | None",   // call-shape line; null for class/declaration
+  "docstring": "…",                                                 // null when none
+  "overloads": [ { "header": "…", "roots": [Node…] }, … ],          // present only for an overload set; else `roots`
+  "roots": [ Node… ],
+  "reason": "…"                                                     // only with scope "empty": why there was nothing to draw
+}
+```
+
+**Node** is `typescope.Node` from `lua/typescope/model.lua` with the resolver-private fields dropped and three added:
+
+```jsonc
+{
+  "name": "port",
+  "kind": "param" | "field" | "property" | "enum_member" | "method" | "return" | "variant" | "type" | "group",
+  "type": { "display": "int", "category": "builtin" | "class" | "dataclass" | "pydantic" | "typeddict" | "namedtuple" | "protocol" | "enum" | "union" | "unresolved" },
+  "default": "8000",            // literal defaults only, as today; enum members carry their value here
+  "badge": "NotRequired",       // TypedDict badges, "[1/3]" overload badges, "ClassVar"
+  "origin": "ServerConfig",     // inherited: the class it came from (↑ marker), absent when own
+  "pass_mode": "*" | "/",       // params only
+  "inferred": true,             // no annotation; pyrefly's inference — rendered ≈ as `evaluated` is today
+  "location": { "uri": "…", "line": 43, "character": 6 },   // where this member is declared; the key to lazy expansion
+  "children": [ Node… ],        // present when resolved within depth
+  "expandable": true            // children omitted for depth: expand = structure(location) with the same params
+}
+```
+
+Mapping onto today's fields: `evaluated` becomes `inferred` + `type.display` holding pyrefly's answer (the ≈ rendering keys off `inferred`); `evaluated_owner` disappears (unions come back as `variant` children, so ownership is structural); `_lazy` and `source` collapse into `location` + `expandable` — **expansion is a fresh `structure` request at the child's location**, so the oracle keeps no per-client state and the resolve cache keys stay `uri#line#depth`. `example`, `active`, `state` and `id` are nvim-side and never cross the wire; `model.new` still assigns ids.
+
+Presentation policy lives in the **oracle**, not in Lua: the member filter, the MRO cut, the async-def return rule (present the declared `Recipe | None`, not `Coroutine[…]` — spike 2's note), and the "informative inference" rule (`None`/`Any`/`Unknown` inferences are dropped, as `informative_inference` does today). Reason: the policy needs the type objects to decide, and a second language's oracle would need the same rules stated once.
+
+## 5. The nvim side
+
+- `resolve.lua` → an oracle client of ~150 lines: `function_scope(bufnr, win, token, pos)` sends `typescope/structure` and adapts the Scope into `(roots, meta, why)` with the same three-way decline (`stale`/`absent`/`empty`); `recurse(node, token, cb)` sends `structure(node.location)` and grafts the children; `evaluate` is deleted. The resolve cache stays as it is (keyed on the scope's location, invalidated by changedtick).
+- `lsp.lua` keeps `client_for` (basedpyright, for `signatureHelp`), `signature_help`, `active_param`, `request_cb`; gains `oracle_for(bufnr)` that finds the `typescope-oracle` client; loses `definition`, `declaration`, `locate`, `hover_result_lines`, `load_buf`.
+- `oracle.lua` (new): `vim.lsp.config`/`vim.lsp.enable` of the binary on `FileType python`, the download-or-locate logic (decision 2), protocol-version check, `:checkhealth` hooks.
+- `extract/python.lua` → only `call_args` survives (plus the call/annotation classification decision 5 needs); everything else deleted with its tests.
+- `render.lua`/`interact.lua`: read `inferred` where they read `evaluated`; render `property`/`enum_member`/`group` kinds (three small branches next to the `method` one); nothing else.
+- `insert.lua`: drop `evaluate`; unchanged otherwise.
+- `examples/`: heuristic and LLM prompts keep reading `type.display`; `enum_member` and `property` nodes are excluded from generation the way `Self@`/`T@` are today.
+- `config.lua`: `oracle = { path = nil, download = true }`; `depth` unchanged.
+
+## 6. The Rust side: `typescope-oracle`
+
+Lives in this repo under `oracle/` (a Cargo workspace member of one crate), so a plugin release tags both halves together.
+
+- `main.rs`: `lsp_server` stdio loop; `initialize` answers with document sync only and `serverInfo { name: "typescope-oracle", version }`; `didOpen`/`didChange`/`didClose` maintain overlays via `Transaction::set_memory` and re-run the affected module at `Require::Everything`; `typescope/structure` dispatches to the walk. `$/cancelRequest` honoured by dropping the answer.
+- `state.rs`: one pyrefly `State` per workspace root, config found by pyrefly's own finder (it reads `pyrightconfig.json` and `pyproject.toml`, spike 3), files added lazily on first request.
+- `walk.rs`: the port of the spike probe's `describe`: type at position → Scope; class → members via `attributes_of_type` filtered by policy → Nodes with locations; function → params/return; union → variants; overloads → groups. Depth-limited; beyond depth emits `expandable` with `location`.
+- `policy.rs`: the member filter, MRO cut, async return rule, informative-inference rule. Pure functions over `pyrefly_types`, unit-tested in Rust against the spike fixture.
+- `vendor/pyrefly` as a **git submodule** pinned to a tag, plus `typescope-attributes.patch` applied by `build.rs`-free means: a `just build` / `scripts/build-oracle.sh` that does `git submodule update`, `git apply --check`, `cargo build --release`. No build-time patching magic; the patched tree is what CI builds.
+- Release: a GitHub Actions matrix builds the four targets, uploads binaries + `SHA256SUMS` to the release the plugin tag creates. Local dev builds on the M1 in 3.5 min cold.
+
+## 7. Verification
+
+- **Rust unit tests** on `policy.rs` and `walk.rs` against `tests/fixtures/shapes.py` and the spike fixture: the JSON for every `typescope:` marker class is asserted, so the fixture markers keep their job (they move from "what `type_at` extracts" to "what the oracle answers").
+- **Lua unit tests** (`test_render`, `test_float`, `test_examples`, `test_match`) unchanged except for the `inferred`/new-kind branches.
+- **e2e** replaces `mock_server.lua`'s LSP fakery with the real binary: `tests/run.sh` builds (or downloads) the oracle once, then `e2e_phase3.lua` and `e2e_declarations.lua` drive it over the fixtures. A `mock_oracle.lua` that replays recorded JSON stays for the pure-UI suites so they don't need Rust installed.
+- **Parity gate**: before the old resolver is deleted, a throwaway script hovers every `typescope:` and `typescope-params:` marker in `shapes.py` through both paths and diffs the rendered floats. Differences are either policy (documented in `design/oracle.md` §4) or bugs. This is the "verify before asserting" step for the whole rewrite.
+- **Screenshots** for the three new row kinds and the methods group, since headless float probes lie.
+- **Footprint** re-measured with `footprint(1)` on the kitchen backend at the end; the number goes in CHANGELOG.
+
+## 8. Beads, in loop order
+
+Each is one tick's work with a testable done-state. Dependencies in brackets.
+
+1. `oracle-crate` — `oracle/` crate skeleton, submodule + patch + build script, `initialize` handshake only; `nvim --headless` can attach and see `serverInfo`. Rust unit test harness in place.
+2. `oracle-walk` [1] — port the probe walk to `walk.rs` + `policy.rs`; unit tests assert JSON for every marker class in `shapes.py` and the spike fixture.
+3. `oracle-sync` [1] — didOpen/didChange overlays; test: edit an annotation in memory, structure answers the new type without saving.
+4. `oracle-scopes` [2] — function / class / declaration / constructor / empty classification and headers, overload groups; async-return rule.
+5. `lua-oracle-client` [1] — `oracle.lua` (enable, locate, version check, health), `lsp.oracle_for`.
+6. `lua-resolve-port` [4, 5] — `resolve.lua` rewritten onto the client; `recurse` via location; cache preserved; the three-way decline preserved.
+7. `lua-render-kinds` [6] — `property`, `enum_member`, `group` rows; `inferred` replaces `evaluated`; screenshots.
+8. `lua-insert-port` [6] — `insert.lua` off `evaluate`.
+9. `parity-gate` [7, 8] — the diff script over every marker; every difference filed or fixed. **Stop condition: the old resolver is not deleted until this bead closes.**
+10. `delete-old-resolver` [9] — `extract/python.lua` → `call_args` only; `lsp.lua` shrinks; `mock_server.lua` → `mock_oracle.lua`; dead tests removed.
+11. `download` [5] — release-binary download with checksum, `config.oracle.path`, `download = false`; health messages.
+12. `release-pipeline` [1] — GitHub Actions matrix, `SHA256SUMS`, tag → release.
+13. `docs-0.2.0` [10, 11] — README requirements/install/config, CHANGELOG, `doc/typescope.txt`, `hdt` (table layout removal) folded in.
+14. `footprint-final` [10] — kitchen measurement in the changelog.
+
+Beads blocked on the Decision bead today (`5mq`, `yw2`, `ym4`, `85g`): `ym4` closes with decision 4; `85g` closes with bead 10; `5mq` and `yw2` are re-scoped onto the oracle client in bead 6 and closed there or re-filed.
+
+## 9. Out of scope
+
+A second language's oracle (the contract is designed for it, nothing is built); upstreaming the pyrefly patch; any UI redesign; changes to the examples subsystem beyond the exclusions in §5; Windows.
+
+## 10. Open risks, named
+
+- **pydantic.** Not probed with pyrefly. If its `BaseModel` handling differs materially from basedpyright's, the pydantic floats — the plugin's best case today — could regress. **Mitigation:** bead 2's fixture set includes the pydantic classes from `shapes.py` and one `Field(...)`-heavy model, and the parity gate diffs them first. If pyrefly is wrong there, that's a stop-and-report, not a workaround.
+- **pyrefly API churn.** The library surface is documented as unstable. Pinning to a tag and vendoring makes each bump a deliberate, tested step; the patch is ten lines and moves with it.
+- **Binary trust.** Downloading executables is a step some users refuse on principle; decision 2's override and opt-out exist for them, and the build is reproducible from the tagged submodule.
+- **Two checkers disagreeing** in a way a user notices: TypeScope's float says one thing, basedpyright's diagnostics another. Cosmetic in spike 3; the changelog says plainly that structure comes from pyrefly.
