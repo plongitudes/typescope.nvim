@@ -1,0 +1,16 @@
+{
+  "project_root": "/Users/tonye/github/plongitudes/kitchen/backend",
+  "file": "app/services/recipe_service.py",
+  "targets": [
+    { "label": "AsyncSession param (sqlalchemy, site-packages)", "line": 88, "needle": "db: AsyncSession", "skip": 4 },
+    { "label": "Recipe.ingredients (sqlalchemy model attr)", "line": 95, "needle": "Recipe.ingredients", "skip": 7 },
+    { "label": "selectinload (sqlalchemy.orm function)", "line": 96, "needle": "selectinload(", "skip": 0 },
+    { "label": "result = await db.execute (inferred local)", "line": 114, "needle": "result = await", "skip": 0 },
+    { "label": "get_recipe_by_id def name", "line": 118, "needle": "def get_recipe_by_id", "skip": 4 },
+    { "label": "-> Optional[Recipe] return annotation", "line": 121, "needle": "Optional[Recipe]", "skip": 9 },
+    { "label": "create_recipe def name", "line": 137, "needle": "def create_recipe", "skip": 4 },
+    { "label": "recipe = Recipe( (constructor call, model)", "line": 144, "needle": "recipe = Recipe(", "skip": 9 },
+    { "label": "ing_result (inferred local)", "line": 191, "needle": "ing_result = await", "skip": 0 },
+    { "label": "RecipeService.get_recipe_by_id (classmethod call)", "line": 228, "needle": "RecipeService.get_recipe_by_id", "skip": 14 }
+  ]
+}

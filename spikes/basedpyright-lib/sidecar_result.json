@@ -1,0 +1,1 @@
+{"side":"sidecar","metric":"phys_footprint via footprint(1)","node":"v26.8.2","ready_ms":117,"ready_from_process_start_ms":379,"first_query_ms":612,"query_ms":[612,590,0,28,1,8,6,0,48,0],"footprint_mb":{"ready":100,"after_10_queries":399,"after_checker_drain":426,"after_10s_idle":427,"peak":427}}
