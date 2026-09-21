@@ -1,0 +1,458 @@
+state ready in 841 ms (842 ms from process start); footprint 127 MB
+
+== db: AsyncSession (line 88)   (offset 2766, 0.1 ms)
+  control (Display): type[AsyncSession]
+  class object
+  class AsyncSession  @ sqlalchemy.ext.asyncio.session:6197
+    · dispatch  <get_type_at: none>
+    · sync_session_class  <get_type_at: none>
+    · sync_session  <get_type_at: none>
+    · refresh  <get_type_at: none>  [unannotated]
+    · run_sync  <get_type_at: none>  [unannotated]
+    · execute  <get_type_at: none>  [unannotated]
+    · scalar  <get_type_at: none>  [unannotated]
+    · scalars  <get_type_at: none>  [unannotated]
+    · get  <get_type_at: none>  [unannotated]
+    · get_one  <get_type_at: none>  [unannotated]
+    · stream  <get_type_at: none>  [unannotated]
+    · stream_scalars  <get_type_at: none>  [unannotated]
+    · delete  <get_type_at: none>  [unannotated]
+    · merge  <get_type_at: none>  [unannotated]
+    · flush  <get_type_at: none>  [unannotated]
+    · get_transaction  <get_type_at: none>  [unannotated]
+    · get_nested_transaction  <get_type_at: none>  [unannotated]
+    · get_bind  <get_type_at: none>  [unannotated]
+    · connection  <get_type_at: none>  [unannotated]
+    · begin  <get_type_at: none>  [unannotated]
+    · begin_nested  <get_type_at: none>  [unannotated]
+    · rollback  <get_type_at: none>  [unannotated]
+    · commit  <get_type_at: none>  [unannotated]
+    · close  <get_type_at: none>  [unannotated]
+    · reset  <get_type_at: none>  [unannotated]
+    · aclose  <get_type_at: none>  [unannotated]
+    · invalidate  <get_type_at: none>  [unannotated]
+    · close_all  <get_type_at: none>  [unannotated]
+    · add  <get_type_at: none>  [unannotated]
+    · add_all  <get_type_at: none>  [unannotated]
+    · expire  <get_type_at: none>  [unannotated]
+    · expire_all  <get_type_at: none>  [unannotated]
+    · expunge  <get_type_at: none>  [unannotated]
+    · expunge_all  <get_type_at: none>  [unannotated]
+    · is_modified  <get_type_at: none>  [unannotated]
+    · in_transaction  <get_type_at: none>  [unannotated]
+    · in_nested_transaction  <get_type_at: none>  [unannotated]
+    · dirty  <get_type_at: none>  [unannotated]
+    · deleted  <get_type_at: none>  [unannotated]
+    · new  <get_type_at: none>  [unannotated]
+    · identity_map  <get_type_at: none>  [unannotated]
+    · is_active  <get_type_at: none>  [unannotated]
+    · autoflush  <get_type_at: none>  [unannotated]
+    · no_autoflush  <get_type_at: none>  [unannotated]
+    · info  <get_type_at: none>  [unannotated]
+    · object_session  <get_type_at: none>  [unannotated]
+    · identity_key  <get_type_at: none>  [unannotated]
+    · bind  <get_type_at: none>  [unannotated]
+    · binds  <get_type_at: none>  [unannotated]
+    <inherited members: MRO is behind pub(crate); not reachable>
+  [solver] 64 attributes:
+    · dispatch  type[_Dispatch[Session]]  @ sqlalchemy.ext.asyncio.session:6775
+    · sync_session_class  type[Session]  @ sqlalchemy.ext.asyncio.session:8413
+    · sync_session  Session  @ sqlalchemy.ext.asyncio.session:9060
+    · refresh  (self: AsyncSession, instance: object, attribute_names: Iterable[str] | None = None, with_for_update: ForUpdateParameter = None) -> Coroutine[Unknown, Unknown, None]  [method]  @ sqlalchemy.ext.asyncio.session:9588
+    · run_sync  [_T: Any](self: AsyncSession, fn: (...) -> _T, *arg: Any, **kw: Any) -> Coroutine[Unknown, Unknown, _T]  @ sqlalchemy.ext.asyncio.session:10420
+    · execute  Overload[
+  [_T: Any](self: AsyncSession, statement: TypedReturnsRows[_T], params: Mapping[str, Any] | Sequence[Mapping[str, Any]] | None = None, *, execution_options: OrmExecuteOptionsParameter = ..., bind_arguments: dict[str, Any] | None = None, _parent_execute_state: Any | None = None, _add_event: Any | None = None) -> Coroutine[Unknown, Unknown, Result[_T]]
+  (self: AsyncSession, statement: UpdateBase, params: Mapping[str, Any] | Sequence[Mapping[str, Any]] | None = None, *, execution_options: OrmExecuteOptionsParameter = ..., bind_arguments: dict[str, Any] | None = None, _parent_execute_state: Any | None = None, _add_event: Any | None = None) -> Coroutine[Unknown, Unknown, CursorResult[Any]]
+  (self: AsyncSession, statement: Executable, params: Mapping[str, Any] | Sequence[Mapping[str, Any]] | None = None, *, execution_options: OrmExecuteOptionsParameter = ..., bind_arguments: dict[str, Any] | None = None, _parent_execute_state: Any | None = None, _add_event: Any | None = None) -> Coroutine[Unknown, Unknown, Result[Any]]
+]  [method]  @ sqlalchemy.ext.asyncio.session:12587
+    · scalar  Overload[
+  [_T: Any](self: AsyncSession, statement: TypedReturnsRows[tuple[_T]], params: Mapping[str, Any] | Sequence[Mapping[str, Any]] | None = None, *, execution_options: OrmExecuteOptionsParameter = ..., bind_arguments: dict[str, Any] | None = None, **kw: Any) -> Coroutine[Unknown, Unknown, _T | None]
+  (self: AsyncSession, statement: Executable, params: Mapping[str, Any] | Sequence[Mapping[str, Any]] | None = None, *, execution_options: OrmExecuteOptionsParameter = ..., bind_arguments: dict[str, Any] | None = None, **kw: Any) -> Coroutine[Unknown, Unknown, Any]
+]  [method]  @ sqlalchemy.ext.asyncio.session:14869
+    · scalars  Overload[
+  [_T: Any](self: AsyncSession, statement: TypedReturnsRows[tuple[_T]], params: Mapping[str, Any] | Sequence[Mapping[str, Any]] | None = None, *, execution_options: OrmExecuteOptionsParameter = ..., bind_arguments: dict[str, Any] | None = None, **kw: Any) -> Coroutine[Unknown, Unknown, ScalarResult[_T]]
+  (self: AsyncSession, statement: Executable, params: Mapping[str, Any] | Sequence[Mapping[str, Any]] | None = None, *, execution_options: OrmExecuteOptionsParameter = ..., bind_arguments: dict[str, Any] | None = None, **kw: Any) -> Coroutine[Unknown, Unknown, ScalarResult[Any]]
+]  [method]  @ sqlalchemy.ext.asyncio.session:16472
+    · get  [_O: object](self: AsyncSession, entity: _EntityBindKey, ident: _PKIdentityArgument, *, options: Sequence[ORMOption] | None = None, populate_existing: bool = False, with_for_update: ForUpdateParameter = None, identity_token: Any | None = None, execution_options: OrmExecuteOptionsParameter = ...) -> Coroutine[Unknown, Unknown, _O | None]  @ sqlalchemy.ext.asyncio.session:18183
+    · get_one  [_O: object](self: AsyncSession, entity: _EntityBindKey, ident: _PKIdentityArgument, *, options: Sequence[ORMOption] | None = None, populate_existing: bool = False, with_for_update: ForUpdateParameter = None, identity_token: Any | None = None, execution_options: OrmExecuteOptionsParameter = ...) -> Coroutine[Unknown, Unknown, _O]  @ sqlalchemy.ext.asyncio.session:19167
+    · stream  Overload[
+  [_T: Any](self: AsyncSession, statement: TypedReturnsRows[_T], params: Mapping[str, Any] | Sequence[Mapping[str, Any]] | None = None, *, execution_options: OrmExecuteOptionsParameter = ..., bind_arguments: dict[str, Any] | None = None, **kw: Any) -> Coroutine[Unknown, Unknown, AsyncResult[_T]]
+  (self: AsyncSession, statement: Executable, params: Mapping[str, Any] | Sequence[Mapping[str, Any]] | None = None, *, execution_options: OrmExecuteOptionsParameter = ..., bind_arguments: dict[str, Any] | None = None, **kw: Any) -> Coroutine[Unknown, Unknown, AsyncResult[Any]]
+]  [method]  @ sqlalchemy.ext.asyncio.session:20300
+    · stream_scalars  Overload[
+  [_T: Any](self: AsyncSession, statement: TypedReturnsRows[tuple[_T]], params: Mapping[str, Any] | Sequence[Mapping[str, Any]] | None = None, *, execution_options: OrmExecuteOptionsParameter = ..., bind_arguments: dict[str, Any] | None = None, **kw: Any) -> Coroutine[Unknown, Unknown, AsyncScalarResult[_T]]
+  (self: AsyncSession, statement: Executable, params: Mapping[str, Any] | Sequence[Mapping[str, Any]] | None = None, *, execution_options: OrmExecuteOptionsParameter = ..., bind_arguments: dict[str, Any] | None = None, **kw: Any) -> Coroutine[Unknown, Unknown, AsyncScalarResult[Any]]
+]  [method]  @ sqlalchemy.ext.asyncio.session:21907
+    · delete  (self: AsyncSession, instance: object) -> Coroutine[Unknown, Unknown, None]  [method]  @ sqlalchemy.ext.asyncio.session:23528
+    · merge  [_O: object](self: AsyncSession, instance: _O, *, load: bool = True, options: Sequence[ORMOption] | None = None) -> Coroutine[Unknown, Unknown, _O]  @ sqlalchemy.ext.asyncio.session:24003
+    · flush  (self: AsyncSession, objects: Sequence[Any] | None = None) -> Coroutine[Unknown, Unknown, None]  [method]  @ sqlalchemy.ext.asyncio.session:24522
+    · get_transaction  (self: AsyncSession) -> AsyncSessionTransaction | None  [method]  @ sqlalchemy.ext.asyncio.session:24827
+    · get_nested_transaction  (self: AsyncSession) -> AsyncSessionTransaction | None  [method]  @ sqlalchemy.ext.asyncio.session:25301
+    · get_bind  [_O: object](self: AsyncSession, mapper: Mapper[_O] | type[_O] | None = None, clause: ClauseElement | None = None, bind: Connection | Engine | None = None, **kw: Any) -> Connection | Engine  @ sqlalchemy.ext.asyncio.session:25792
+    · connection  (self: AsyncSession, bind_arguments: dict[str, Any] | None = None, execution_options: Mapping[str, Any] | _CoreKnownExecutionOptions | None = None, **kw: Any) -> Coroutine[Unknown, Unknown, AsyncConnection]  [method]  @ sqlalchemy.ext.asyncio.session:29720
+    · begin  (self: AsyncSession) -> AsyncSessionTransaction  [method]  @ sqlalchemy.ext.asyncio.session:30804
+    · begin_nested  (self: AsyncSession) -> AsyncSessionTransaction  [method]  @ sqlalchemy.ext.asyncio.session:31656
+    · rollback  (self: AsyncSession) -> Coroutine[Unknown, Unknown, None]  [method]  @ sqlalchemy.ext.asyncio.session:32299
+    · commit  (self: AsyncSession) -> Coroutine[Unknown, Unknown, None]  [method]  @ sqlalchemy.ext.asyncio.session:32577
+    · close  (self: AsyncSession) -> Coroutine[Unknown, Unknown, None]  [method]  @ sqlalchemy.ext.asyncio.session:32845
+    · reset  (self: AsyncSession) -> Coroutine[Unknown, Unknown, None]  [method]  @ sqlalchemy.ext.asyncio.session:33339
+    · aclose  (self: AsyncSession) -> Coroutine[Unknown, Unknown, None]  [method]  @ sqlalchemy.ext.asyncio.session:33902
+    · invalidate  (self: AsyncSession) -> Coroutine[Unknown, Unknown, None]  [method]  @ sqlalchemy.ext.asyncio.session:34252
+    · close_all  () -> Coroutine[Unknown, Unknown, None]  [method]  @ sqlalchemy.ext.asyncio.session:34745
+    · add  (self: AsyncSession, instance: object, _warn: bool = True) -> None  [method]  @ sqlalchemy.ext.asyncio.session:36226
+    · add_all  (self: AsyncSession, instances: Iterable[object]) -> None  [method]  @ sqlalchemy.ext.asyncio.session:37461
+    · expire  (self: AsyncSession, instance: object, attribute_names: Iterable[str] | None = None) -> None  [method]  @ sqlalchemy.ext.asyncio.session:38068
+    · expire_all  (self: AsyncSession) -> None  [method]  @ sqlalchemy.ext.asyncio.session:39923
+    · expunge  (self: AsyncSession, instance: object) -> None  [method]  @ sqlalchemy.ext.asyncio.session:41418
+    · expunge_all  (self: AsyncSession) -> None  [method]  @ sqlalchemy.ext.asyncio.session:41902
+    · is_modified  (self: AsyncSession, instance: object, include_collections: bool = True) -> bool  [method]  @ sqlalchemy.ext.asyncio.session:42333
+    · in_transaction  (self: AsyncSession) -> bool  [method]  @ sqlalchemy.ext.asyncio.session:45358
+    · in_nested_transaction  (self: AsyncSession) -> bool  [method]  @ sqlalchemy.ext.asyncio.session:45809
+    · dirty  (self: AsyncSession) -> Any  [property]  @ sqlalchemy.ext.asyncio.session:46252
+    · deleted  (self: AsyncSession) -> Any  [property]  @ sqlalchemy.ext.asyncio.session:47380
+    · new  (self: AsyncSession) -> Any  [property]  @ sqlalchemy.ext.asyncio.session:47731
+    · identity_map  (self: AsyncSession, attr: IdentityMap) -> None  [property]  @ sqlalchemy.ext.asyncio.session:48071
+    · is_active  (self: AsyncSession) -> Any  [property]  @ sqlalchemy.ext.asyncio.session:48455
+    · autoflush  (self: AsyncSession, attr: bool) -> None  [property]  @ sqlalchemy.ext.asyncio.session:49809
+    · no_autoflush  (self: AsyncSession) -> Any  [property]  @ sqlalchemy.ext.asyncio.session:50161
+    · info  (self: AsyncSession) -> Any  [property]  @ sqlalchemy.ext.asyncio.session:51060
+    · object_session  (instance: object) -> Session | None  [method]  @ sqlalchemy.ext.asyncio.session:51725
+    · identity_key  (class_: type[Any] | None = None, ident: tuple[Any, ...] | Any = None, *, instance: Any | None = None, row: Row[Any] | RowMapping | None = None, identity_token: Any | None = None) -> tuple[type[Any], tuple[Any, ...], Any | None]  [method]  @ sqlalchemy.ext.asyncio.session:52171
+    · bind  <no type>  @ sqlalchemy.ext.asyncio.session:7889
+    · binds  <no type>  @ sqlalchemy.ext.asyncio.session:8005
+
+== Recipe.ingredients (line 95)   (offset 3055, 0.1 ms)
+  control (Display): InstrumentedAttribute[Any]
+  instance of InstrumentedAttribute[Any]
+  class InstrumentedAttribute  @ sqlalchemy.orm.attributes:16697
+    · inherit_cache  <get_type_at: none>  [unannotated]
+    <inherited members: MRO is behind pub(crate); not reachable>
+  [solver] 161 attributes:
+    · inherit_cache  bool | None  @ sqlalchemy.orm.attributes:16944
+    · is_attribute ↑QueryableAttribute  bool  @ sqlalchemy.orm.attributes:5270
+    · dispatch ↑QueryableAttribute  _DispatchCommon[Any]  @ sqlalchemy.orm.attributes:5295
+    · class_ ↑QueryableAttribute  AliasedClass[Any] | type[Any]  @ sqlalchemy.orm.attributes:5348
+    · key ↑QueryableAttribute  str  @ sqlalchemy.orm.attributes:5385
+    · parententity ↑QueryableAttribute  AliasedInsp[Any] | Mapper[Any]  @ sqlalchemy.orm.attributes:5398
+    · impl ↑QueryableAttribute  AttributeImpl  @ sqlalchemy.orm.attributes:5441
+    · comparator ↑QueryableAttribute  PropComparator[Any]  @ sqlalchemy.orm.attributes:5465
+    · get_history ↑QueryableAttribute  (instance: Any, passive: PassiveFlag = ...) -> History  [method]  @ sqlalchemy.orm.attributes:8084
+    · info ↑QueryableAttribute  dict[Any, Any]  @ sqlalchemy.orm.attributes:8321
+    · parent ↑QueryableAttribute  AliasedInsp[Any] | Mapper[Any]  @ sqlalchemy.orm.attributes:10110
+    · expression ↑QueryableAttribute  ColumnElement[Any]  @ sqlalchemy.orm.attributes:10406
+    · adapt_to_entity ↑QueryableAttribute  (adapt_to_entity: AliasedInsp[Any]) -> InstrumentedAttribute[Any]  [method]  @ sqlalchemy.orm.attributes:13025
+    · of_type ↑QueryableAttribute  [_T](entity: _EntityType) -> QueryableAttribute[_T]  [method]  @ sqlalchemy.orm.attributes:13375
+    · and_ ↑QueryableAttribute  (*clauses: _ColumnExpressionArgument) -> QueryableAttribute[bool]  [method]  @ sqlalchemy.orm.attributes:13756
+    · label ↑QueryableAttribute  (name: str | None) -> Label[Any]  [method]  @ sqlalchemy.orm.attributes:14757
+    · operate ↑QueryableAttribute  (op: OperatorType, *other: Any, **kwargs: Any) -> ColumnElement[Any]  [method]  @ sqlalchemy.orm.attributes:14869
+    · reverse_operate ↑QueryableAttribute  (op: OperatorType, other: Any, **kwargs: Any) -> ColumnElement[Any]  [method]  @ sqlalchemy.orm.attributes:15073
+    · hasparent ↑QueryableAttribute  (state: InstanceState[Any], optimistic: bool = False) -> bool  [method]  @ sqlalchemy.orm.attributes:15283
+    · is_selectable ↑InspectionAttr  bool  @ sqlalchemy.orm.base:15933
+    · is_aliased_class ↑InspectionAttr  bool  @ sqlalchemy.orm.base:16052
+    · is_instance ↑InspectionAttr  bool  @ sqlalchemy.orm.base:16154
+    · is_mapper ↑InspectionAttr  bool  @ sqlalchemy.orm.base:16252
+    · is_bundle ↑InspectionAttr  bool  @ sqlalchemy.orm.base:16345
+    · is_property ↑InspectionAttr  bool  @ sqlalchemy.orm.base:16434
+    · is_clause_element ↑InspectionAttr  bool  @ sqlalchemy.orm.base:17200
+    · extension_type ↑InspectionAttr  InspectionAttrExtensionType  @ sqlalchemy.orm.base:17319
+    · prop ↑PropComparator  MapperProperty[Any]  @ sqlalchemy.orm.interfaces:25006
+    · property ↑PropComparator  MapperProperty[Unknown]  @ sqlalchemy.orm.interfaces:25414
+    · adapter ↑PropComparator  _ORMAdapterProto | None  @ sqlalchemy.orm.interfaces:27068
+    · any_op ↑PropComparator  OperatorType  @ sqlalchemy.orm.interfaces:27817
+    · has_op ↑PropComparator  OperatorType  @ sqlalchemy.orm.interfaces:27868
+    · of_type_op ↑PropComparator  OperatorType  @ sqlalchemy.orm.interfaces:27919
+    · any ↑PropComparator  (criterion: (() -> ColumnElement[bool]) | ColumnElement[bool] | ExpressionElementRole[bool] | LambdaElement | SQLCoreOperations[bool] | _HasClauseElement | None = None, **kwargs: Any) -> ColumnElement[bool]  [method]  @ sqlalchemy.orm.interfaces:29890
+    · has ↑PropComparator  (criterion: (() -> ColumnElement[bool]) | ColumnElement[bool] | ExpressionElementRole[bool] | LambdaElement | SQLCoreOperations[bool] | _HasClauseElement | None = None, **kwargs: Any) -> ColumnElement[bool]  [method]  @ sqlalchemy.orm.interfaces:30648
+    · op ↑SQLCoreOperations  Overload[
+  [_OPT: Any](opstring: str, precedence: int = ..., is_comparison: bool = ..., *, return_type: _TypeEngineArgument, python_impl: ((...) -> Any) | None = None) -> (Any) -> BinaryExpression[_OPT]
+  (opstring: str, precedence: int = ..., is_comparison: bool = ..., return_type: TypeEngine[Any] | type[TypeEngine[Any]] | None = ..., python_impl: ((...) -> Any) | None = ...) -> (Any) -> BinaryExpression[Any]
+]  [method]  @ sqlalchemy.sql.elements:26561
+    · bool_op ↑SQLCoreOperations  (opstring: str, precedence: int = 0, python_impl: ((...) -> Any) | None = None) -> (Any) -> BinaryExpression[bool]  [method]  @ sqlalchemy.sql.elements:27582
+    · is_distinct_from ↑SQLCoreOperations  (other: Any) -> ColumnElement[bool]  [method]  @ sqlalchemy.sql.elements:28766
+    · is_not_distinct_from ↑SQLCoreOperations  (other: Any) -> ColumnElement[bool]  [method]  @ sqlalchemy.sql.elements:28854
+    · concat ↑SQLCoreOperations  Overload[
+  (other: Any) -> ColumnElement[str]
+  (other: Any) -> ColumnElement[Any]
+]  [method]  @ sqlalchemy.sql.elements:29936
+    · like ↑SQLCoreOperations  (other: Any, escape: str | None = None) -> BinaryExpression[bool]  [method]  @ sqlalchemy.sql.elements:30196
+    · ilike ↑SQLCoreOperations  (other: Any, escape: str | None = None) -> BinaryExpression[bool]  [method]  @ sqlalchemy.sql.elements:30327
+    · bitwise_xor ↑SQLCoreOperations  (other: Any) -> BinaryExpression[Any]  [method]  @ sqlalchemy.sql.elements:30459
+    · bitwise_or ↑SQLCoreOperations  (other: Any) -> BinaryExpression[Any]  [method]  @ sqlalchemy.sql.elements:30544
+    · bitwise_and ↑SQLCoreOperations  (other: Any) -> BinaryExpression[Any]  [method]  @ sqlalchemy.sql.elements:30628
+    · bitwise_not ↑SQLCoreOperations  () -> UnaryExpression[Any]  [method]  @ sqlalchemy.sql.elements:30713
+    · bitwise_lshift ↑SQLCoreOperations  (other: Any) -> BinaryExpression[Any]  [method]  @ sqlalchemy.sql.elements:30787
+    · bitwise_rshift ↑SQLCoreOperations  (other: Any) -> BinaryExpression[Any]  [method]  @ sqlalchemy.sql.elements:30875
+    · in_ ↑SQLCoreOperations  (other: BindParameter[Any] | InElementRole | Iterable[Any]) -> BinaryExpression[bool]  [method]  @ sqlalchemy.sql.elements:30963
+    · not_in ↑SQLCoreOperations  (other: BindParameter[Any] | InElementRole | Iterable[Any]) -> BinaryExpression[bool]  [method]  @ sqlalchemy.sql.elements:31164
+    · notin_ ↑SQLCoreOperations  (other: BindParameter[Any] | InElementRole | Iterable[Any]) -> BinaryExpression[bool]  [method]  @ sqlalchemy.sql.elements:31368
+    · not_like ↑SQLCoreOperations  (other: Any, escape: str | None = None) -> BinaryExpression[bool]  [method]  @ sqlalchemy.sql.elements:31572
+    · notlike ↑SQLCoreOperations  (other: Any, escape: str | None = None) -> BinaryExpression[bool]  [method]  @ sqlalchemy.sql.elements:31707
+    · not_ilike ↑SQLCoreOperations  (other: Any, escape: str | None = None) -> BinaryExpression[bool]  [method]  @ sqlalchemy.sql.elements:31841
+    · notilike ↑SQLCoreOperations  (other: Any, escape: str | None = None) -> BinaryExpression[bool]  [method]  @ sqlalchemy.sql.elements:31977
+    · is_ ↑SQLCoreOperations  (other: Any) -> BinaryExpression[bool]  [method]  @ sqlalchemy.sql.elements:32112
+    · is_not ↑SQLCoreOperations  (other: Any) -> BinaryExpression[bool]  [method]  @ sqlalchemy.sql.elements:32190
+    · isnot ↑SQLCoreOperations  (other: Any) -> BinaryExpression[bool]  [method]  @ sqlalchemy.sql.elements:32271
+    · startswith ↑SQLCoreOperations  (other: Any, escape: str | None = None, autoescape: bool = False) -> ColumnElement[bool]  [method]  @ sqlalchemy.sql.elements:32351
+    · istartswith ↑SQLCoreOperations  (other: Any, escape: str | None = None, autoescape: bool = False) -> ColumnElement[bool]  [method]  @ sqlalchemy.sql.elements:32548
+    · endswith ↑SQLCoreOperations  (other: Any, escape: str | None = None, autoescape: bool = False) -> ColumnElement[bool]  [method]  @ sqlalchemy.sql.elements:32746
+    · iendswith ↑SQLCoreOperations  (other: Any, escape: str | None = None, autoescape: bool = False) -> ColumnElement[bool]  [method]  @ sqlalchemy.sql.elements:32941
+    · contains ↑SQLCoreOperations  (other: Any, **kw: Any) -> ColumnElement[bool]  [method]  @ sqlalchemy.sql.elements:33137
+    · icontains ↑SQLCoreOperations  (other: Any, **kw: Any) -> ColumnElement[bool]  [method]  @ sqlalchemy.sql.elements:33228
+    · match ↑SQLCoreOperations  (other: Any, **kwargs: Any) -> ColumnElement[bool]  [method]  @ sqlalchemy.sql.elements:33320
+    · regexp_match ↑SQLCoreOperations  (pattern: Any, flags: str | None = None) -> ColumnElement[bool]  [method]  @ sqlalchemy.sql.elements:33412
+    · regexp_replace ↑SQLCoreOperations  (pattern: Any, replacement: Any, flags: str | None = None) -> ColumnElement[str]  [method]  @ sqlalchemy.sql.elements:33549
+    · desc ↑SQLCoreOperations  () -> UnaryExpression[Any]  [method]  @ sqlalchemy.sql.elements:33705
+    · asc ↑SQLCoreOperations  () -> UnaryExpression[Any]  [method]  @ sqlalchemy.sql.elements:33772
+    · nulls_first ↑SQLCoreOperations  () -> UnaryExpression[Any]  [method]  @ sqlalchemy.sql.elements:33838
+    · nullsfirst ↑SQLCoreOperations  () -> UnaryExpression[Any]  [method]  @ sqlalchemy.sql.elements:33912
+    · nulls_last ↑SQLCoreOperations  () -> UnaryExpression[Any]  [method]  @ sqlalchemy.sql.elements:33985
+    · nullslast ↑SQLCoreOperations  () -> UnaryExpression[Any]  [method]  @ sqlalchemy.sql.elements:34058
+    · collate ↑SQLCoreOperations  (collation: str) -> CollationClause  [method]  @ sqlalchemy.sql.elements:34130
+    · between ↑SQLCoreOperations  (cleft: Any, cright: Any, symmetric: bool = False) -> BinaryExpression[bool]  [method]  @ sqlalchemy.sql.elements:34209
+    · distinct ↑SQLCoreOperations  () -> UnaryExpression[Any]  [method]  @ sqlalchemy.sql.elements:34351
+    · any_ ↑SQLCoreOperations  () -> CollectionAggregate[Any]  [method]  @ sqlalchemy.sql.elements:34435
+    · all_ ↑SQLCoreOperations  () -> CollectionAggregate[Any]  [method]  @ sqlalchemy.sql.elements:34504
+    · timetuple ↑ColumnOperators  None  @ sqlalchemy.sql.operators:16253
+    · isnot_distinct_from ↑ColumnOperators  (other: Any) -> ColumnOperators  [method]  @ sqlalchemy.sql.operators:18885
+    · allows_lambda ↑AllowsLambdaRole  bool  @ sqlalchemy.sql.roles:1276
+    · uses_inspection ↑UsesInspection  bool  @ sqlalchemy.sql.roles:1204
+    · unique_params ↑Immutable  (*optionaldict: Unknown, **kwargs: Unknown) -> Unknown  [method]  @ sqlalchemy.sql.base:5582
+    · params ↑Immutable  (*optionaldict: Unknown, **kwargs: Unknown) -> Unknown  [method]  @ sqlalchemy.sql.base:5715
+
+== selectinload( (line 96)   (offset 3128, 0.0 ms)
+  control (Display): (*keys: _AttrType, *, recursion_depth: int | None = None) -> _AbstractLoad
+  function  (*keys: _AttrType, *, recursion_depth: int | None = None) -> _AbstractLoad
+    · returns  _AbstractLoad
+
+== result = await (line 114)   (offset 3676, 0.0 ms)
+  control (Display): Result[tuple[Recipe]]
+  instance of Result[tuple[Recipe]]
+  class Result  @ sqlalchemy.engine.result:28946
+    · close  <get_type_at: none>  [unannotated]
+    · closed  <get_type_at: none>  [unannotated]
+    · yield_per  <get_type_at: none>  [unannotated]
+    · unique  <get_type_at: none>  [unannotated]
+    · columns  <get_type_at: none>  [unannotated]
+    · scalars  <get_type_at: none>  [unannotated]
+    · mappings  <get_type_at: none>  [unannotated]
+    · t  <get_type_at: none>  [unannotated]
+    · tuples  <get_type_at: none>  [unannotated]
+    · partitions  <get_type_at: none>  [unannotated]
+    · fetchall  <get_type_at: none>  [unannotated]
+    · fetchone  <get_type_at: none>  [unannotated]
+    · fetchmany  <get_type_at: none>  [unannotated]
+    · all  <get_type_at: none>  [unannotated]
+    · first  <get_type_at: none>  [unannotated]
+    · one_or_none  <get_type_at: none>  [unannotated]
+    · scalar_one  <get_type_at: none>  [unannotated]
+    · scalar_one_or_none  <get_type_at: none>  [unannotated]
+    · one  <get_type_at: none>  [unannotated]
+    · scalar  <get_type_at: none>  [unannotated]
+    · freeze  <get_type_at: none>  [unannotated]
+    · merge  <get_type_at: none>  [unannotated]
+    <inherited members: MRO is behind pub(crate); not reachable>
+  [solver] 66 attributes:
+    · close  () -> None  [method]  @ sqlalchemy.engine.result:30639
+    · closed  bool  @ sqlalchemy.engine.result:31842
+    · yield_per  (num: int) -> Result[tuple[Recipe]]  [method]  @ sqlalchemy.engine.result:32048
+    · unique  (strategy: ((Any) -> Any) | None = None) -> Result[tuple[Recipe]]  [method]  @ sqlalchemy.engine.result:34451
+    · columns  (*col_expressions: _KeyIndexType) -> Result[tuple[Recipe]]  [method]  @ sqlalchemy.engine.result:36694
+    · scalars  Overload[
+  [_T: Any]() -> ScalarResult[_T]
+  [_T: Any](index: Literal[0]) -> ScalarResult[_T]
+  (index: _KeyIndexType = 0) -> ScalarResult[Any]
+]  [method]  @ sqlalchemy.engine.result:38690
+    · mappings  () -> MappingResult  [method]  @ sqlalchemy.engine.result:40799
+    · t  TupleResult[tuple[Recipe]]  @ sqlalchemy.engine.result:41341
+    · tuples  () -> TupleResult[tuple[Recipe]]  [method]  @ sqlalchemy.engine.result:41647
+    · partitions  (size: int | None = None) -> Iterator[Sequence[Row[tuple[Recipe]]]]  [method]  @ sqlalchemy.engine.result:42989
+    · fetchall  () -> Sequence[Row[tuple[Recipe]]]  [method]  @ sqlalchemy.engine.result:45266
+    · fetchone  () -> Row[tuple[Recipe]] | None  [method]  @ sqlalchemy.engine.result:45412
+    · fetchmany  (size: int | None = None) -> Sequence[Row[tuple[Recipe]]]  [method]  @ sqlalchemy.engine.result:46079
+    · all  () -> Sequence[Row[tuple[Recipe]]]  [method]  @ sqlalchemy.engine.result:46617
+    · first  () -> Row[tuple[Recipe]] | None  [method]  @ sqlalchemy.engine.result:47092
+    · one_or_none  () -> Row[tuple[Recipe]] | None  [method]  @ sqlalchemy.engine.result:48434
+    · scalar_one  Overload[
+  [_T: Any]() -> _T
+  () -> Any
+]  [method]  @ sqlalchemy.engine.result:49106
+    · scalar_one_or_none  Overload[
+  [_T: Any]() -> _T | None
+  () -> Any | None
+]  [method]  @ sqlalchemy.engine.result:49696
+    · one  () -> Row[tuple[Recipe]]  [method]  @ sqlalchemy.engine.result:50333
+    · scalar  Overload[
+  [_T: Any]() -> _T | None
+  () -> Any
+]  [method]  @ sqlalchemy.engine.result:51381
+    · freeze  () -> FrozenResult[tuple[Recipe]]  [method]  @ sqlalchemy.engine.result:52101
+    · merge  (*others: Result[Any]) -> MergedResult[tuple[Recipe]]  [method]  @ sqlalchemy.engine.result:52965
+    · keys ↑_WithKeys  () -> RMKeyView  [method]  @ sqlalchemy.engine.result:28244
+    · memoized_attribute ↑HasMemoized  type[HasMemoized.memoized_attribute]  @ sqlalchemy.util.langhelpers:36454
+    · memoized_instancemethod ↑HasMemoized  [_F: (...) -> Any](fn: _F) -> _F  [method]  @ sqlalchemy.util.langhelpers:37326
+
+== def get_recipe_by_id (line 118)   (offset 3780, 0.0 ms)
+  control (Display): (db: AsyncSession, recipe_id: UUID) -> Coroutine[Unknown, Unknown, Recipe | None]
+  function  (db: AsyncSession, recipe_id: UUID) -> Coroutine[Unknown, Unknown, Recipe | None]
+    · returns  Coroutine[Unknown, Unknown, Recipe | None]
+
+== Optional[Recipe] (line 121)   (offset 3867, 0.0 ms)
+  control (Display): type[Recipe]
+  class object
+  class Recipe  @ app.models.recipe:987
+    · id  <get_type_at: none>  [unannotated]
+    · owner_id  <get_type_at: none>  [unannotated]
+    · name  <get_type_at: none>  [unannotated]
+    · index_name  <get_type_at: none>  [unannotated]
+    · dish_type  <get_type_at: none>  [unannotated]
+    · description  <get_type_at: none>  [unannotated]
+    · prep_time_minutes  <get_type_at: none>  [unannotated]
+    · cook_time_minutes  <get_type_at: none>  [unannotated]
+    · prep_notes  <get_type_at: none>  [unannotated]
+    · postmortem_notes  <get_type_at: none>  [unannotated]
+    · source_url  <get_type_at: none>  [unannotated]
+    · retired_at  <get_type_at: none>  [unannotated]
+    · created_at  <get_type_at: none>  [unannotated]
+    · updated_at  <get_type_at: none>  [unannotated]
+    · ingredients  <get_type_at: none>  [unannotated]
+    · instructions  <get_type_at: none>  [unannotated]
+    · prep_steps  <get_type_at: none>  [unannotated]
+    <inherited members: MRO is behind pub(crate); not reachable>
+  [solver] 19 attributes:
+    · id  Column[UUID]  @ app.models.recipe:1096
+    · owner_id  Column[UUID]  @ app.models.recipe:1170
+    · name  Column[str]  @ app.models.recipe:1324
+    · index_name  Column[str]  @ app.models.recipe:1366
+    · dish_type  Column[str]  @ app.models.recipe:1458
+    · description  Column[str]  @ app.models.recipe:1538
+    · prep_time_minutes  Column[int]  @ app.models.recipe:1614
+    · cook_time_minutes  Column[int]  @ app.models.recipe:1669
+    · prep_notes  Column[str]  @ app.models.recipe:1724
+    · postmortem_notes  Column[str]  @ app.models.recipe:1769
+    · source_url  Column[str]  @ app.models.recipe:1820
+    · retired_at  Column[datetime]  @ app.models.recipe:1867
+    · created_at  Column[datetime]  @ app.models.recipe:1946
+    · updated_at  Column[datetime]  @ app.models.recipe:2038
+    · ingredients  InstrumentedAttribute[Any]  @ app.models.recipe:2211
+    · instructions  InstrumentedAttribute[Any]  @ app.models.recipe:2348
+    · prep_steps  InstrumentedAttribute[Any]  @ app.models.recipe:2487
+
+== def create_recipe (line 137)   (offset 4459, 0.0 ms)
+  control (Display): (db: AsyncSession, recipe_data: RecipeCreate, owner_id: UUID) -> Coroutine[Unknown, Unknown, Recipe]
+  function  (db: AsyncSession, recipe_data: RecipeCreate, owner_id: UUID) -> Coroutine[Unknown, Unknown, Recipe]
+    · returns  Coroutine[Unknown, Unknown, Recipe]
+
+== recipe = Recipe( (line 144)   (offset 4686, 0.0 ms)
+  control (Display): type[Recipe]
+  class object
+  class Recipe  @ app.models.recipe:987
+    · id  <get_type_at: none>  [unannotated]
+    · owner_id  <get_type_at: none>  [unannotated]
+    · name  <get_type_at: none>  [unannotated]
+    · index_name  <get_type_at: none>  [unannotated]
+    · dish_type  <get_type_at: none>  [unannotated]
+    · description  <get_type_at: none>  [unannotated]
+    · prep_time_minutes  <get_type_at: none>  [unannotated]
+    · cook_time_minutes  <get_type_at: none>  [unannotated]
+    · prep_notes  <get_type_at: none>  [unannotated]
+    · postmortem_notes  <get_type_at: none>  [unannotated]
+    · source_url  <get_type_at: none>  [unannotated]
+    · retired_at  <get_type_at: none>  [unannotated]
+    · created_at  <get_type_at: none>  [unannotated]
+    · updated_at  <get_type_at: none>  [unannotated]
+    · ingredients  <get_type_at: none>  [unannotated]
+    · instructions  <get_type_at: none>  [unannotated]
+    · prep_steps  <get_type_at: none>  [unannotated]
+    <inherited members: MRO is behind pub(crate); not reachable>
+  [solver] 19 attributes:
+    · id  Column[UUID]  @ app.models.recipe:1096
+    · owner_id  Column[UUID]  @ app.models.recipe:1170
+    · name  Column[str]  @ app.models.recipe:1324
+    · index_name  Column[str]  @ app.models.recipe:1366
+    · dish_type  Column[str]  @ app.models.recipe:1458
+    · description  Column[str]  @ app.models.recipe:1538
+    · prep_time_minutes  Column[int]  @ app.models.recipe:1614
+    · cook_time_minutes  Column[int]  @ app.models.recipe:1669
+    · prep_notes  Column[str]  @ app.models.recipe:1724
+    · postmortem_notes  Column[str]  @ app.models.recipe:1769
+    · source_url  Column[str]  @ app.models.recipe:1820
+    · retired_at  Column[datetime]  @ app.models.recipe:1867
+    · created_at  Column[datetime]  @ app.models.recipe:1946
+    · updated_at  Column[datetime]  @ app.models.recipe:2038
+    · ingredients  InstrumentedAttribute[Any]  @ app.models.recipe:2211
+    · instructions  InstrumentedAttribute[Any]  @ app.models.recipe:2348
+    · prep_steps  InstrumentedAttribute[Any]  @ app.models.recipe:2487
+
+== ing_result = await (line 191)   (offset 6644, 0.0 ms)
+  control (Display): Result[tuple[RecipeIngredient]]
+  instance of Result[tuple[RecipeIngredient]]
+  class Result  @ sqlalchemy.engine.result:28946
+    · close  <get_type_at: none>  [unannotated]
+    · closed  <get_type_at: none>  [unannotated]
+    · yield_per  <get_type_at: none>  [unannotated]
+    · unique  <get_type_at: none>  [unannotated]
+    · columns  <get_type_at: none>  [unannotated]
+    · scalars  <get_type_at: none>  [unannotated]
+    · mappings  <get_type_at: none>  [unannotated]
+    · t  <get_type_at: none>  [unannotated]
+    · tuples  <get_type_at: none>  [unannotated]
+    · partitions  <get_type_at: none>  [unannotated]
+    · fetchall  <get_type_at: none>  [unannotated]
+    · fetchone  <get_type_at: none>  [unannotated]
+    · fetchmany  <get_type_at: none>  [unannotated]
+    · all  <get_type_at: none>  [unannotated]
+    · first  <get_type_at: none>  [unannotated]
+    · one_or_none  <get_type_at: none>  [unannotated]
+    · scalar_one  <get_type_at: none>  [unannotated]
+    · scalar_one_or_none  <get_type_at: none>  [unannotated]
+    · one  <get_type_at: none>  [unannotated]
+    · scalar  <get_type_at: none>  [unannotated]
+    · freeze  <get_type_at: none>  [unannotated]
+    · merge  <get_type_at: none>  [unannotated]
+    <inherited members: MRO is behind pub(crate); not reachable>
+  [solver] 66 attributes:
+    · close  () -> None  [method]  @ sqlalchemy.engine.result:30639
+    · closed  bool  @ sqlalchemy.engine.result:31842
+    · yield_per  (num: int) -> Result[tuple[RecipeIngredient]]  [method]  @ sqlalchemy.engine.result:32048
+    · unique  (strategy: ((Any) -> Any) | None = None) -> Result[tuple[RecipeIngredient]]  [method]  @ sqlalchemy.engine.result:34451
+    · columns  (*col_expressions: _KeyIndexType) -> Result[tuple[RecipeIngredient]]  [method]  @ sqlalchemy.engine.result:36694
+    · scalars  Overload[
+  [_T: Any]() -> ScalarResult[_T]
+  [_T: Any](index: Literal[0]) -> ScalarResult[_T]
+  (index: _KeyIndexType = 0) -> ScalarResult[Any]
+]  [method]  @ sqlalchemy.engine.result:38690
+    · mappings  () -> MappingResult  [method]  @ sqlalchemy.engine.result:40799
+    · t  TupleResult[tuple[RecipeIngredient]]  @ sqlalchemy.engine.result:41341
+    · tuples  () -> TupleResult[tuple[RecipeIngredient]]  [method]  @ sqlalchemy.engine.result:41647
+    · partitions  (size: int | None = None) -> Iterator[Sequence[Row[tuple[RecipeIngredient]]]]  [method]  @ sqlalchemy.engine.result:42989
+    · fetchall  () -> Sequence[Row[tuple[RecipeIngredient]]]  [method]  @ sqlalchemy.engine.result:45266
+    · fetchone  () -> Row[tuple[RecipeIngredient]] | None  [method]  @ sqlalchemy.engine.result:45412
+    · fetchmany  (size: int | None = None) -> Sequence[Row[tuple[RecipeIngredient]]]  [method]  @ sqlalchemy.engine.result:46079
+    · all  () -> Sequence[Row[tuple[RecipeIngredient]]]  [method]  @ sqlalchemy.engine.result:46617
+    · first  () -> Row[tuple[RecipeIngredient]] | None  [method]  @ sqlalchemy.engine.result:47092
+    · one_or_none  () -> Row[tuple[RecipeIngredient]] | None  [method]  @ sqlalchemy.engine.result:48434
+    · scalar_one  Overload[
+  [_T: Any]() -> _T
+  () -> Any
+]  [method]  @ sqlalchemy.engine.result:49106
+    · scalar_one_or_none  Overload[
+  [_T: Any]() -> _T | None
+  () -> Any | None
+]  [method]  @ sqlalchemy.engine.result:49696
+    · one  () -> Row[tuple[RecipeIngredient]]  [method]  @ sqlalchemy.engine.result:50333
+    · scalar  Overload[
+  [_T: Any]() -> _T | None
+  () -> Any
+]  [method]  @ sqlalchemy.engine.result:51381
+    · freeze  () -> FrozenResult[tuple[RecipeIngredient]]  [method]  @ sqlalchemy.engine.result:52101
+    · merge  (*others: Result[Any]) -> MergedResult[tuple[RecipeIngredient]]  [method]  @ sqlalchemy.engine.result:52965
+    · keys ↑_WithKeys  () -> RMKeyView  [method]  @ sqlalchemy.engine.result:28244
+    · memoized_attribute ↑HasMemoized  type[HasMemoized.memoized_attribute]  @ sqlalchemy.util.langhelpers:36454
+    · memoized_instancemethod ↑HasMemoized  [_F: (...) -> Any](fn: _F) -> _F  [method]  @ sqlalchemy.util.langhelpers:37326
+
+== RecipeService.get_recipe_by_id (line 228)   (offset 8196, 0.0 ms)
+  control (Display): (db: AsyncSession, recipe_id: UUID) -> Coroutine[Unknown, Unknown, Recipe | None]
+  function  (db: AsyncSession, recipe_id: UUID) -> Coroutine[Unknown, Unknown, Recipe | None]
+    · returns  Coroutine[Unknown, Unknown, Recipe | None]
+
+done; footprint 136 MB (peak 136); queries ms: [0.143, 0.066, 0.043, 0.018, 0.002, 0.022, 0.004, 0.04, 0.021, 0.023]

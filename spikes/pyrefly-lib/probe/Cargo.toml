@@ -1,0 +1,21 @@
+[package]
+name = "typescope-pyrefly-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Spike 3: pyrefly as a library, from OUTSIDE its crate, public API only.
+[dependencies]
+pyrefly = { path = "../src/pyrefly" }
+pyrefly_build = { path = "../src/crates/pyrefly_build" }
+pyrefly_python = { path = "../src/crates/pyrefly_python" }
+pyrefly_types = { path = "../src/crates/pyrefly_types" }
+pyrefly_util = { path = "../src/crates/pyrefly_util" }
+pyrefly_config = { path = "../src/crates/pyrefly_config" }
+ruff_text_size = "0.0.14"
+dupe = "0.9.1"
+
+[workspace]
+
+[profile.release]
+debug = 0
