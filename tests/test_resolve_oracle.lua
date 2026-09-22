@@ -259,6 +259,47 @@ do
   require("typescope").close()
 end
 
+-- the insert-mode typing surface on the oracle path (bead lfy): cursor
+-- inside `ServerConfig("h")`'s parens, drive the insert entry point the way
+-- e2e_phase3 does (insert mode itself is unreachable headless)
+do
+  require("typescope").setup({ resolver = "oracle", oracle = { path = bin }, insert_mode = { enabled = true } })
+  local q = vim.fn.getcwd() .. "/tests/fixtures/oracle/oracle.py"
+  vim.cmd.edit(q)
+  local qb = vim.api.nvim_get_current_buf()
+  vim.bo[qb].filetype = "python"
+  vim.wait(20000, function()
+    local c = require("typescope.lsp").oracle_for(qb)
+    return c ~= nil and c.initialized
+  end, 50)
+  for i, l in ipairs(vim.api.nvim_buf_get_lines(qb, 0, -1, false)) do
+    local s = l:find('= ServerConfig("h")', 1, true)
+    if s then
+      vim.api.nvim_win_set_cursor(0, { i, s + 14 }) -- inside the parens
+    end
+  end
+  require("typescope.insert")._update()
+  local iw
+  vim.wait(20000, function()
+    for _, w in ipairs(vim.api.nvim_list_wins()) do
+      local c = vim.api.nvim_win_get_config(w)
+      if c.relative ~= "" and vim.bo[vim.api.nvim_win_get_buf(w)].filetype == "typescope" then
+        iw = w
+      end
+    end
+    return iw ~= nil
+  end, 20)
+  check(iw ~= nil, "insert surface opened on the oracle path")
+  if iw then
+    local itext = table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(iw), 0, -1, false), "\n")
+    check(
+      itext:find("host", 1, true) ~= nil and itext:find("port", 1, true) ~= nil,
+      "typing surface lists the constructor's params"
+    )
+  end
+  require("typescope.insert").close()
+end
+
 for _, c in ipairs(vim.lsp.get_clients({ name = "typescope-oracle" })) do
   if vim.fn.has("nvim-0.11") == 1 then
     c:stop(true)

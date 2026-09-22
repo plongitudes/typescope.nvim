@@ -60,3 +60,9 @@ Newest at the bottom. One entry per tick: bead, what was done, what was verified
 - Screenshots: NOT taken — this session has no terminal to render into. The suite prints the exact float lines for each layout (row content is what the buffer holds; the geometry warning is about anchors, which these rows do not touch). Tony: open a Python buffer with an enum and a class with a property, press K, and eyeball the three rows once — that is the visual check this bead cannot do headless.
 - Deferred to bead 10 with reason: "`inferred` replaces `evaluated`" in the renderer. Until the treesitter resolver is deleted both producers exist, and the ≈ drawing is driven by `evaluated`, which the oracle client sets alongside `inferred`; collapsing to one field is bead 10's cleanup.
 - Next: `lfy` insert port.
+
+## 2026-09-21 — tick 8 — `lfy` lua-insert-port
+
+- Done: `insert.lua` goes through `typescope._resolver()` / `_can_resolve()` like the float; basedpyright is optional on the oracle path (it still supplies `signatureHelp` for the active param when attached, and `refresh_active` already guarded its absence). `ensure_shape` calls `evaluate` only when the resolver offers it — the oracle's inferred types arrive inline and its lazy nodes are structure — so the legacy path keeps its ≈ fetch until bead 10 deletes `evaluate` with the old resolver. `function_scope`'s signature unchanged.
+- Verified: `./tests/run.sh` ALL SUITES PASS (legacy insert e2e untouched); the oracle suite drives `insert._update()` inside `ServerConfig("h")` and reads the constructor's params off the typing surface; stylua clean; no stray processes.
+- Next: `1mv` parity gate (both deps closed).

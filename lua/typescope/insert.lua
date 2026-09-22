@@ -198,12 +198,19 @@ local function ensure_shape(st)
   if node._eval_pending and not async.stale(node._eval_pending) then
     return
   end
+  -- The oracle resolver has nothing to evaluate lazily: an inferred type
+  -- arrives inline and a lazy node is structure, not an evaluation. Only the
+  -- treesitter resolver offers evaluate(); this goes with it (bead 10).
+  local resolver = require("typescope")._resolver()
+  if not resolver.evaluate then
+    return
+  end
   local client = require("typescope.lsp").client_for(st.srcbuf)
   if not client then
     return
   end
   node._eval_pending = st.token
-  require("typescope.resolve").evaluate(client, node, st.token, function(filled)
+  resolver.evaluate(client, node, st.token, function(filled)
     node._eval_pending = nil
     if filled and state == st then
       repaint(st)
@@ -312,12 +319,15 @@ local function open_for(srcbuf, key, frow0, fcol)
   local token = async.token()
   resolve_token = token
   local win = vim.api.nvim_get_current_win()
-  local client = require("typescope.lsp").client_for(srcbuf)
-  if not client then
+  local typescope = require("typescope")
+  if not typescope._can_resolve(srcbuf) then
     return
   end
+  -- basedpyright, when attached: the legacy pipeline needs it; the oracle
+  -- path only uses it for signatureHelp (refresh_active)
+  local client = require("typescope.lsp").client_for(srcbuf)
   async.run(function()
-    local roots, meta = require("typescope.resolve").function_scope(client, srcbuf, win, token, { frow0 + 1, fcol })
+    local roots, meta = typescope._resolver().function_scope(client, srcbuf, win, token, { frow0 + 1, fcol })
     if async.stale(token) or pending_key ~= key then
       return
     end
