@@ -3,12 +3,15 @@
 //! links against the vendored, patched pyrefly; the overlays (bead 3) and the
 //! structure walk (beads 2 and 4) grow from here.
 
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::Mutex;
 
 use pyrefly::library::library::library::library::default_config_finder;
+use pyrefly::state::load::FileContents;
 use pyrefly::state::require::Require;
 use pyrefly::state::state::State;
 use pyrefly_build::handle::Handle;
@@ -27,9 +30,12 @@ use crate::walk::Walker;
 
 pub struct Oracle {
     state: State,
-    /// Files already solved at Require::Everything. Bead 3 (overlays)
-    /// replaces this with proper invalidation.
+    /// Files on disk already solved at Require::Everything.
     loaded: Mutex<HashSet<PathBuf>>,
+    /// Buffers the editor has open, with their current (possibly unsaved)
+    /// contents. These are pyrefly memory overlays: a handle for an open
+    /// file is a `ModulePath::memory` handle and reads from here, not disk.
+    open: Mutex<HashMap<PathBuf, Arc<String>>>,
 }
 
 /// The answer to `typescope/structure` (design/oracle.md §4). Bead 4 fills
@@ -53,15 +59,20 @@ impl Oracle {
         // and pyrightconfig.json, which is how spike 3 found the kitchen venv
         // with no configuration of its own.
         let state = State::new(default_config_finder(None), ThreadCount::AllThreads);
-        Self { state, loaded: Mutex::new(HashSet::new()) }
+        Self { state, loaded: Mutex::new(HashSet::new()), open: Mutex::new(HashMap::new()) }
     }
 
-    /// The handle for a file on disk, named and configured the way pyrefly's
-    /// own server would (its config finder walks up for pyrefly.toml,
+    /// The handle for a file, named and configured the way pyrefly's own
+    /// server would (its config finder walks up for pyrefly.toml,
     /// pyproject.toml, pyrightconfig.json and derives the module name from
-    /// the search path).
+    /// the search path). An open buffer gets a memory handle so its unsaved
+    /// contents are what gets analysed.
     pub fn handle_for(&self, path: &Path) -> Handle {
-        let module_path = ModulePath::filesystem(path.to_path_buf());
+        let module_path = if self.open.lock().unwrap().contains_key(path) {
+            ModulePath::memory(path.to_path_buf())
+        } else {
+            ModulePath::filesystem(path.to_path_buf())
+        };
         let config = self
             .state
             .config_finder()
@@ -70,9 +81,13 @@ impl Oracle {
     }
 
     /// Solve the file (and, lazily, what it imports) so the transaction can
-    /// answer questions about it.
+    /// answer questions about it. Open buffers are solved on every change
+    /// (`did_change`), so here only files read from disk need a first run.
     pub fn ensure_loaded(&self, path: &Path) -> Handle {
         let handle = self.handle_for(path);
+        if self.open.lock().unwrap().contains_key(path) {
+            return handle;
+        }
         let mut loaded = self.loaded.lock().unwrap();
         if !loaded.contains(path) {
             let mut committing = self.state.new_committable_transaction(Require::Exports, None);
@@ -81,6 +96,44 @@ impl Oracle {
             loaded.insert(path.to_path_buf());
         }
         handle
+    }
+
+    /// `textDocument/didOpen` and `didChange` (full sync): the buffer's
+    /// current text becomes the overlay and every open file is re-solved,
+    /// the way pyrefly's server validates its open files.
+    pub fn did_change(&self, path: &Path, text: String) {
+        let text = Arc::new(text);
+        self.open.lock().unwrap().insert(path.to_path_buf(), text.clone());
+        let mut committing = self.state.new_committable_transaction(Require::Exports, None);
+        committing
+            .as_mut()
+            .set_memory(vec![(path.to_path_buf(), Some(Arc::new(FileContents::Source(text))))]);
+        let handles = self.open_handles();
+        committing.as_mut().run(&handles, Require::Everything, None);
+        self.state.commit_transaction(committing, None);
+    }
+
+    /// `textDocument/didClose`: the overlay is dropped and the file is read
+    /// from disk again on the next request.
+    pub fn did_close(&self, path: &Path) {
+        if self.open.lock().unwrap().remove(path).is_none() {
+            return;
+        }
+        let mut committing = self.state.new_committable_transaction(Require::Exports, None);
+        committing.as_mut().set_memory(vec![(path.to_path_buf(), None)]);
+        committing.as_mut().invalidate_disk(&[path.to_path_buf()]);
+        // a dirtied transaction must run before it commits (pyrefly asserts
+        // it); the remaining open files are re-solved, an empty list is fine
+        let handles = self.open_handles();
+        committing.as_mut().run(&handles, Require::Everything, None);
+        self.state.commit_transaction(committing, None);
+        // whatever was solved from disk before the open is stale now
+        self.loaded.lock().unwrap().remove(path);
+    }
+
+    fn open_handles(&self) -> Vec<Handle> {
+        let paths: Vec<PathBuf> = self.open.lock().unwrap().keys().cloned().collect();
+        paths.iter().map(|p| self.handle_for(p)).collect()
     }
 
     /// The structure under (line, character) — 0-based, UTF-16 like LSP.

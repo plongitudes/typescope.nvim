@@ -293,3 +293,30 @@ fn beyond_depth_a_class_is_expandable_and_located_at_its_declaration() {
     let deeper = oracle().structure(&fixtures().join("oracle/oracle.py"), use_line, 4, 2, Members::Data).unwrap();
     assert_eq!(data_rows(find(&deeper.roots[0], "item")), ["host", "port"]);
 }
+
+#[test]
+fn an_unsaved_edit_is_what_the_oracle_answers_with() {
+    // a private State: overlays are global to it and must not leak into
+    // the other tests' shared oracle
+    let oracle = Oracle::new();
+    let path = fixtures().join("oracle/oracle.py");
+    let on_disk = std::fs::read_to_string(&path).unwrap();
+    let line = line_of("oracle/oracle.py", "    resp = fetch");
+
+    // as on disk
+    let scope = oracle.structure(&path, line, 4, 2, Members::Data).unwrap();
+    assert_eq!(find(&scope.roots[0], "status").ty.display, "int");
+
+    // opened, then edited in memory without saving: status becomes a str
+    oracle.did_change(&path, on_disk.clone());
+    let edited = on_disk.replace("    status: int\n", "    status: str\n");
+    assert_ne!(edited, on_disk);
+    oracle.did_change(&path, edited);
+    let scope = oracle.structure(&path, line, 4, 2, Members::Data).unwrap();
+    assert_eq!(find(&scope.roots[0], "status").ty.display, "str", "the overlay, not the disk");
+
+    // closed: the disk is the truth again
+    oracle.did_close(&path);
+    let scope = oracle.structure(&path, line, 4, 2, Members::Data).unwrap();
+    assert_eq!(find(&scope.roots[0], "status").ty.display, "int");
+}

@@ -18,3 +18,11 @@ Newest at the bottom. One entry per tick: bead, what was done, what was verified
 - Plan correction (§4): expansion = re-ask the original position with depth+1 and graft; `location` is the declaration. Asking at the declaration loses specialization.
 - Gotchas: `completions` never lists `object` members or dataclass-synthesized dunders → category from the decorator text; `git mv -k` on an untracked file silently does nothing (cost one confusing test run); the mock server globs `tests/fixtures/*.py` non-recursively, so new fixtures with colliding class names go in a subdirectory.
 - Next: `dmg` oracle-sync (overlays) or `12n` lua client — both ready; `12r` scopes needs this bead.
+
+## 2026-09-21 — tick 3 — `dmg` oracle-sync
+
+- Done: open buffers are pyrefly memory overlays. `didOpen`/`didChange` (full sync) store the text, `set_memory` the overlay, and re-run every open file at `Require::Everything`; `didClose` drops the overlay, `invalidate_disk`, and forgets the file was loaded so disk is the truth again. An open file's handle is a `ModulePath::memory` handle, so the solver reads the buffer, not the file.
+- Verified: Rust test edits `status: int` → `str` in memory and the answer follows, then reverts on close (19/19); nvim test changes `port: int` to `str` with `nvim_buf_set_lines` (no save), asks, gets `str`, fixture untouched on disk; `./tests/run.sh` ALL SUITES PASS.
+- Gotcha: a transaction that `set_memory`/`invalidate_disk` dirtied must `run` (even with no handles) before `commit_transaction`, or pyrefly asserts "Transaction is dirty".
+- `$/cancelRequest` is accepted and ignored: requests are answered synchronously in order, so a cancel always arrives after its answer. Noted in main.rs; revisit only if a request ever runs long enough to matter.
+- Next: `12r` oracle-scopes.

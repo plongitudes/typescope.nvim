@@ -84,6 +84,38 @@ if client and client.initialized then
   end
   check(table.concat(names, ",") == "host,port,debug", "fields host,port,debug (got " .. table.concat(names, ",") .. ")")
 
+  -- an UNSAVED edit is what the oracle answers with: change `port: int` to
+  -- `port: str` in the buffer (nvim sends didChange), ask again, then undo
+  local port_line
+  for i, l in ipairs(lines) do
+    if l:match("^    port: int = 8000") then
+      port_line = i - 1
+      break
+    end
+  end
+  check(port_line ~= nil, "found `port: int = 8000` in shapes.py")
+  vim.api.nvim_buf_set_lines(bufnr, port_line, port_line + 1, false, { "    port: str = 8000" })
+  vim.wait(200) -- let the didChange notification go out
+  local done1, result1
+  client:request("typescope/structure", {
+    textDocument = { uri = vim.uri_from_bufnr(bufnr) },
+    position = { line = class_line, character = 6 },
+  }, function(_, r)
+    done1, result1 = true, r
+  end, bufnr)
+  vim.wait(20000, function()
+    return done1
+  end, 10)
+  local port
+  for _, c in ipairs(result1 and result1.roots and result1.roots[1].children or {}) do
+    if c.name == "port" then
+      port = c
+    end
+  end
+  check(port and port.type.display == "str", "unsaved edit seen: port is str (got " .. vim.inspect(port and port.type.display) .. ")")
+  vim.api.nvim_buf_set_lines(bufnr, port_line, port_line + 1, false, { "    port: int = 8000" })
+  vim.bo[bufnr].modified = false
+
   -- a position with nothing under it answers null, not an error
   local done0, result0, err0
   client:request("typescope/structure", {

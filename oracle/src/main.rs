@@ -84,7 +84,7 @@ fn serve(connection: &Connection, oracle: oracle::Oracle) -> Result<()> {
                 let resp = handle_request(&oracle, req);
                 connection.sender.send(Message::Response(resp))?;
             }
-            Message::Notification(note) => handle_notification(note),
+            Message::Notification(note) => handle_notification(&oracle, note),
             Message::Response(_) => {} // we send no requests, so nothing to match
         }
     }
@@ -132,11 +132,35 @@ fn file_path(uri: &lsp_types::Uri) -> Option<std::path::PathBuf> {
     Some(std::path::PathBuf::from(String::from_utf8_lossy(&out).into_owned()))
 }
 
-fn handle_notification(note: Notification) {
+fn handle_notification(oracle: &oracle::Oracle, note: Notification) {
     match note.method.as_str() {
-        // bead 3 turns these into pyrefly overlays; until then the oracle
-        // reads files from disk, which is what the spike probes did
-        DidOpenTextDocument::METHOD | DidChangeTextDocument::METHOD | DidCloseTextDocument::METHOD => {}
+        DidOpenTextDocument::METHOD => {
+            if let Ok(p) = serde_json::from_value::<lsp_types::DidOpenTextDocumentParams>(note.params)
+                && let Some(path) = file_path(&p.text_document.uri)
+            {
+                oracle.did_change(&path, p.text_document.text);
+            }
+        }
+        DidChangeTextDocument::METHOD => {
+            // full sync: the last change carries the whole document
+            if let Ok(p) = serde_json::from_value::<lsp_types::DidChangeTextDocumentParams>(note.params)
+                && let Some(path) = file_path(&p.text_document.uri)
+                && let Some(change) = p.content_changes.into_iter().last()
+            {
+                oracle.did_change(&path, change.text);
+            }
+        }
+        DidCloseTextDocument::METHOD => {
+            if let Ok(p) = serde_json::from_value::<lsp_types::DidCloseTextDocumentParams>(note.params)
+                && let Some(path) = file_path(&p.text_document.uri)
+            {
+                oracle.did_close(&path);
+            }
+        }
+        // $/cancelRequest: requests are answered synchronously and in order,
+        // so by the time a cancel arrives its request has been answered.
+        // Accepted and ignored; revisit if a request ever takes long enough
+        // to be worth threading.
         _ => {}
     }
 }
