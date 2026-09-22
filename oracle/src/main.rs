@@ -9,7 +9,11 @@
 //! language server; this one advertises nothing that would compete.
 
 mod oracle;
+mod policy;
 mod protocol;
+mod walk;
+#[cfg(test)]
+mod tests;
 
 use anyhow::Result;
 use lsp_server::Connection;
@@ -37,6 +41,24 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    // `--probe FILE LINE COL [DEPTH] [data|all]`: answer one structure query
+    // and print the JSON. Development and fixture tests; not used by the plugin.
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(i) = args.iter().position(|a| a == "--probe") {
+        let path = std::path::PathBuf::from(args.get(i + 1).expect("--probe FILE LINE COL")).canonicalize()?;
+        let line: u32 = args.get(i + 2).expect("LINE").parse()?;
+        let col: u32 = args.get(i + 3).expect("COL").parse()?;
+        let depth: u32 = args.get(i + 4).and_then(|d| d.parse().ok()).unwrap_or(2);
+        let members = match args.get(i + 5).map(String::as_str) {
+            Some("all") => protocol::Members::All,
+            _ => protocol::Members::Data,
+        };
+        let oracle = oracle::Oracle::new();
+        let scope = oracle.structure(&path, line, col, depth, members);
+        println!("{}", serde_json::to_string_pretty(&scope)?);
+        return Ok(());
+    }
+
     let (connection, io_threads) = Connection::stdio();
 
     // initialize/initialized by hand rather than Connection::initialize, which
@@ -52,14 +74,14 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn serve(connection: &Connection, _oracle: oracle::Oracle) -> Result<()> {
+fn serve(connection: &Connection, oracle: oracle::Oracle) -> Result<()> {
     for msg in &connection.receiver {
         match msg {
             Message::Request(req) => {
                 if connection.handle_shutdown(&req)? {
                     return Ok(());
                 }
-                let resp = handle_request(req);
+                let resp = handle_request(&oracle, req);
                 connection.sender.send(Message::Response(resp))?;
             }
             Message::Notification(note) => handle_notification(note),
@@ -69,16 +91,45 @@ fn serve(connection: &Connection, _oracle: oracle::Oracle) -> Result<()> {
     Ok(())
 }
 
-fn handle_request(req: Request) -> Response {
+fn handle_request(oracle: &oracle::Oracle, req: Request) -> Response {
     match req.method.as_str() {
         protocol::STRUCTURE => match serde_json::from_value::<protocol::StructureParams>(req.params) {
-            // bead 1: the request is routed and validated; beads 2 and 4 fill
-            // the answer. `null` is the contract's "nothing under the cursor".
-            Ok(_params) => Response::new_ok(req.id, serde_json::Value::Null),
+            Ok(params) => match file_path(&params.text_document.uri) {
+                Some(path) => {
+                    let scope = oracle.structure(&path, params.position.line, params.position.character, params.depth, params.members);
+                    // `null` is the contract's "nothing under the cursor"
+                    Response::new_ok(req.id, serde_json::to_value(scope).unwrap_or(serde_json::Value::Null))
+                }
+                None => Response::new_err(req.id, ErrorCode::InvalidParams as i32, "textDocument.uri is not a file".to_owned()),
+            },
             Err(e) => Response::new_err(req.id, ErrorCode::InvalidParams as i32, e.to_string()),
         },
         other => Response::new_err(req.id, ErrorCode::MethodNotFound as i32, format!("unsupported request: {other}")),
     }
+}
+
+/// `file:///a/b%20c.py` → `/a/b c.py`. lsp-types 0.97's `Uri` carries no
+/// filesystem conversion of its own.
+fn file_path(uri: &lsp_types::Uri) -> Option<std::path::PathBuf> {
+    if uri.scheme().map(|s| s.as_str()) != Some("file") {
+        return None;
+    }
+    let raw = uri.path().as_str();
+    let mut out = Vec::with_capacity(raw.len());
+    let bytes = raw.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len()
+            && let Ok(h) = u8::from_str_radix(&raw[i + 1..i + 3], 16)
+        {
+            out.push(h);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    Some(std::path::PathBuf::from(String::from_utf8_lossy(&out).into_owned()))
 }
 
 fn handle_notification(note: Notification) {

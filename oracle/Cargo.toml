@@ -21,6 +21,8 @@ pyrefly_types = { path = "vendor/pyrefly/crates/pyrefly_types" }
 pyrefly_util = { path = "vendor/pyrefly/crates/pyrefly_util" }
 pyrefly_config = { path = "vendor/pyrefly/crates/pyrefly_config" }
 ruff_text_size = "0.0.14"
+ruff_source_file = "0.0.14"
+ruff_python_ast = "0.0.14"
 dupe = "0.9.1"
 
 # the LSP loop: same scaffold crate pyrefly's own server uses

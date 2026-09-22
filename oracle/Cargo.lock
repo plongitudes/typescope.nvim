@@ -3293,6 +3293,8 @@ dependencies = [
  "pyrefly_python",
  "pyrefly_types",
  "pyrefly_util",
+ "ruff_python_ast",
+ "ruff_source_file",
  "ruff_text_size",
  "serde",
  "serde_json",

@@ -1,0 +1,6 @@
+# The oracle's fixture environment. `site/` holds hand-written stubs for the
+# third-party packages the fixtures import (pydantic), so the tests need no
+# virtualenv and no network. pyrefly recognises pydantic models by the
+# qualified name pydantic.BaseModel, which the stub provides.
+search-path = [".", "site"]
+python-version = "3.12"

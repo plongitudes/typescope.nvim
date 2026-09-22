@@ -9,3 +9,12 @@ Newest at the bottom. One entry per tick: bead, what was done, what was verified
 - Gotchas: the vendored tree lives *inside* `oracle/`, so cargo adopted it into our workspace and lost pyrefly's `workspace.lints` — `[workspace] exclude = ["vendor/pyrefly"]` fixes it. After a build `git status` shows the submodule as modified (the applied patch); that is expected and never committed into the submodule.
 - Cost: debug build 1m33s warm cache / ~3.5 min cold; binary 30 MB debug.
 - Next: `5f8` oracle-walk — port the probe walk to walk.rs + policy.rs, pydantic fixtures first.
+
+## 2026-09-21 — tick 2 — `5f8` oracle-walk
+
+- Done: `walk.rs` (type → Node/Scope JSON, functions/overloads/classes/unions, params by position with receiver dropped, literal defaults incl. `Field(...)`/`field(...)` unwrapping, `Required`/`NotRequired` badges, `≈` inferred, origin, locations), `policy.rs` (category, MRO cut, hidden names, kinds, terminal typeshed classes), `--probe FILE LINE COL [DEPTH] [data|all]` CLI, `scripts/oracle-tree.py`, fixture env `tests/fixtures/pyrefly.toml` + `site/pydantic` stubs, `tests/fixtures/oracle/oracle.py` (the spike fixture), `oracle/src/tests.rs` (18 tests: every `typescope:`/`typescope-params:` marker in shapes.py, plus generic/enum/inheritance/local/narrowing/typevar/depth/methods cases).
+- Verified: `cargo test` 18/18; `./tests/run.sh` ALL SUITES PASS incl. the attach test now asserting a real dataclass Scope and `null` off-identifier; real pydantic 2.12.3 via the kitchen venv on `RecipeIngredientResponse` matches the source (Field sentinel vs `Field(None, gt=0)` default, inherited ↑origin, Optional unions, enum variant) — no disagreement with basedpyright's reading; formal diff is bead 9.
+- Gaps the oracle closes, recorded as `typescope-oracle:` override markers (UnannotatedSelf, Conditional, Unannotated, DerivedConfig inline inheritance) so `test_shapes.lua` (old extractor) stays green until bead 10.
+- Plan correction (§4): expansion = re-ask the original position with depth+1 and graft; `location` is the declaration. Asking at the declaration loses specialization.
+- Gotchas: `completions` never lists `object` members or dataclass-synthesized dunders → category from the decorator text; `git mv -k` on an untracked file silently does nothing (cost one confusing test run); the mock server globs `tests/fixtures/*.py` non-recursively, so new fixtures with colliding class names go in a subdirectory.
+- Next: `dmg` oracle-sync (overlays) or `12n` lua client — both ready; `12r` scopes needs this bead.

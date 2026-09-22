@@ -55,18 +55,47 @@ if client and client.initialized then
     check(caps[forbidden] == nil, forbidden .. " not advertised")
   end
 
+  -- the class name of the first `class` in shapes.py: a Scope with roots
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local class_line
+  for i, l in ipairs(lines) do
+    if l:match("^class ServerConfig") then
+      class_line = i - 1
+      break
+    end
+  end
   local done, result, err
   client:request("typescope/structure", {
     textDocument = { uri = vim.uri_from_bufnr(bufnr) },
-    position = { line = 30, character = 6 },
+    position = { line = class_line, character = 6 },
   }, function(e, r)
     done, err, result = true, e, r
   end, bufnr)
-  vim.wait(10000, function()
+  vim.wait(20000, function()
     return done
   end, 10)
   check(done and err == nil, "typescope/structure answered without error (" .. vim.inspect(err) .. ")")
-  check(done and result == vim.NIL or result == nil, "bead-1 answer is null")
+  check(type(result) == "table" and result.scope == "class", "answer is a class Scope (got " .. vim.inspect(result and result.scope) .. ")")
+  local root = type(result) == "table" and result.roots and result.roots[1]
+  check(root and root.type and root.type.category == "dataclass", "ServerConfig is a dataclass over the wire")
+  local names = {}
+  for _, c in ipairs(root and root.children or {}) do
+    names[#names + 1] = c.name
+  end
+  check(table.concat(names, ",") == "host,port,debug", "fields host,port,debug (got " .. table.concat(names, ",") .. ")")
+
+  -- a position with nothing under it answers null, not an error
+  local done0, result0, err0
+  client:request("typescope/structure", {
+    textDocument = { uri = vim.uri_from_bufnr(bufnr) },
+    position = { line = 0, character = 0 },
+  }, function(e, r)
+    done0, err0, result0 = true, e, r
+  end, bufnr)
+  vim.wait(10000, function()
+    return done0
+  end, 10)
+  check(done0 and err0 == nil and (result0 == nil or result0 == vim.NIL), "nothing under the cursor → null")
 
   -- an unknown method is refused cleanly, not crashed on
   local done2, err2

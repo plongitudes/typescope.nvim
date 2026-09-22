@@ -17,6 +17,14 @@ The class marker begins "typescope:" and carries "category=" and "fields=",
 where fields is a comma-separated list or the word NONE. Protocols may add
 "methods=", and an optional "note=" explains a NONE.
 
+A third kind, "typescope-oracle:", sits directly below a class marker and
+overrides its "category="/"fields=" for the oracle (oracle/src/tests.rs).
+It exists only while both readers are alive: it records a gap the oracle
+closes that the treesitter extractor still has, so the two suites can
+disagree on purpose until the extractor is deleted. Rule cited:
+design/oracle.md §4, `inferred` — an unannotated member carries pyrefly's
+inference and is drawn ≈, where the extractor had no type to report.
+
 The parameter marker begins "typescope-params:" and carries "params=", the
 parameters a caller actually supplies — so a method's receiver is absent from it
 whatever that receiver is named. A marker that says NONE is documenting a real
@@ -30,7 +38,7 @@ from dataclasses import dataclass
 from typing import NamedTuple, NotRequired, Protocol, Required, TypedDict
 
 import pydantic
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # === Supported: the declarative shapes ===============================
 
@@ -54,6 +62,15 @@ class User(BaseModel):
 class RetryPolicy:
     retries: int = 3
     backoff: float = 2.0
+
+
+# Field(...) is the required-field sentinel, not a default; default= and
+# default_factory= are the value; constraint keywords are not shape.
+# typescope: category=pydantic fields=name,tags,limit
+class Account(BaseModel):
+    name: str = Field(..., min_length=1)
+    tags: list[str] = Field(default_factory=list)
+    limit: int = Field(default=10, gt=0)
 
 
 # typescope: category=typeddict fields=id,label
@@ -93,6 +110,7 @@ class BaseConfig:
 
 # Own fields first, then inherited ones, each tagged with the class it came from.
 # typescope: category=class fields=extra bases=BaseConfig
+# typescope-oracle: category=class fields=extra,env note=inherited members inline, tagged with their origin
 class DerivedConfig(BaseConfig):
     extra: int = 1
 
@@ -166,6 +184,7 @@ class Initialisers:
 
 # Unannotated self-assignment: same reasoning as the class-level case below.
 # typescope: category=class fields=NONE note=no annotation on self.x
+# typescope-oracle: category=class fields=strong note=inferred str, drawn ≈
 class UnannotatedSelf:
     def __init__(self) -> None:
         self.strong = "bar string"
@@ -175,6 +194,7 @@ class UnannotatedSelf:
 # conditional may not exist at runtime, and the class-level scan has the same
 # shallow contract — so this is a deliberate boundary, not an oversight.
 # typescope: category=class fields=always note=conditional self-assignment is not scanned
+# typescope-oracle: category=class fields=always,sometimes note=pyrefly binds the conditional attribute too
 class Conditional:
     def __init__(self, flag: bool) -> None:
         self.always: int = 1
@@ -194,6 +214,7 @@ class SelfDunder:
 # annotation there is no type to show, and guessing from the literal would be a
 # different feature (and often wrong).
 # typescope: category=class fields=NONE note=no annotation, so no type to report
+# typescope-oracle: category=class fields=strong,ant note=inferred from the literals, drawn ≈
 class Unannotated:
     strong = "bar string"
     ant = 42

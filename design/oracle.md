@@ -99,13 +99,17 @@ Response: `null` when nothing is under the cursor (K's job), otherwise a **Scope
   "origin": "ServerConfig",     // inherited: the class it came from (↑ marker), absent when own
   "pass_mode": "*" | "/",       // params only
   "inferred": true,             // no annotation; pyrefly's inference — rendered ≈ as `evaluated` is today
-  "location": { "uri": "…", "line": 43, "character": 6 },   // where this member is declared; the key to lazy expansion
+  "location": { "uri": "…", "line": 43, "character": 6 },   // where this member is DECLARED, for navigation
   "children": [ Node… ],        // present when resolved within depth
-  "expandable": true            // children omitted for depth: expand = structure(location) with the same params
+  "expandable": true            // children omitted for depth; see expansion below
 }
 ```
 
-Mapping onto today's fields: `evaluated` becomes `inferred` + `type.display` holding pyrefly's answer (the ≈ rendering keys off `inferred`); `evaluated_owner` disappears (unions come back as `variant` children, so ownership is structural); `_lazy` and `source` collapse into `location` + `expandable` — **expansion is a fresh `structure` request at the child's location**, so the oracle keeps no per-client state and the resolve cache keys stay `uri#line#depth`. `example`, `active`, `state` and `id` are nvim-side and never cross the wire; `model.new` still assigns ids.
+Mapping onto today's fields: `evaluated` becomes `inferred` + `type.display` holding pyrefly's answer (the ≈ rendering keys off `inferred`); `evaluated_owner` disappears (unions come back as `variant` children, so ownership is structural); `_lazy` and `source` collapse into `location` + `expandable`. `example`, `active`, `state` and `id` are nvim-side and never cross the wire; `model.new` still assigns ids.
+
+**Expansion** (corrected in bead 2): an `expandable` node is expanded by **re-requesting the scope's original position with a larger `depth`** and grafting the deeper subtree in by id path. Asking at the member's own declaration would answer with the *unspecialized* type (`item: T` in `Box`, not `ServerConfig`), so `location` is for navigation only. The oracle keeps no per-client state; a deeper ask is sub-millisecond warm; the resolve cache keys stay `uri#line#depth`.
+
+Policy facts established by bead 2's fixtures: members inherited from any bundled-typeshed class are cut wholesale (`object`, `tuple`, `Enum`, `dict` behind a TypedDict), not just from a marker list; a nested class (`class Config` in a pydantic model) is not a member; typeshed classes are terminal leaves (`str`, `Path`); an anonymous TypedDict (a dict literal's inferred shape) is vocabulary, not shape; the category comes from the solver's fingerprints (enum literal, `NamedTupleFallback`/`TypedDictFallback`, a `pydantic` base, `Protocol`) or, for `@dataclass` and `@pydantic.dataclasses.dataclass`, from the author's decorator, because pyrefly does not list synthesized dunders among attributes. A request whose position is not on an identifier answers `null`.
 
 Presentation policy lives in the **oracle**, not in Lua: the member filter, the MRO cut, the async-def return rule (present the declared `Recipe | None`, not `Coroutine[…]` — spike 2's note), and the "informative inference" rule (`None`/`Any`/`Unknown` inferences are dropped, as `informative_inference` does today). Reason: the policy needs the type objects to decide, and a second language's oracle would need the same rules stated once.
 
