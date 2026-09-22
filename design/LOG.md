@@ -52,3 +52,11 @@ Newest at the bottom. One entry per tick: bead, what was done, what was verified
 - Closed as re-homed: `5mq` (empty decline now covered), `yw2` (dissolved: `expandable` now means "a class with members", not "a location to chase").
 - Behaviors carried from resolve.lua are listed by name at the top of resolve_oracle.lua; the dropped ones are named there too with why.
 - Next: `6ii` render kinds or `lfy` insert port (both ready).
+
+## 2026-09-21 — tick 7 — `6ii` lua-render-kinds
+
+- Done: `render.lua` gains `name_group_of()` / `type_injectable()` (one mapping for the three layouts) with `property` → `TypeScopeProperty` (`@property`), `enum_member` → `TypeScopeEnumMember` (`@constant`), `group` → `TypeScopeGroup` (`NonText`, the fold reads as chrome); a group's "(n)" is never treesitter-injected. `examples` never target an enum member (its value is the example) or a group. `model.Node.inferred` documented and set by the oracle client. `tests/test_render_kinds.lua` renders both layouts, collapsed and opened, asserts rows and highlight groups, and prints the floats.
+- Verified: `./tests/run.sh` ALL SUITES PASS; stylua clean.
+- Screenshots: NOT taken — this session has no terminal to render into. The suite prints the exact float lines for each layout (row content is what the buffer holds; the geometry warning is about anchors, which these rows do not touch). Tony: open a Python buffer with an enum and a class with a property, press K, and eyeball the three rows once — that is the visual check this bead cannot do headless.
+- Deferred to bead 10 with reason: "`inferred` replaces `evaluated`" in the renderer. Until the treesitter resolver is deleted both producers exist, and the ≈ drawing is driven by `evaluated`, which the oracle client sets alongside `inferred`; collapsing to one field is bead 10's cleanup.
+- Next: `lfy` insert port.

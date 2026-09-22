@@ -4,6 +4,9 @@ local M = {}
 -- colorschemes and the config `highlights` table can override without fighting us.
 local groups = {
   TypeScopeField = { link = "@variable" },
+  TypeScopeProperty = { link = "@property" },
+  TypeScopeEnumMember = { link = "@constant" },
+  TypeScopeGroup = { link = "NonText" },
   -- params match the capture a def rendering would give them, so the tree's
   -- colors agree with syntax-highlighted signatures elsewhere in the editor
   TypeScopeParam = { link = "@variable.parameter" },

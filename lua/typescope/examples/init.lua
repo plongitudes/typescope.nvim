@@ -136,6 +136,8 @@ local function eligible(node)
   -- open() churn. Expanding resolves the node; examples follow honestly.
   return #node.children == 0
     and node.kind ~= "method"
+    and node.kind ~= "enum_member" -- its value IS the example
+    and node.kind ~= "group"
     and node.type.category ~= "unresolved"
     and node._lazy == nil
     and not has_real_default

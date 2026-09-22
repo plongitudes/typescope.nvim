@@ -12,13 +12,14 @@
 
 ---@class typescope.Node
 ---@field id string stable path id, e.g. "root.config.host" (preserves expand state across re-renders)
----@field kind "param"|"field"|"return"|"method"|"variant"|"type" ("type" = a class hovered directly, root shows its own structure)
+---@field kind "param"|"field"|"property"|"enum_member"|"method"|"group"|"return"|"variant"|"type"|"overload" ("type" = a class hovered directly, root shows its own structure; "group" = the collapsed `methods (n)` row; see design/oracle.md §4)
 ---@field name string
 ---@field type typescope.TypeInfo
 ---@field default? string source text of the default value
 ---@field badge? string e.g. "NotRequired" for TypedDict fields
 ---@field origin? string parent class name for inherited fields (rendered as ↑Parent)
 ---@field evaluated? string pyright's evaluated type for leaves structural resolution couldn't crack (rendered as ≈ T)
+---@field inferred? boolean the oracle's answer for a member/return with no annotation (the checker's inference, drawn ≈). TRANSITIONAL: until the treesitter resolver goes, the ≈ rendering is driven by `evaluated`, which the oracle client sets alongside this
 ---@field evaluated_owner? string the annotation ref the evaluation came from (named in the ledger detail when it isn't the whole annotation)
 ---@field source? { uri: string, range: table } where the type is declared
 ---@field children typescope.Node[]
@@ -66,6 +67,7 @@ function M.new(spec)
     origin = spec.origin,
     pass_mode = spec.pass_mode, -- "*" kw-only | "/" positional-only (params)
     evaluated = spec.evaluated,
+    inferred = spec.inferred or false,
     source = spec.source,
     children = {},
     state = {

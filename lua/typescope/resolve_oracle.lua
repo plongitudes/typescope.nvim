@@ -71,6 +71,7 @@ local function to_spec(n, lazy)
     badge = n.badge,
     origin = n.origin,
     pass_mode = n.pass_mode,
+    inferred = n.inferred or false,
     evaluated = n.inferred and display or nil,
     source = n.location
         and { uri = n.location.uri, range = { start = { line = n.location.line, character = n.location.character } } }

@@ -631,6 +631,44 @@ end
 ---@param roots typescope.Node[]
 ---@param opts typescope.RenderOpts
 ---@return typescope.RenderResult
+--- The highlight group a row's NAME takes from its kind (design/oracle.md §4
+--- kinds): a property and an enum member are data rows with their own
+--- vocabulary; a `methods (n)` group is chrome-coloured so it reads as a
+--- fold, not a member.
+---@param node typescope.Node
+---@return string
+local function name_group_of(node)
+  if node.active then
+    return "TypeScopeActive"
+  end
+  local kind = node.kind
+  if kind == "return" then
+    return "TypeScopeKeyword"
+  elseif kind == "type" then
+    return "TypeScopeType"
+  elseif kind == "param" then
+    return "TypeScopeParam"
+  elseif kind == "property" then
+    return "TypeScopeProperty"
+  elseif kind == "enum_member" then
+    return "TypeScopeEnumMember"
+  elseif kind == "group" then
+    return "TypeScopeGroup"
+  end
+  return "TypeScopeField"
+end
+
+--- Is a row's type text a Python expression worth injecting Python
+--- highlighting into? Method "signatures" like (path: str) -> bytes,
+--- class-root category labels like (pydantic), overload shapes with elision
+--- marks, and a group's "(3)" count are not, so they keep block colouring.
+---@param node typescope.Node
+---@return boolean
+local function type_injectable(node)
+  local k = node.kind
+  return k ~= "method" and k ~= "type" and k ~= "overload" and k ~= "group"
+end
+
 function M.render(roots, opts)
   local style = opts.style
   local result = { lines = {}, highlights = {}, ts_injections = {}, line_to_node = {}, width = 0 }
@@ -784,13 +822,7 @@ function M.render(roots, opts)
       line:add(string.rep(" ", pad))
     end
     line:add(marker, "TypeScopeChrome")
-    local name_group = node.kind == "return" and "TypeScopeKeyword"
-      or node.kind == "type" and "TypeScopeType"
-      or node.kind == "param" and "TypeScopeParam"
-      or "TypeScopeField"
-    if node.active then
-      name_group = "TypeScopeActive"
-    end
+    local name_group = name_group_of(node)
     line:add(node.name, name_group)
     if opts.align ~= "right" then
       line:add(string.rep(" ", pad))
@@ -805,7 +837,7 @@ function M.render(roots, opts)
     -- method "signatures" like (path: str) -> bytes, class-root category
     -- labels like (pydantic), and overload shapes with elision marks aren't
     -- parseable expressions, so they keep block coloring
-    local injectable = (node.kind ~= "method" and node.kind ~= "type" and node.kind ~= "overload") and "replace" or nil
+    local injectable = type_injectable(node) and "replace" or nil
     -- an unannotated param's declared type is only implicit Any; when we have
     -- pyright's inferred type, show just that instead of "Any ≈ T"
     if not (node.evaluated and type_text == "Any") then
@@ -1001,13 +1033,7 @@ function M.render(roots, opts)
     local rows = {}
     local function collect(node, bars, branch, depth)
       local marker = is_expandable(node) and (node.state.expanded and style.expanded or style.collapsed) or style.leaf
-      local name_group = node.kind == "return" and "TypeScopeKeyword"
-        or node.kind == "type" and "TypeScopeType"
-        or node.kind == "param" and "TypeScopeParam"
-        or "TypeScopeField"
-      if node.active then
-        name_group = "TypeScopeActive"
-      end
+      local name_group = name_group_of(node)
       local name_segs = {}
       if depth > 0 then
         table.insert(name_segs, { branch, "TypeScopeChrome" })
@@ -1022,8 +1048,7 @@ function M.render(roots, opts)
 
       local type_segs = {}
       local type_text = node.type.display or node.type.raw or "?"
-      local injectable = (node.kind ~= "method" and node.kind ~= "type" and node.kind ~= "overload") and "replace"
-        or nil
+      local injectable = type_injectable(node) and "replace" or nil
       if not (node.evaluated and type_text == "Any") then
         table.insert(type_segs, { type_text, "TypeScopeType", injectable })
       end
@@ -1265,13 +1290,7 @@ function M.render(roots, opts)
           line:add("  ")
         end
       end
-      local name_group = node.kind == "return" and "TypeScopeKeyword"
-        or node.kind == "type" and "TypeScopeType"
-        or node.kind == "param" and "TypeScopeParam"
-        or "TypeScopeField"
-      if node.active then
-        name_group = "TypeScopeActive"
-      end
+      local name_group = name_group_of(node)
       line:add(capped_name(node.name), name_group)
       line:add(string.rep(" ", math.max(0, name_col - line.width)) .. "  ")
 
@@ -1283,10 +1302,7 @@ function M.render(roots, opts)
       if type_is_evaluation then
         type_text = node.evaluated
       end
-      local injectable = not type_is_evaluation
-          and (node.kind ~= "method" and node.kind ~= "type" and node.kind ~= "overload")
-          and "replace"
-        or nil
+      local injectable = not type_is_evaluation and type_injectable(node) and "replace" or nil
       local type_group = type_is_evaluation and "TypeScopeEvaluated" or "TypeScopeType"
 
       -- indicators that stay whole; the type absorbs any truncation
