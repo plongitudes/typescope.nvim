@@ -1,6 +1,6 @@
 # The type oracle: replacing the syntax-reading resolver
 
-Status: **draft for review**, 2026-09-21. Written after the three spikes on `dev/oracle-spikes` (findings under `spikes/`). Everything marked **DECISION** needs Tony's answer before the loop starts; each carries the default this document is written against, so a "yes to all defaults" is a complete answer.
+Status: **accepted**, 2026-09-21 — Tony took every default, with decision 6 revised as written below. Written after the three spikes on `dev/oracle-spikes` (findings under `spikes/`). Each **DECISION** records the choice and the reasoning; the loop treats them as settled.
 
 ## 1. Why
 
@@ -31,7 +31,7 @@ Two paths (oracle when present, old resolver when not) would keep the plugin wor
 
 **DECISION 5 — hovering a class *call* draws the constructor.** Default: yes. `Recipe(` draws `__init__`'s parameters (the receiver dropped) as the roots and the instance shape as `returns`; hovering the class name in an annotation or a declaration draws the shape as today. pyrefly answers `type[Recipe]` for both, so the distinction is made on the nvim side from the call-site tree (`extract.call_args` already finds the enclosing call).
 
-**DECISION 6 — upstream the pyrefly patch.** Default: not in this plan's scope; the release pipeline applies the patch. Whether and under whose name a PR is opened is a separate conversation. The patch is written so it can be dropped without a code change the day a `pub fn` lands.
+**DECISION 6 — upstream the pyrefly patch, after the parity gate, if the approach holds.** The release pipeline applies the patch for the whole rewrite; the loop never opens the PR. Once bead 9 (`parity-gate`) closes and the function's final shape is proven in `walk.rs`, Tony opens a PR against pyrefly under his own name — framed as a generalization of their `query::get_attributes` (attributes of a *type*, through the MRO, with types), with a doc comment and a fixture test in their tree — with the description written by Tony from a draft. The patch is written so it can be dropped without a code change the day the `pub fn` lands. If the PR is declined or ignored, nothing changes: the pipeline keeps applying the patch.
 
 **DECISION 7 — this is v0.2.0.** Default: yes. New hard requirement, removal of the deprecated `table` layout (hdt) rides along, changelog entry says what changed for a user in one paragraph.
 
