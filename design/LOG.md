@@ -114,3 +114,7 @@ Newest at the bottom. One entry per tick: bead, what was done, what was verified
 - Verified: `./tests/run.sh` ALL SUITES PASS; `luacheck lua/ tests/` 0 warnings; stylua clean; no stray processes.
 - Not done, deliberately: tagging `v0.2.0` and cutting the release (external action; the changelog says "Unreleased"). `oracle.RELEASE` is `v0.2.0`, so the first download works only once that tag's release exists — Tony's step.
 - This was the last `5ag` bead.
+
+## 2026-09-21 — loop end
+
+Fourteen beads in fourteen ticks (of 25 budgeted), all on `dev/oracle-spikes`, nothing merged to `main`. What the branch holds: the oracle (Rust, `oracle/`, 34 tests), the plugin on it (one resolver, ten Lua suites green, luacheck and stylua clean), the download and release pipeline, and the 0.2.0 docs. What stays outside the loop, for Tony: (1) merge to `main` and tag `v0.2.0` — the first real run of `release.yml` and the first real download; (2) eyeball the property / enum-member / methods-group rows once in a real terminal (tick 7 could not); (3) the pyrefly PR for the one `pub fn`, under Tony's name, now that the parity gate has closed (decision 6). `design/QUESTIONS.md` stayed empty: no fork needed a decision the plan had not already made.
