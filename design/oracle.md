@@ -102,6 +102,7 @@ Scope facts established by bead 4: a callee is asked with pyrefly's declaration-
   "origin": "ServerConfig",     // inherited: the class it came from (↑ marker), absent when own
   "pass_mode": "*" | "/",       // params only
   "inferred": true,             // no annotation; pyrefly's inference — rendered ≈ as `evaluated` is today
+  "resolved": "Literal['auto', 'manual']",   // when `display` is the alias the author wrote and the row has no structure of its own: what it resolved to, drawn ≈ (parity gate: "alias name kept as vocabulary")
   "location": { "uri": "…", "line": 43, "character": 6 },   // where this member is DECLARED, for navigation
   "children": [ Node… ],        // present when resolved within depth
   "expandable": true            // children omitted for depth; see expansion below
@@ -145,6 +146,7 @@ Lives in this repo under `oracle/` (a Cargo workspace member of one crate), so a
 - **e2e** replaces `mock_server.lua`'s LSP fakery with the real binary: `tests/run.sh` builds (or downloads) the oracle once, then `e2e_phase3.lua` and `e2e_declarations.lua` drive it over the fixtures. A `mock_oracle.lua` that replays recorded JSON stays for the pure-UI suites so they don't need Rust installed.
 - **Parity gate**: before the old resolver is deleted, a throwaway script hovers every `typescope:` and `typescope-params:` marker in `shapes.py` through both paths and diffs the rendered floats. Differences are either policy (documented in `design/oracle.md` §4) or bugs. This is the "verify before asserting" step for the whole rewrite.
 - **Screenshots** for the three new row kinds and the methods group, since headless float probes lie.
+- **Parity gate result (bead 9, 2026-09-21):** `scripts/parity.lua` opened the float on all 29 markers in `shapes.py` through both resolvers against a real basedpyright. 26 targets byte-identical; the 3 differences are the documented closed gaps (`typescope-oracle:` markers). Fixed on the way: Protocol/class method rows are receiver-less signatures without children; an unannotated parameter reads `Any` (pyrefly's `Unknown` is not a name anyone wrote); a TypedDict *value* lists its keys (its attributes are `dict`'s); a written alias (`data: Payload`) stays the vocabulary with the resolution as `resolved` (≈) on leaves; an unannotated parameter with a default takes the default's type as ≈ (pyrefly types it `int | Unknown`; the `Unknown` member is the missing annotation); `returns` starts collapsed. Fixture defect found: `sample.py` never imported `overload` or `Literal` (the mock never checked). `e2e_phase3.lua` on the oracle path: 101/115; the 14 left are the mock-server stub-hop family (`sinks.py` + `sinks_stub.py`, which a real checker relates only as `sinks.pyi`), prefetch checks that read the old module's cache, the first open racing the oracle's attach, and one evaluation-only-expand mechanic the oracle has no equivalent for — all bead 10's rewrite. `e2e_declarations.lua`: 29/29. No checker disagreement on this corpus.
 - **Footprint** re-measured with `footprint(1)` on the kitchen backend at the end; the number goes in CHANGELOG.
 
 ## 8. Beads, in loop order

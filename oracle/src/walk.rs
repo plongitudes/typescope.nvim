@@ -73,6 +73,11 @@ pub struct Node {
     pub children: Vec<Node>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub expandable: bool,
+    /// When `type.display` is the annotation the author wrote (an alias
+    /// name kept as vocabulary) and the row has no structure of its own,
+    /// what the checker resolved it to — the plugin draws it as `≈ T`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved: Option<String>,
     /// Call-shape tokens of a function node (`a`, `b=…`, `*`, `/`), for the
     /// header line. Never serialized.
     #[serde(skip)]
@@ -101,6 +106,7 @@ impl Node {
             location: None,
             children: Vec::new(),
             expandable: false,
+            resolved: None,
             shape: Vec::new(),
             def_name: None,
             def_range: None,
@@ -127,7 +133,22 @@ impl<'a> Walker<'a> {
                 self.class_node(name, kind, ty, depth)
             }
             Type::Union(u) => {
-                let mut node = Node::leaf(name, kind, display(ty), "union");
+                // `int | Unknown` is how pyrefly types an unannotated
+                // parameter from its default: the known members are the
+                // type, the Unknown is the missing annotation, drawn ≈
+                let known: Vec<&Type> = u.members.iter().filter(|m| !matches!(m, Type::Any(_))).collect();
+                let partial = known.len() < u.members.len();
+                // pyrefly's own display groups literals (`Literal['a', 'b']`);
+                // only re-spell the union when a member was dropped
+                let shown = match known.as_slice() {
+                    _ if !partial => display(ty),
+                    [] => "Any".to_owned(),
+                    [one] => display(one),
+                    many => many.iter().map(|m| display(m)).collect::<Vec<_>>().join(" | "),
+                };
+                let category = if partial && known.len() == 1 { leaf_category(known[0]) } else { "union" };
+                let mut node = Node::leaf(name, kind, shown, category);
+                node.inferred = partial;
                 if depth > 0 {
                     for member in u.members.iter() {
                         if member.is_none() {
@@ -152,6 +173,9 @@ impl<'a> Walker<'a> {
                 BoundMethodType::Overload(o) => self.overload_node(name, kind, o.signatures.iter(), Some(&bm.obj), depth),
             },
             Type::Overload(o) => self.overload_node(name, kind, o.signatures.iter(), None, depth),
+            // an unannotated parameter is implicitly Any to Python; pyrefly
+            // spells its ignorance `Unknown`, which is not a name a user wrote
+            Type::Any(_) => Node::leaf(name, kind, "Any".to_owned(), "builtin"),
             other => Node::leaf(name, kind, display(other), leaf_category(other)),
         }
     }
@@ -191,6 +215,8 @@ impl<'a> Walker<'a> {
                     Param::PosOnly(pname, ty, req) => {
                         let n = pname.as_ref().map(|n| n.as_str().to_owned()).unwrap_or_default();
                         let mut c = self.node(&n, "param", ty, depth);
+                        keep_written(&mut c, facts.written.get(&n));
+                        infer_from_default(&mut c, ty, req);
                         c.pass_mode = Some("/".to_owned());
                         c.default = default_text(req);
                         shape.push(token(&n, c.default.is_some()));
@@ -199,6 +225,8 @@ impl<'a> Walker<'a> {
                     }
                     Param::Pos(pname, ty, req) => {
                         let mut c = self.node(pname.as_str(), "param", ty, depth);
+                        keep_written(&mut c, facts.written.get(pname.as_str()));
+                        infer_from_default(&mut c, ty, req);
                         c.default = default_text(req);
                         shape.push(token(pname.as_str(), c.default.is_some()));
                         node.children.push(c);
@@ -215,6 +243,8 @@ impl<'a> Walker<'a> {
                             star_written = true;
                         }
                         let mut c = self.node(pname.as_str(), "param", ty, depth);
+                        keep_written(&mut c, facts.written.get(pname.as_str()));
+                        infer_from_default(&mut c, ty, req);
                         c.pass_mode = Some("*".to_owned());
                         c.default = default_text(req);
                         shape.push(token(pname.as_str(), c.default.is_some()));
@@ -247,7 +277,7 @@ impl<'a> Walker<'a> {
         let module = def.qname.module();
         let handle = Handle::new(def.qname.module_name(), module.path().dupe(), self.handle.sys_info().dupe());
         let range = def.qname.range();
-        let mut facts = DefFacts { location: None, return_annotated: true, is_async: false };
+        let mut facts = DefFacts::default();
         if let Some(uri) = uri_of(module.path()) {
             let loc = module.lined_buffer().line_index().source_location(range.start(), module.contents(), PositionEncoding::Utf16);
             facts.location = Some(Location {
@@ -261,6 +291,14 @@ impl<'a> Walker<'a> {
         {
             facts.return_annotated = fd.returns.is_some();
             facts.is_async = fd.is_async;
+            let text = module.contents();
+            for p in fd.parameters.iter() {
+                if let Some(ann) = p.annotation()
+                    && let Some(w) = written_name(self.tx, &handle, ann, text)
+                {
+                    facts.written.insert(p.name().to_string(), w);
+                }
+            }
         }
         facts
     }
@@ -291,7 +329,12 @@ impl<'a> Walker<'a> {
         let (cls, query_ty) = match ty {
             Type::ClassType(ct) => (ct.class_object().dupe(), ty.clone()),
             Type::SelfType(ct) => (ct.class_object().dupe(), Type::ClassType(ct.clone())),
-            Type::TypedDict(pyrefly_types::typed_dict::TypedDict::TypedDict(td)) => (td.class_object().dupe(), ty.clone()),
+            // a TypedDict VALUE's attributes are dict's methods; its keys are
+            // the class body's annotations, which the class instance lists
+            Type::TypedDict(pyrefly_types::typed_dict::TypedDict::TypedDict(td)) => (
+                td.class_object().dupe(),
+                Type::ClassType(ClassType::new(td.class_object().dupe(), td.targs().clone())),
+            ),
             // an anonymous TypedDict is how pyrefly types a dict literal:
             // `{"k": 1}` displays as `dict[str, int]` and is vocabulary, not shape
             Type::TypedDict(_) => return Node::leaf(name, kind, display(ty), "builtin"),
@@ -367,7 +410,7 @@ impl<'a> Walker<'a> {
                 continue; // a nested class (pydantic's `class Config`) is not data
             }
             let mut child = match (&a.ty, mk) {
-                (Some(t), MemberKind::Method) => self.node(a.name.as_str(), "method", t, 0),
+                (Some(t), MemberKind::Method) => self.method_row(a.name.as_str(), t),
                 (Some(t), MemberKind::EnumMember) => {
                     // `· RED  Color = 1`: the member's class as its type, the
                     // source value as its default, like any other field row
@@ -396,6 +439,9 @@ impl<'a> Walker<'a> {
                 let decl = self.declaration_facts(o, a.name.as_str(), range);
                 if mk == MemberKind::Field && decl.property {
                     mk = MemberKind::Property;
+                }
+                if mk == MemberKind::Field {
+                    keep_written(&mut child, decl.written.as_ref());
                 }
                 if category == Category::TypedDict {
                     // explicit wrappers win; otherwise total=False makes every
@@ -433,6 +479,21 @@ impl<'a> Walker<'a> {
         node
     }
 
+    /// A method as a row of its class: `(key: str) -> bytes`, the receiver
+    /// dropped, and no children — inside a class shape a method's own
+    /// parameters are noise, and the resolver drew it exactly this way.
+    fn method_row(&self, name: &str, ty: &Type) -> Node {
+        let full = self.node(name, "method", ty, 0);
+        let sig = if full.children.iter().all(|c| c.kind == "overload") && !full.children.is_empty() {
+            full.children.iter().map(signature_of).collect::<Vec<_>>().join(" | ")
+        } else {
+            signature_of(&full)
+        };
+        let mut row = Node::leaf(name, "method", sig, "function");
+        row.location = full.location;
+        row
+    }
+
     /// What only the declaration site knows: annotated or not, a property
     /// getter or a plain member, and a literal initializer's source text.
     fn declaration_facts(&self, owner: &Class, name: &str, range: TextRange) -> DeclFacts {
@@ -455,6 +516,9 @@ impl<'a> Walker<'a> {
                     let raw = &text[value.range()];
                     facts.value_text = Some(raw.to_owned());
                     facts.literal_default = literal_default(value, text);
+                }
+                if let Some(ann) = annotation {
+                    facts.written = written_name(self.tx, &handle, ann, text);
                 }
                 if let Some(ann) = annotation
                     && let Expr::Subscript(sub) = ann
@@ -505,12 +569,32 @@ struct DefFacts {
     location: Option<Location>,
     return_annotated: bool,
     is_async: bool,
+    /// param name → the annotation as written, when it is a bare name or
+    /// dotted name (an alias the author chose as vocabulary)
+    written: std::collections::HashMap<String, String>,
 }
 
 impl Default for DefFacts {
     fn default() -> Self {
-        DefFacts { location: None, return_annotated: true, is_async: false }
+        DefFacts { location: None, return_annotated: true, is_async: false, written: Default::default() }
     }
+}
+
+/// The annotation text worth keeping as vocabulary: a name or a dotted name
+/// (`Payload`, `pkg.Config`) that is NOT a type variable — `item: T` in a
+/// specialized `Box[ServerConfig]` must read `ServerConfig`. `Optional[X]`
+/// and friends are normalised better by the checker's own display.
+fn written_name(tx: &Transaction<'_>, handle: &Handle, ann: &Expr, text: &str) -> Option<String> {
+    match ann {
+        Expr::Name(_) | Expr::Attribute(_) => {}
+        _ => return None,
+    }
+    if let Some(t) = tx.get_type_at(handle, ann.range().start())
+        && matches!(t, Type::TypeVar(_) | Type::Quantified(_) | Type::QuantifiedValue(_) | Type::ParamSpec(_) | Type::TypeVarTuple(_))
+    {
+        return None;
+    }
+    Some(text[ann.range()].to_owned())
 }
 
 #[derive(Default)]
@@ -521,6 +605,8 @@ struct DeclFacts {
     value_text: Option<String>,
     /// `Required[...]` / `NotRequired[...]` around the annotation
     wrapper: Option<String>,
+    /// the annotation as written, when it is a bare or dotted name
+    written: Option<String>,
 }
 
 struct ClassDefFacts {
@@ -713,9 +799,68 @@ fn display_function(f: &Function) -> String {
 
 fn leaf_category(ty: &Type) -> &'static str {
     match ty {
-        Type::Any(_) => "unresolved",
         Type::Literal(_) | Type::LiteralString(_) => "literal",
         _ => "builtin",
+    }
+}
+
+/// `(a: int, b: str = …) -> R` from a function node's param/return children.
+fn signature_of(fn_node: &Node) -> String {
+    let mut params = Vec::new();
+    for c in fn_node.children.iter().filter(|c| c.kind == "param") {
+        let mut p = format!("{}: {}", c.name, c.ty.display);
+        if let Some(d) = &c.default {
+            p.push_str(&format!(" = {d}"));
+        }
+        params.push(p);
+    }
+    let ret = fn_node.children.iter().find(|c| c.kind == "return").map(|r| r.ty.display.clone()).unwrap_or_else(|| "None".to_owned());
+    format!("({}) -> {ret}", params.join(", "))
+}
+
+/// An alias the author wrote (`data: Payload`) stays the row's vocabulary;
+/// the checker's resolution becomes the ≈ decoration when the row has no
+/// structure of its own to show what it resolved to. The resolver's "alias
+/// name kept as vocabulary" and "alias leaf decorated with evaluated type".
+fn keep_written(node: &mut Node, written: Option<&String>) {
+    if let Some(w) = written
+        && *w != node.ty.display
+        && w.rsplit('.').next() != Some(node.ty.display.as_str())
+    {
+        if node.children.is_empty() && !node.expandable {
+            node.resolved = Some(std::mem::replace(&mut node.ty.display, w.clone()));
+        } else {
+            node.ty.display = w.clone();
+        }
+    }
+}
+
+/// An unannotated parameter with a default: pyrefly does not infer
+/// parameter types, but it does type the default expression, and the type
+/// of `3` widened to `int` is what pyright's default-based inference
+/// reported and the float drew as `≈ int`. Presentation, not inference of
+/// our own — the checker typed the value; the widening is Literal → class.
+fn infer_from_default(node: &mut Node, ty: &Type, req: &Required) {
+    if !matches!(ty, Type::Any(_)) {
+        return;
+    }
+    if let Required::Optional(Some(dv)) = req {
+        let widened = match &dv.ty {
+            Type::Literal(lit) => match &lit.value {
+                Lit::Int(_) => "int".to_owned(),
+                Lit::Str(_) => "str".to_owned(),
+                Lit::Bool(_) => "bool".to_owned(),
+                Lit::Bytes(_) => "bytes".to_owned(),
+                Lit::Enum(e) => e.class.name().as_str().to_owned(),
+                _ => dv.ty.to_string(),
+            },
+            Type::None => return, // `= None` says nothing about the type
+            other => other.to_string(),
+        };
+        if policy::informative_display(&widened) {
+            node.ty.display = widened;
+            node.inferred = true;
+        }
     }
 }
 

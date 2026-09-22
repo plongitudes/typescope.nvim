@@ -73,6 +73,7 @@ do
   check(meta.header == "takes_config(config, timeout=…) -> User", "header (got " .. tostring(meta.header) .. ")")
   check(type(meta.docstring) == "string", "docstring carried")
   check(roots[1].state.expanded and not roots[2].state.expanded, "param with structure starts open, leaf closed")
+  check(not roots[3].state.expanded and #roots[3].children > 0, "returns starts collapsed even with structure")
   check(names(roots[1].children) == "host,port,debug", "config's fields (got " .. names(roots[1].children) .. ")")
   check(roots[1].children[2].default == "8000", "port default")
   check(roots[1].type.category == "dataclass", "category dataclass")

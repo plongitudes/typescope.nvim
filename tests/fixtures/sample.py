@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional, TypedDict
+from typing import Literal, Optional, TypedDict, overload
 
 from server_types import Response
 

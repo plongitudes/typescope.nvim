@@ -72,7 +72,8 @@ local function to_spec(n, lazy)
     origin = n.origin,
     pass_mode = n.pass_mode,
     inferred = n.inferred or false,
-    evaluated = n.inferred and display or nil,
+    -- ≈ for an inferred type, or for what a written alias resolved to
+    evaluated = n.resolved or (n.inferred and display) or nil,
     source = n.location
         and { uri = n.location.uri, range = { start = { line = n.location.line, character = n.location.character } } }
       or nil,
@@ -186,9 +187,10 @@ function M.function_scope(client, bufnr, win, token, pos)
   elseif scope.scope == "declaration" then
     roots[1].state.expanded = #roots[1].children > 0
   else
-    -- function / constructor: params with resolved structure start open
+    -- function / constructor: params with resolved structure start open,
+    -- returns starts closed (the resolver's auto-expand policy)
     for _, r in ipairs(roots) do
-      r.state.expanded = #r.children > 0
+      r.state.expanded = r.kind == "param" and #r.children > 0
     end
   end
 

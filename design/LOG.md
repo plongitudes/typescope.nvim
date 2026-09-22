@@ -66,3 +66,14 @@ Newest at the bottom. One entry per tick: bead, what was done, what was verified
 - Done: `insert.lua` goes through `typescope._resolver()` / `_can_resolve()` like the float; basedpyright is optional on the oracle path (it still supplies `signatureHelp` for the active param when attached, and `refresh_active` already guarded its absence). `ensure_shape` calls `evaluate` only when the resolver offers it — the oracle's inferred types arrive inline and its lazy nodes are structure — so the legacy path keeps its ≈ fetch until bead 10 deletes `evaluate` with the old resolver. `function_scope`'s signature unchanged.
 - Verified: `./tests/run.sh` ALL SUITES PASS (legacy insert e2e untouched); the oracle suite drives `insert._update()` inside `ServerConfig("h")` and reads the constructor's params off the typing surface; stylua clean; no stray processes.
 - Next: `1mv` parity gate (both deps closed).
+
+## 2026-09-21 — tick 9 — `1mv` parity-gate
+
+- Done: `scripts/parity.lua` (throwaway; goes with resolve.lua) diffs the rendered float on every `shapes.py` marker through legacy (real basedpyright, fixture stubs on extraPaths) and oracle. 26/29 identical; the 3 differences are the documented closed gaps. pydantic identical.
+- Fixed in the oracle from the diff and the old e2e on the oracle path: method rows as receiver-less signatures (leaf, `(key: str) -> bytes`); `Unknown` → `Any`; TypedDict values list their keys (query the class instance, not the dict-shaped value); written alias kept as vocabulary with `resolved` (new wire field, drawn ≈) on leaves — type variables excluded so `Box[ServerConfig].item` still reads `ServerConfig`; unannotated param with a default → the default's type, ≈ (pyrefly's `int | Unknown` with the `Unknown` member dropped); union displays keep pyrefly's grouped literal spelling unless a member was dropped. Port bug: `returns` now starts collapsed.
+- Fixture defect: `sample.py` lacked `overload` and `Literal` imports — a mock never checked; a real checker sees an unknown decorator and the overload stubs stop being functions. Imported them (legacy suite unaffected).
+- `e2e_phase3.lua` with `resolver = "oracle"`: 101/115 (was 83/115 at tick 6). Remaining 14, all classified for bead 10: stub-hop family ×10 (`sinks.py`/`sinks_stub.py` + `attach()` with no import — rewrite as `sinks.pyi`), prefetch ×2 (the test reads `typescope.resolve._cache_count`), first-open attach race ×1, evaluation-only expand ×1 (no oracle equivalent). `e2e_declarations.lua`: 29/29.
+- No checker disagreement on this corpus. The stop condition did not fire.
+- Verified: cargo test 32/32; `./tests/run.sh` ALL SUITES PASS; stylua clean; no stray processes.
+- Decision 6 checkpoint: the parity gate is closed; the pyrefly PR conversation can happen outside the loop whenever Tony wants.
+- Next: `73q` delete-old-resolver.

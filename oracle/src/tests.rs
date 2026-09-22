@@ -272,8 +272,10 @@ fn methods_are_grouped_for_data_and_flat_for_all() {
     let kinds: Vec<&str> = all.roots[0].children.iter().map(|c| c.kind.as_str()).collect();
     assert_eq!(kinds, ["field", "method"]);
     let run = &all.roots[0].children[1];
-    let params: Vec<&str> = run.children.iter().map(|c| c.name.as_str()).collect();
-    assert_eq!(params, ["n", "returns"], "self dropped by position");
+    // a method row is its receiver-less signature, no children (the
+    // resolver drew Protocol methods exactly so; parity gate 1mv)
+    assert_eq!(run.ty.display, "(n: int) -> str", "self dropped by position, signature as the row");
+    assert!(run.children.is_empty());
 }
 
 #[test]
@@ -432,4 +434,59 @@ fn a_module_name_is_not_ours() {
     // is a Module; K's job
     let line = line_of("oracle/oracle.py", "from typing import Generic");
     assert!(oracle().structure(&fixtures().join("oracle/oracle.py"), line, 5, 2, Members::Data, false).is_none());
+}
+
+// ---------------------------------------------------------------- parity gate (1mv)
+
+#[test]
+fn a_written_alias_stays_the_vocabulary_and_resolves_beneath() {
+    // sample.py: Payload = UserRecord; def send(data: Payload)
+    let s = probe("sample.py", "def send", 4, false);
+    let data = &s.roots[0];
+    assert_eq!(data.ty.display, "Payload", "the alias the author wrote");
+    assert_eq!(data.ty.category, "typeddict");
+    assert_eq!(data_rows(data), ["email", "name", "age"], "TypedDict keys through the alias");
+    assert_eq!(find(data, "email").badge.as_deref(), Some("NotRequired"), "total=False badges survive");
+    assert!(data.resolved.is_none(), "a row with structure needs no ≈");
+    // LoopMode = Literal["auto", "manual"]; def configure(mode: LoopMode)
+    let s = probe("sample.py", "def configure", 4, false);
+    let mode = &s.roots[0];
+    assert_eq!(mode.ty.display, "LoopMode");
+    assert_eq!(mode.resolved.as_deref(), Some("Literal['auto', 'manual']"), "a leaf alias is decorated with what it resolved to");
+}
+
+#[test]
+fn a_typedict_parameter_lists_its_keys_not_dicts_methods() {
+    let s = probe("sample.py", "def update_user", 4, false);
+    assert_eq!(data_rows(&s.roots[0]), ["email", "name", "age"]);
+    assert!(s.roots[0].children.iter().all(|c| c.kind != "group"), "dict's methods are cut");
+}
+
+#[test]
+fn an_unannotated_parameter_reads_any_not_unknown() {
+    let s = probe("shapes.py", "def free_function", 4, false);
+    assert_eq!(s.roots[0].name, "numpy_test");
+    assert_eq!(s.roots[0].ty.display, "Any");
+    assert_eq!(s.roots[0].ty.category, "builtin");
+}
+
+#[test]
+fn a_protocol_method_row_is_its_receiverless_signature() {
+    let s = probe("shapes.py", "class Backend", 6, false);
+    let read = find(&s.roots[0], "read");
+    assert_eq!(read.kind, "method");
+    assert_eq!(read.ty.display, "(key: str) -> bytes");
+    assert!(read.children.is_empty() && !read.expandable);
+}
+
+#[test]
+fn an_unannotated_parameter_with_a_default_is_typed_by_the_default() {
+    // def configure(mode: LoopMode, count=3): pyrefly types count as
+    // `int | Unknown`; the float shows `int ≈`, as pyright's default-based
+    // inference did
+    let s = probe("sample.py", "def configure", 4, false);
+    let count = &s.roots[1];
+    assert_eq!(count.ty.display, "int");
+    assert!(count.inferred);
+    assert_eq!(count.default.as_deref(), Some("3"));
 }
