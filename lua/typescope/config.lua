@@ -7,6 +7,10 @@
 ---@field timeout_ms integer stall timeout: how long ollama may go SILENT, not a total budget
 ---@field keep_alive string how long ollama keeps the model resident after a request (RAM tradeoff)
 
+---@class typescope.OracleConfig
+---@field path string? an explicit typescope-oracle binary; nil = the downloaded one under stdpath("data"), then a build in this checkout
+---@field download boolean fetch the release binary on first use when none is found (decision 2; the download itself is a later bead)
+
 ---@class typescope.UiConfig
 ---@field style "unicode"|"ascii"|"minimal"|"rounded"
 ---@field layout "ledger"|"tree"|"table" one-line rows with a cursor-follow detail block (default) vs flowing segments vs column grid (deprecated)
@@ -44,6 +48,7 @@
 ---@field show_examples boolean
 ---@field example_mode "heuristic"|"llm"|"none"
 ---@field ollama typescope.OllamaConfig
+---@field oracle typescope.OracleConfig
 ---@field ui typescope.UiConfig
 ---@field highlights table<string, vim.api.keyset.highlight>
 ---@field keymaps typescope.KeymapConfig
@@ -97,6 +102,13 @@ local defaults = {
     -- see M.shutdown — so the default stays conservative; raise it in your
     -- own config if you have the RAM.
     keep_alive = "5m",
+  },
+  -- The type oracle (design/oracle.md): a pyrefly-backed binary this plugin
+  -- starts as a second language server on Python buffers. `path` points at
+  -- your own build; with it unset the downloaded binary is used.
+  oracle = {
+    path = nil,
+    download = true,
   },
   ui = {
     style = "rounded", -- "unicode" | "ascii" | "minimal" | "rounded"
@@ -173,6 +185,11 @@ end
 local function validate(cfg)
   check("trigger", cfg.trigger, { "hover", "manual" })
   check("prefetch", cfg.prefetch, "boolean")
+  check("oracle", cfg.oracle, "table")
+  check("oracle.download", cfg.oracle.download, "boolean")
+  if cfg.oracle.path ~= nil and type(cfg.oracle.path) ~= "string" then
+    error("typescope.setup: `oracle.path` must be a string path or nil", 0)
+  end
   check("insert_mode", cfg.insert_mode, "table")
   check("insert_mode.enabled", cfg.insert_mode.enabled, "boolean")
   check("insert_mode.max_detail_lines", cfg.insert_mode.max_detail_lines, "positive_integer")

@@ -30,6 +30,15 @@ function M.client_for(bufnr)
   end
 end
 
+--- The oracle client for a buffer (design/oracle.md §5). basedpyright stays
+--- `client_for`: it still answers signatureHelp and everything K falls
+--- through to; the oracle answers `typescope/structure`.
+---@param bufnr integer
+---@return vim.lsp.Client?
+function M.oracle_for(bufnr)
+  return require("typescope.oracle").client_for(bufnr)
+end
+
 -- vim.str_utfindex/str_byteindex changed signatures between 0.10 and 0.11.
 ---@param line string
 ---@param byte_col integer

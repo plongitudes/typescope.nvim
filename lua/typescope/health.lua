@@ -36,6 +36,34 @@ function M.check()
 
   local cfg = require("typescope.config").get()
 
+  -- the type oracle (required: it is where structure comes from)
+  health.start("typescope.nvim: oracle")
+  local oracle = require("typescope.oracle")
+  local bin = oracle.locate(cfg)
+  if not bin then
+    health.error("typescope-oracle binary not found", {
+      "Set `oracle.path` to a build, or let the plugin download a release (oracle.download = true)",
+      "Build from this checkout: scripts/build-oracle.sh --release",
+    })
+  else
+    local version = oracle.version(bin)
+    if version then
+      health.ok(("%s (%s)"):format(version, bin))
+    else
+      health.error(("typescope-oracle at %s does not answer --version"):format(bin))
+    end
+    if oracle.mismatch then
+      health.error(
+        ("oracle protocol %s, plugin needs %d"):format(tostring(oracle.mismatch.got), oracle.mismatch.want),
+        { "Update the oracle binary and the plugin together" }
+      )
+    elseif oracle.client_for() then
+      health.ok("oracle client active")
+    else
+      health.ok("oracle client not active in this session (attaches on the next Python buffer)")
+    end
+  end
+
   health.start("typescope.nvim: examples (optional)")
   if not cfg.ollama.enabled then
     health.ok("Ollama disabled (heuristic examples only)")

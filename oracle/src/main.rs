@@ -71,10 +71,14 @@ fn main() -> Result<()> {
     connection.initialize_finish(init_id, init_result)?;
 
     let oracle = oracle::Oracle::new();
-    serve(&connection, oracle)?;
+    let served = serve(&connection, oracle);
 
+    // The writer thread only ends once every sender is gone; holding the
+    // connection across the join would keep this process alive after the
+    // editor has closed our stdin — a stray oracle per closed nvim.
+    drop(connection);
     io_threads.join()?;
-    Ok(())
+    served
 }
 
 fn serve(connection: &Connection, oracle: oracle::Oracle) -> Result<()> {

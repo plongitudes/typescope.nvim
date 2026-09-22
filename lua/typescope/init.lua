@@ -11,6 +11,7 @@ function M.setup(opts)
   M._enable_hover(cfg)
   require("typescope.insert").set_enabled(cfg.insert_mode.enabled)
   M._enable_warmstart(cfg)
+  require("typescope.oracle").enable(cfg)
 end
 
 -- Suppression key of the last CursorHold attempt: don't re-fire the pipeline

@@ -34,3 +34,11 @@ Newest at the bottom. One entry per tick: bead, what was done, what was verified
 - Gotchas: `get_type_at` coerces a callee to the chosen overload — `get_type_at_preserving_declaration` is the right question; an `@overload` stub's type is just that stub, the set lives at the implementation def (AST lookup of the last same-named def); pyrefly does not type `self.x` assignment targets, so those go through the enclosing class's attributes (receiver by position); pyrefly lists a written `__init__` but not a dataclass's synthesized one.
 - Plan: §4 request gains `call`; Scope's overload shape aligned to what the plugin already consumes (`headers` + `overloads` + group roots).
 - Next: `12n` lua-oracle-client (only bead ready besides `sjg`).
+
+## 2026-09-21 — tick 5 — `12n` lua-oracle-client
+
+- Done: `lua/typescope/oracle.lua` — `locate()` (config `oracle.path` → `stdpath("data")/typescope/` → a build in this checkout), `version()`, pure `protocol_ok()`, `attach()` via `vim.lsp.start` with an `on_init` protocol check that refuses and records a mismatch, `client_for()`, `request()` (vim.NIL → nil), `enable()` (FileType autocmd + sweep); `lsp.oracle_for`; `config.oracle = { path, download }` with validation; `setup()` enables it; `:checkhealth` gets an oracle section (binary, version, mismatch, client). `tests/test_oracle_client.lua` (15 checks) in `run.sh`.
+- Verified: `./tests/run.sh` ALL SUITES PASS; `stylua --check` clean; no stray processes.
+- Found and fixed: the oracle outlived its nvim — `io_threads.join()` waits on the writer thread, which waits on the `Connection`'s sender; drop the connection before joining. Two orphans had survived the suite run before the fix; now the binary exits on stdin EOF.
+- `lsp.client_for` (basedpyright's slot) never picks the oracle because it does not advertise definition support — tested.
+- Next: `4fd` lua-resolve-port (both its deps now closed).

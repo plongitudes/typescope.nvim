@@ -75,14 +75,20 @@ if client and client.initialized then
     return done
   end, 10)
   check(done and err == nil, "typescope/structure answered without error (" .. vim.inspect(err) .. ")")
-  check(type(result) == "table" and result.scope == "class", "answer is a class Scope (got " .. vim.inspect(result and result.scope) .. ")")
+  check(
+    type(result) == "table" and result.scope == "class",
+    "answer is a class Scope (got " .. vim.inspect(result and result.scope) .. ")"
+  )
   local root = type(result) == "table" and result.roots and result.roots[1]
   check(root and root.type and root.type.category == "dataclass", "ServerConfig is a dataclass over the wire")
   local names = {}
   for _, c in ipairs(root and root.children or {}) do
     names[#names + 1] = c.name
   end
-  check(table.concat(names, ",") == "host,port,debug", "fields host,port,debug (got " .. table.concat(names, ",") .. ")")
+  check(
+    table.concat(names, ",") == "host,port,debug",
+    "fields host,port,debug (got " .. table.concat(names, ",") .. ")"
+  )
 
   -- an UNSAVED edit is what the oracle answers with: change `port: int` to
   -- `port: str` in the buffer (nvim sends didChange), ask again, then undo
@@ -112,7 +118,10 @@ if client and client.initialized then
       port = c
     end
   end
-  check(port and port.type.display == "str", "unsaved edit seen: port is str (got " .. vim.inspect(port and port.type.display) .. ")")
+  check(
+    port and port.type.display == "str",
+    "unsaved edit seen: port is str (got " .. vim.inspect(port and port.type.display) .. ")"
+  )
   vim.api.nvim_buf_set_lines(bufnr, port_line, port_line + 1, false, { "    port: int = 8000" })
   vim.bo[bufnr].modified = false
 
