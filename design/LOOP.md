@@ -15,7 +15,6 @@ Read this at the start of every tick. The plan is `design/oracle.md`; the work q
 
 - **25 ticks** total, then stop and summarize regardless of state. A slow grind that never trips the three-tick rule is still a grind.
 - One Cargo target dir: once `oracle/` builds, `cargo clean` the spike crate. Dev profile for tests; release builds only when a bead needs the shipped binary.
-- Check `memory_pressure` before a release build; under ~15% free, skip the build this tick. It is an 8 GB laptop Tony is also using.
 - Network only to `github.com/facebook/pyrefly` (submodule), crates.io (cargo), and this repo's GitHub Releases (download bead). Nothing else gets installed or fetched to solve a problem; that is a `QUESTIONS.md` entry.
 
 ## Scope fence
