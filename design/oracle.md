@@ -144,22 +144,22 @@ Lives in this repo under `oracle/` (a Cargo workspace member of one crate), so a
 
 Each is one tick's work with a testable done-state. Dependencies in brackets.
 
-1. `oracle-crate` — `oracle/` crate skeleton, submodule + patch + build script, `initialize` handshake only; `nvim --headless` can attach and see `serverInfo`. Rust unit test harness in place.
-2. `oracle-walk` [1] — port the probe walk to `walk.rs` + `policy.rs`; unit tests assert JSON for every marker class in `shapes.py` and the spike fixture.
-3. `oracle-sync` [1] — didOpen/didChange overlays; test: edit an annotation in memory, structure answers the new type without saving.
-4. `oracle-scopes` [2] — function / class / declaration / constructor / empty classification and headers, overload groups; async-return rule.
-5. `lua-oracle-client` [1] — `oracle.lua` (enable, locate, version check, health), `lsp.oracle_for`.
-6. `lua-resolve-port` [4, 5] — `resolve.lua` rewritten onto the client; `recurse` via location; cache preserved; the three-way decline preserved.
-7. `lua-render-kinds` [6] — `property`, `enum_member`, `group` rows; `inferred` replaces `evaluated`; screenshots.
-8. `lua-insert-port` [6] — `insert.lua` off `evaluate`.
-9. `parity-gate` [7, 8] — the diff script over every marker; every difference filed or fixed. **Stop condition: the old resolver is not deleted until this bead closes.**
-10. `delete-old-resolver` [9] — `extract/python.lua` → `call_args` only; `lsp.lua` shrinks; `mock_server.lua` → `mock_oracle.lua`; dead tests removed.
-11. `download` [5] — release-binary download with checksum, `config.oracle.path`, `download = false`; health messages.
-12. `release-pipeline` [1] — GitHub Actions matrix, `SHA256SUMS`, tag → release.
-13. `docs-0.2.0` [10, 11] — README requirements/install/config, CHANGELOG, `doc/typescope.txt`, `hdt` (table layout removal) folded in.
-14. `footprint-final` [10] — kitchen measurement in the changelog.
+1. `oracle-crate` (`4te`) — `oracle/` crate skeleton, submodule + patch + build script, `initialize` handshake only; `nvim --headless` can attach and see `serverInfo`. Rust unit test harness in place.
+2. `oracle-walk` (`5f8`) [1] — port the probe walk to `walk.rs` + `policy.rs`; unit tests assert JSON for every marker class in `shapes.py` and the spike fixture.
+3. `oracle-sync` (`dmg`) [1] — didOpen/didChange overlays; test: edit an annotation in memory, structure answers the new type without saving.
+4. `oracle-scopes` (`12r`) [2] — function / class / declaration / constructor / empty classification and headers, overload groups; async-return rule.
+5. `lua-oracle-client` (`12n`) [1] — `oracle.lua` (enable, locate, version check, health), `lsp.oracle_for`.
+6. `lua-resolve-port` (`4fd`) [4, 5] — `resolve.lua` rewritten onto the client; `recurse` via location; cache preserved; the three-way decline preserved.
+7. `lua-render-kinds` (`6ii`) [6] — `property`, `enum_member`, `group` rows; `inferred` replaces `evaluated`; screenshots.
+8. `lua-insert-port` (`lfy`) [6] — `insert.lua` off `evaluate`.
+9. `parity-gate` (`1mv`) [7, 8] — the diff script over every marker; every difference filed or fixed. **Stop condition: the old resolver is not deleted until this bead closes.**
+10. `delete-old-resolver` (`73q`) [9] — `extract/python.lua` → `call_args` only; `lsp.lua` shrinks; `mock_server.lua` → `mock_oracle.lua`; dead tests removed.
+11. `download` (`tzb`) [5] — release-binary download with checksum, `config.oracle.path`, `download = false`; health messages.
+12. `release-pipeline` (`sjg`) [1] — GitHub Actions matrix, `SHA256SUMS`, tag → release.
+13. `docs-0.2.0` (`ipb`) [10, 11] — README requirements/install/config, CHANGELOG, `doc/typescope.txt`, `hdt` (table layout removal) folded in.
+14. `footprint-final` (`upm`) [10] — kitchen measurement in the changelog.
 
-Beads blocked on the Decision bead today (`5mq`, `yw2`, `ym4`, `85g`): `ym4` closes with decision 4; `85g` closes with bead 10; `5mq` and `yw2` are re-scoped onto the oracle client in bead 6 and closed there or re-filed.
+`ym4` is closed by decision 4; `85g` closes with bead 10; `5mq` and `yw2` are re-homed on bead 6; `hdt` on bead 13. Epic: `5ag`.
 
 ## 9. Out of scope
 
