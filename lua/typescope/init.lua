@@ -14,6 +14,27 @@ function M.setup(opts)
   require("typescope.oracle").enable(cfg)
 end
 
+--- The resolver module the float uses. TRANSITIONAL (design/oracle.md bead
+--- 10 removes the switch): `config.resolver` picks between the treesitter
+--- resolver and the oracle client while both exist for the parity gate.
+function M._resolver()
+  local which = require("typescope.config").get().resolver
+  return require(which == "oracle" and "typescope.resolve_oracle" or "typescope.resolve")
+end
+
+--- Can the pipeline run in this buffer? The treesitter resolver needs a
+--- client with definition support (basedpyright); the oracle resolver needs
+--- the oracle, and uses basedpyright only for signatureHelp when present.
+---@param bufnr integer
+---@return boolean
+function M._can_resolve(bufnr)
+  local lsp = require("typescope.lsp")
+  if require("typescope.config").get().resolver == "oracle" then
+    return lsp.oracle_for(bufnr) ~= nil
+  end
+  return lsp.client_for(bufnr) ~= nil
+end
+
 -- Suppression key of the last CursorHold attempt: don't re-fire the pipeline
 -- while the cursor sits on the same word of the same line (v1 heuristic;
 -- revisit if it feels over- or under-eager).
@@ -32,7 +53,7 @@ function M._enable_hover(cfg)
     group = group,
     desc = "TypeScope: auto-open on cursor rest (trigger = 'hover')",
     callback = function()
-      if vim.fn.mode() ~= "n" or not require("typescope.lsp").client_for(0) then
+      if vim.fn.mode() ~= "n" or not M._can_resolve(vim.api.nvim_get_current_buf()) then
         return
       end
       local pos = vim.api.nvim_win_get_cursor(0)
@@ -137,7 +158,7 @@ function M._enable_warmstart(cfg)
         local lsp = require("typescope.lsp")
         local client = lsp.client_for(0)
         local cword = vim.fn.expand("<cword>")
-        if not client or cword == "" then
+        if not M._can_resolve(vim.api.nvim_get_current_buf()) or cword == "" then
           return
         end
         local pos = vim.api.nvim_win_get_cursor(0)
@@ -155,7 +176,7 @@ function M._enable_warmstart(cfg)
         async.run(function()
           -- results and errors both discarded: the cache write inside
           -- function_scope is the entire point
-          require("typescope.resolve").function_scope(client, bufnr, win, token)
+          M._resolver().function_scope(client, bufnr, win, token)
           if prefetch_token == token then
             prefetch_token = nil
           end
@@ -299,7 +320,7 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
     on_close = M.close,
     on_recurse = function(node, done)
       if session then
-        require("typescope.resolve").recurse(session.client, node, session.token, done)
+        M._resolver().recurse(session.client, node, session.token, done)
       end
     end,
     on_llm = function(tree_roots, done, on_progress)
@@ -437,12 +458,15 @@ function M.open(opts)
   local bufnr = vim.api.nvim_get_current_buf()
   local win = vim.api.nvim_get_current_win()
   local lsp = require("typescope.lsp")
-  local client = lsp.client_for(bufnr)
-  if not client then
+  local client = lsp.client_for(bufnr) -- basedpyright: signatureHelp, and the legacy pipeline
+  if not M._can_resolve(bufnr) then
     if opts.on_unresolved then
       opts.on_unresolved()
     elseif not opts.silent then
-      vim.notify("typescope: no LSP client with definition support attached to this buffer", vim.log.levels.WARN)
+      local what = require("typescope.config").get().resolver == "oracle"
+          and "the type oracle (see :checkhealth typescope)"
+        or "an LSP client with definition support"
+      vim.notify("typescope: " .. what .. " is not attached to this buffer", vim.log.levels.WARN)
     end
     return
   end
@@ -451,7 +475,7 @@ function M.open(opts)
   local token = async.token()
   open_token = token
   async.run(function()
-    local resolve = require("typescope.resolve")
+    local resolve = M._resolver()
     local roots, meta_or_err, why = resolve.function_scope(client, bufnr, win, token)
     if async.stale(token) then
       return
@@ -465,7 +489,9 @@ function M.open(opts)
       return
     end
     -- signatureHelp still requested, but only for activeParameter now
-    local sig_result = lsp.signature_help(client, bufnr, win, token)
+    -- activeParameter comes from basedpyright's signatureHelp; without it
+    -- the float opens with no row marked active
+    local sig_result = client and lsp.signature_help(client, bufnr, win, token) or nil
     if async.stale(token) then
       return
     end

@@ -350,6 +350,32 @@ function M.call_args(src, row, col)
   return out
 end
 
+--- Is (row, col) on the CALLEE of a call — `Recipe(` with the cursor on
+--- `Recipe`, `obj.method(` on `method`? Call-site syntax, so this stays
+--- treesitter: the oracle draws a class under a call as its constructor
+--- (design/oracle.md decision 5).
+---@param src integer|string
+---@param row integer 0-based
+---@param col integer 0-based byte
+---@return boolean
+function M.on_callee(src, row, col)
+  local node = node_at(src, row, col)
+  local call = node and walk_up(node, "call")
+  local callee = call and field1(call, "function")
+  if not callee then
+    return false
+  end
+  local srow, scol, erow, ecol = callee:range()
+  if row < srow or row > erow or (row == srow and col < scol) or (row == erow and col >= ecol) then
+    return false
+  end
+  -- on the callee's final identifier specifically, not an argument of a
+  -- nested call inside it
+  local target = callee:type() == "attribute" and field1(callee, "attribute") or callee
+  local tr, tc, ter, tec = target:range()
+  return row >= tr and row <= ter and (row > tr or col >= tc) and (row < ter or col < tec)
+end
+
 --- When (row, col) sits on the NAME of a type-alias definition, return the
 --- RHS node to be parsed as an annotation. Recognized shapes:
 ---   X = SomeClass          X = A | B          X = Optional[Thing]
