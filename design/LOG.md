@@ -26,3 +26,11 @@ Newest at the bottom. One entry per tick: bead, what was done, what was verified
 - Gotcha: a transaction that `set_memory`/`invalidate_disk` dirtied must `run` (even with no handles) before `commit_transaction`, or pyrefly asserts "Transaction is dirty".
 - `$/cancelRequest` is accepted and ignored: requests are answered synchronously in order, so a cancel always arrives after its answer. Noted in main.rs; revisit only if a request ever runs long enough to matter.
 - Next: `12r` oracle-scopes.
+
+## 2026-09-21 — tick 4 — `12r` oracle-scopes
+
+- Done: `scope.rs` — function (roots = params + return, call-shape header with `name=…`, `/`, `*`, docstring), overload sets (groups with `[i/n]` badges, `headers`, `overloads`), class (root row `(category ← bases)` from the written bases minus markers, docstring), constructor on `call: true` (written `__init__` or the instance's fields as params, then `returns` = the instance), declaration (root named as the cursor's text, `self.x` included, ≈ when the assignment was unannotated), `empty` with the resolver's reasons; Module → null. `--probe … --call`.
+- Verified: 27 Rust tests; `./tests/run.sh` ALL SUITES PASS.
+- Gotchas: `get_type_at` coerces a callee to the chosen overload — `get_type_at_preserving_declaration` is the right question; an `@overload` stub's type is just that stub, the set lives at the implementation def (AST lookup of the last same-named def); pyrefly does not type `self.x` assignment targets, so those go through the enclosing class's attributes (receiver by position); pyrefly lists a written `__init__` but not a dataclass's synthesized one.
+- Plan: §4 request gains `call`; Scope's overload shape aligned to what the plugin already consumes (`headers` + `overloads` + group roots).
+- Next: `12n` lua-oracle-client (only bead ready besides `sjg`).

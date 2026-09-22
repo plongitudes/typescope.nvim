@@ -171,6 +171,20 @@ pub fn informative_inference(ty: &Type) -> bool {
     !matches!(ty, Type::None | Type::Any(_) | Type::Never(_))
 }
 
+/// The same question over a rendered type: what a return row shows.
+pub fn informative_display(display: &str) -> bool {
+    !matches!(display, "None" | "Any" | "Unknown" | "Never" | "NoReturn")
+}
+
+/// Bases the class header does not repeat, because the category already
+/// says them: the construct markers.
+pub fn is_marker_base(name: &str) -> bool {
+    matches!(
+        name,
+        "object" | "BaseModel" | "TypedDict" | "NamedTuple" | "Protocol" | "Generic" | "Enum" | "IntEnum" | "StrEnum" | "Flag" | "IntFlag"
+    )
+}
+
 /// A checker-private notation rather than a Python type: pyrefly's `Self@C`
 /// and `T@f` spellings never reach the float as something to exemplify.
 pub fn is_checker_notation(display: &str) -> bool {

@@ -73,6 +73,18 @@ pub struct Node {
     pub children: Vec<Node>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub expandable: bool,
+    /// Call-shape tokens of a function node (`a`, `b=…`, `*`, `/`), for the
+    /// header line. Never serialized.
+    #[serde(skip)]
+    pub shape: Vec<String>,
+    /// The `def`'s own name and the range of that name in its module, when
+    /// the function has a source definition. Never serialized.
+    #[serde(skip)]
+    pub def_name: Option<String>,
+    #[serde(skip)]
+    pub def_range: Option<TextRange>,
+    #[serde(skip)]
+    pub def_module: Option<ModulePath>,
 }
 
 impl Node {
@@ -89,6 +101,10 @@ impl Node {
             location: None,
             children: Vec::new(),
             expandable: false,
+            shape: Vec::new(),
+            def_name: None,
+            def_range: None,
+            def_module: None,
         }
     }
 }
@@ -146,16 +162,30 @@ impl<'a> Walker<'a> {
         let mut node = Node::leaf(name, kind, display_function(f), "function");
         let def = f.metadata.kind.as_func_def_id();
         let facts = def.map(|d| self.def_facts(d)).unwrap_or_default();
-        node.location = facts.location;
+        node.location = facts.location.clone();
+        if let Some(d) = def {
+            node.def_name = Some(d.qname.id().as_str().to_owned());
+            node.def_range = Some(d.qname.range());
+            node.def_module = Some(d.qname.module().path().dupe());
+        }
         let flags = &f.metadata.flags;
         // the receiver is dropped by POSITION: a method's first parameter
         // whatever it is called, never a staticmethod's (the resolver's
         // binds_receiver rule, carried forward)
         let receiver_bound = bound_to.is_some() || (def.is_some_and(|d| d.cls.is_some()) && !flags.is_staticmethod);
+        // shape tokens mirror the resolver's header: names, `name=…` for a
+        // default, and the `/` and `*` separators the signature implies
+        let mut shape: Vec<String> = Vec::new();
+        let mut had_pos_only = false;
+        let mut star_written = false;
         if let Params::List(list) = &f.signature.params {
             for (i, p) in list.items().iter().enumerate() {
                 if i == 0 && receiver_bound {
                     continue;
+                }
+                if had_pos_only && !matches!(p, Param::PosOnly(..)) {
+                    shape.push("/".to_owned());
+                    had_pos_only = false;
                 }
                 match p {
                     Param::PosOnly(pname, ty, req) => {
@@ -163,31 +193,48 @@ impl<'a> Walker<'a> {
                         let mut c = self.node(&n, "param", ty, depth);
                         c.pass_mode = Some("/".to_owned());
                         c.default = default_text(req);
+                        shape.push(token(&n, c.default.is_some()));
+                        had_pos_only = true;
                         node.children.push(c);
                     }
                     Param::Pos(pname, ty, req) => {
                         let mut c = self.node(pname.as_str(), "param", ty, depth);
                         c.default = default_text(req);
+                        shape.push(token(pname.as_str(), c.default.is_some()));
                         node.children.push(c);
                     }
                     Param::Varargs(pname, ty) => {
                         let n = format!("*{}", pname.as_ref().map(|n| n.as_str()).unwrap_or(""));
+                        shape.push(n.clone());
+                        star_written = true;
                         node.children.push(self.node(&n, "param", ty, depth));
                     }
                     Param::KwOnly(pname, ty, req) => {
+                        if !star_written {
+                            shape.push("*".to_owned());
+                            star_written = true;
+                        }
                         let mut c = self.node(pname.as_str(), "param", ty, depth);
                         c.pass_mode = Some("*".to_owned());
                         c.default = default_text(req);
+                        shape.push(token(pname.as_str(), c.default.is_some()));
                         node.children.push(c);
                     }
                     Param::Kwargs(pname, ty) => {
                         let n = format!("**{}", pname.as_ref().map(|n| n.as_str()).unwrap_or(""));
+                        shape.push(n.clone());
                         node.children.push(self.node(&n, "param", ty, depth));
                     }
                 }
             }
+            if had_pos_only {
+                shape.push("/".to_owned());
+            }
         }
-                let ret = &f.signature.ret;
+        node.shape = shape;
+        // an `async def` evaluates to Coroutine[_, _, X]; the float says what
+        // the author declared, X, the way hover does
+        let ret = if facts.is_async { unwrap_coroutine(&f.signature.ret) } else { &f.signature.ret };
         let mut r = self.node("returns", "return", ret, depth);
         r.inferred = !facts.return_annotated;
         node.children.push(r);
@@ -200,7 +247,7 @@ impl<'a> Walker<'a> {
         let module = def.qname.module();
         let handle = Handle::new(def.qname.module_name(), module.path().dupe(), self.handle.sys_info().dupe());
         let range = def.qname.range();
-        let mut facts = DefFacts { location: None, return_annotated: true };
+        let mut facts = DefFacts { location: None, return_annotated: true, is_async: false };
         if let Some(uri) = uri_of(module.path()) {
             let loc = module.lined_buffer().line_index().source_location(range.start(), module.contents(), PositionEncoding::Utf16);
             facts.location = Some(Location {
@@ -213,6 +260,7 @@ impl<'a> Walker<'a> {
             && let Some(fd) = find_function_def(&ast.body, range)
         {
             facts.return_annotated = fd.returns.is_some();
+            facts.is_async = fd.is_async;
         }
         facts
     }
@@ -247,7 +295,14 @@ impl<'a> Walker<'a> {
             // an anonymous TypedDict is how pyrefly types a dict literal:
             // `{"k": 1}` displays as `dict[str, int]` and is vocabulary, not shape
             Type::TypedDict(_) => return Node::leaf(name, kind, display(ty), "builtin"),
-            Type::ClassDef(c) => (c.dupe(), instance_of(c).unwrap_or_else(|| ty.clone())),
+            Type::ClassDef(c) => {
+                if std::env::var_os("TYPESCOPE_DEBUG_CLASSDEF").is_some() {
+                    for a in self.tx.attributes_of_type(self.handle, ty.clone()).unwrap_or_default() {
+                        eprintln!("[classdef attr] {}  ty={}", a.name, a.ty.as_ref().map(|t| t.to_string()).unwrap_or_default());
+                    }
+                }
+                (c.dupe(), instance_of(c).unwrap_or_else(|| ty.clone()))
+            }
             _ => unreachable!(),
         };
         if policy::is_terminal_class(&cls) {
@@ -449,11 +504,12 @@ impl<'a> Walker<'a> {
 struct DefFacts {
     location: Option<Location>,
     return_annotated: bool,
+    is_async: bool,
 }
 
 impl Default for DefFacts {
     fn default() -> Self {
-        DefFacts { location: None, return_annotated: true }
+        DefFacts { location: None, return_annotated: true, is_async: false }
     }
 }
 
@@ -474,48 +530,166 @@ struct ClassDefFacts {
 
 // ------------------------------------------------------------------ cursor
 
-/// Is `offset` on an identifier a person would hover — a name, an
-/// attribute, a `def`/`class` name, a parameter? Everything else (a string,
-/// a number, an operator, whitespace) is not TypeScope's business and the
-/// request answers `null`, which is what lets K fall through.
-pub fn identifier_at(body: &[Stmt], offset: ruff_text_size::TextSize) -> bool {
+/// The identifier under the cursor, as the float would name it.
+#[derive(Debug, Clone)]
+pub struct Cursor {
+    /// `resp`, `self.bar`, `get_recipe_by_id` — the full dotted text for an
+    /// attribute, as the resolver's declaration rows were named.
+    pub text: String,
+    /// The identifier's own range (the attribute name for `self.bar`).
+    pub range: TextRange,
+    /// The cursor is on the target of an UNANNOTATED assignment: the
+    /// declaration row is pyrefly's inference, drawn ≈.
+    pub inferred: bool,
+}
+
+/// The identifier `offset` sits on — a name, an attribute, a `def`/`class`
+/// name, a parameter — or `None` for anything else (a string, a number, an
+/// operator, whitespace), which is not TypeScope's business: the request
+/// answers `null` and K falls through.
+pub fn identifier_at(body: &[Stmt], text: &str, offset: ruff_text_size::TextSize) -> Option<Cursor> {
     use ruff_python_ast::visitor::Visitor;
-    struct Finder {
+    struct Finder<'t> {
+        text: &'t str,
         offset: ruff_text_size::TextSize,
-        hit: bool,
+        hit: Option<Cursor>,
+        in_bare_assign_target: bool,
     }
-    impl<'a> Visitor<'a> for Finder {
+    impl<'a, 't> Visitor<'a> for Finder<'t> {
         fn visit_stmt(&mut self, stmt: &'a Stmt) {
-            if self.hit || !stmt.range().contains_inclusive(self.offset) {
+            if self.hit.is_some() || !stmt.range().contains_inclusive(self.offset) {
                 return;
             }
             match stmt {
-                Stmt::FunctionDef(f) if f.name.range().contains_inclusive(self.offset) => self.hit = true,
-                Stmt::ClassDef(c) if c.name.range().contains_inclusive(self.offset) => self.hit = true,
+                Stmt::FunctionDef(f) if f.name.range().contains_inclusive(self.offset) => {
+                    self.hit = Some(Cursor { text: f.name.to_string(), range: f.name.range(), inferred: false });
+                }
+                Stmt::ClassDef(c) if c.name.range().contains_inclusive(self.offset) => {
+                    self.hit = Some(Cursor { text: c.name.to_string(), range: c.name.range(), inferred: false });
+                }
+                Stmt::Assign(a) => {
+                    for t in &a.targets {
+                        if t.range().contains_inclusive(self.offset) {
+                            self.in_bare_assign_target = true;
+                            self.visit_expr(t);
+                            self.in_bare_assign_target = false;
+                            return;
+                        }
+                    }
+                    ruff_python_ast::visitor::walk_stmt(self, stmt);
+                }
                 _ => ruff_python_ast::visitor::walk_stmt(self, stmt),
             }
         }
         fn visit_expr(&mut self, expr: &'a Expr) {
-            if self.hit || !expr.range().contains_inclusive(self.offset) {
+            if self.hit.is_some() || !expr.range().contains_inclusive(self.offset) {
                 return;
             }
             match expr {
-                Expr::Name(_) => self.hit = true,
-                Expr::Attribute(a) if a.attr.range().contains_inclusive(self.offset) => self.hit = true,
+                Expr::Name(n) => {
+                    self.hit = Some(Cursor { text: n.id.to_string(), range: n.range(), inferred: self.in_bare_assign_target });
+                }
+                Expr::Attribute(a) if a.attr.range().contains_inclusive(self.offset) => {
+                    self.hit = Some(Cursor {
+                        text: self.text[a.range()].to_owned(),
+                        range: a.attr.range(),
+                        inferred: self.in_bare_assign_target,
+                    });
+                }
                 _ => ruff_python_ast::visitor::walk_expr(self, expr),
             }
         }
         fn visit_parameter(&mut self, p: &'a ruff_python_ast::Parameter) {
             if p.name.range().contains_inclusive(self.offset) {
-                self.hit = true;
+                self.hit = Some(Cursor { text: p.name.to_string(), range: p.name.range(), inferred: false });
             } else {
                 ruff_python_ast::visitor::walk_parameter(self, p);
             }
         }
     }
-    let mut f = Finder { offset, hit: false };
+    let mut f = Finder { text, offset, hit: None, in_bare_assign_target: false };
     ruff_python_ast::visitor::walk_body(&mut f, body);
     f.hit
+}
+
+/// For a `def` name at `name_range` that is one of several same-named defs
+/// in its body (an `@overload` set), the name range of the LAST one — the
+/// implementation, where pyrefly's type is the whole overload set.
+pub fn overload_implementation(body: &[Stmt], name_range: TextRange) -> Option<TextRange> {
+    fn in_body(body: &[Stmt], name_range: TextRange) -> Option<Option<TextRange>> {
+        let mut found_name: Option<&str> = None;
+        for stmt in body {
+            match stmt {
+                Stmt::FunctionDef(f) if f.name.range() == name_range => found_name = Some(f.name.as_str()),
+                _ => {}
+            }
+        }
+        if let Some(name) = found_name {
+            let last = body
+                .iter()
+                .filter_map(|s| match s {
+                    Stmt::FunctionDef(f) if f.name.as_str() == name => Some(f.name.range()),
+                    _ => None,
+                })
+                .last();
+            return Some(last.filter(|r| *r != name_range));
+        }
+        for stmt in body {
+            for nested in nested_bodies(stmt) {
+                if let Some(r) = in_body(nested, name_range) {
+                    return Some(r);
+                }
+            }
+        }
+        None
+    }
+    in_body(body, name_range).flatten()
+}
+
+/// `self.x` inside a method, where pyrefly does not type the attribute
+/// target itself: the enclosing class's view of `x`. The receiver is the
+/// method's first parameter, whatever it is called.
+pub fn self_attribute_type(tx: &Transaction<'_>, handle: &Handle, body: &[Stmt], text: &str, cursor: &Cursor) -> Option<Type> {
+    let (obj, attr) = cursor.text.rsplit_once('.')?;
+    fn enclosing(body: &[Stmt], at: TextRange, cls: Option<&ruff_python_ast::StmtClassDef>) -> Option<(Option<TextRange>, Option<String>)> {
+        for stmt in body {
+            if !stmt.range().contains_range(at) {
+                continue;
+            }
+            match stmt {
+                Stmt::ClassDef(c) => return enclosing(&c.body, at, Some(c)),
+                Stmt::FunctionDef(f) => {
+                    let receiver = f.parameters.iter().next().map(|p| p.name().to_string());
+                    if let Some(inner) = enclosing(&f.body, at, cls) {
+                        return Some(inner);
+                    }
+                    return Some((cls.map(|c| c.name.range()), receiver));
+                }
+                other => {
+                    for nested in nested_bodies(other) {
+                        if let Some(x) = enclosing(nested, at, cls) {
+                            return Some(x);
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+    let (class_name_range, receiver) = enclosing(body, cursor.range, None)?;
+    if receiver.as_deref() != Some(obj) {
+        return None;
+    }
+    let _ = text;
+    let class_ty = tx.get_type_at(handle, class_name_range?.start())?;
+    let instance = match &class_ty {
+        Type::ClassDef(c) => instance_of(c)?,
+        _ => return None,
+    };
+    tx.attributes_of_type(handle, instance)?
+        .into_iter()
+        .find(|a| a.name.as_str() == attr)
+        .and_then(|a| a.ty)
 }
 
 // ------------------------------------------------------------------ helpers
@@ -543,6 +717,21 @@ fn leaf_category(ty: &Type) -> &'static str {
         Type::Literal(_) | Type::LiteralString(_) => "literal",
         _ => "builtin",
     }
+}
+
+fn token(name: &str, has_default: bool) -> String {
+    if has_default { format!("{name}=…") } else { name.to_owned() }
+}
+
+/// `Coroutine[Any, Any, X]` / `CoroutineType[…, X]` → `X`.
+fn unwrap_coroutine(ret: &Type) -> &Type {
+    if let Type::ClassType(ct) = ret
+        && matches!(ct.class_object().name().as_str(), "Coroutine" | "CoroutineType")
+        && let Some(last) = ct.targs().as_slice().last()
+    {
+        return last;
+    }
+    ret
 }
 
 fn default_text(req: &Required) -> Option<String> {
@@ -610,7 +799,7 @@ fn find_function_def(body: &[Stmt], name_range: TextRange) -> Option<&ruff_pytho
 }
 
 /// The `class` whose name sits at `name_range`, anywhere in the module.
-fn find_class_def(body: &[Stmt], name_range: TextRange) -> Option<&ruff_python_ast::StmtClassDef> {
+pub fn find_class_def(body: &[Stmt], name_range: TextRange) -> Option<&ruff_python_ast::StmtClassDef> {
     for stmt in body {
         match stmt {
             Stmt::ClassDef(c) if c.name.range() == name_range => return Some(c),

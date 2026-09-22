@@ -67,3 +67,43 @@ n = first([1, 2, 3])
 maybe = fetch_maybe("z")
 if maybe is not None:
     narrowed = maybe
+
+
+# --- scopes (bead 12r) -----------------------------------------------------
+
+from typing import overload
+
+
+class Empty:
+    pass
+
+
+class Holder:
+    def __init__(self) -> None:
+        self.cfg: ServerConfig = ServerConfig("h")
+        self.guess = fetch("y")
+
+
+def separators(a: int, b: str = "x", /, c: float = 1.0, *, d: bool, e: int = 2) -> None:
+    """Positional-only, then plain, then keyword-only."""
+
+
+async def fetch_async(url: str) -> Response:
+    """An async def evaluates to a coroutine; the float shows the declared return."""
+    ...
+
+
+@overload
+def pick(key: int) -> int: ...
+@overload
+def pick(key: str, default: str = "") -> str: ...
+def pick(key, default=None):
+    """Overloaded: the plugin picks the active signature."""
+    return key
+
+x = pick(3)
+
+
+class Quiet:
+    def n(self):
+        pass

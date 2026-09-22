@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use crate::oracle::Oracle;
-use crate::oracle::Scope;
+use crate::scope::Scope;
 use crate::protocol::Members;
 use crate::walk::Node;
 
@@ -28,7 +28,7 @@ fn oracle() -> &'static Oracle {
 }
 
 fn structure(file: &str, line0: u32, col0: u32) -> Option<Scope> {
-    oracle().structure(&fixtures().join(file), line0, col0, 2, Members::Data)
+    oracle().structure(&fixtures().join(file), line0, col0, 2, Members::Data, false)
 }
 
 /// 0-based line of the first line starting with `prefix` in a fixture, so
@@ -262,13 +262,13 @@ fn methods_are_grouped_for_data_and_flat_for_all() {
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("svc.py");
     std::fs::write(&file, source).unwrap();
-    let data = oracle().structure(&file, 0, 6, 2, Members::Data).unwrap();
+    let data = oracle().structure(&file, 0, 6, 2, Members::Data, false).unwrap();
     let kinds: Vec<&str> = data.roots[0].children.iter().map(|c| c.kind.as_str()).collect();
     assert_eq!(kinds, ["field", "group"]);
     let group = &data.roots[0].children[1];
     assert_eq!(group.name, "methods");
     assert_eq!(group.children[0].name, "run");
-    let all = oracle().structure(&file, 0, 6, 2, Members::All).unwrap();
+    let all = oracle().structure(&file, 0, 6, 2, Members::All, false).unwrap();
     let kinds: Vec<&str> = all.roots[0].children.iter().map(|c| c.kind.as_str()).collect();
     assert_eq!(kinds, ["field", "method"]);
     let run = &all.roots[0].children[1];
@@ -279,7 +279,7 @@ fn methods_are_grouped_for_data_and_flat_for_all() {
 #[test]
 fn beyond_depth_a_class_is_expandable_and_located_at_its_declaration() {
     let use_line = line_of("oracle/oracle.py", "def use(");
-    let scope = oracle().structure(&fixtures().join("oracle/oracle.py"), use_line, 4, 1, Members::Data).unwrap();
+    let scope = oracle().structure(&fixtures().join("oracle/oracle.py"), use_line, 4, 1, Members::Data, false).unwrap();
     let item = find(&scope.roots[0], "item");
     assert!(item.expandable);
     assert!(item.children.is_empty());
@@ -290,7 +290,7 @@ fn beyond_depth_a_class_is_expandable_and_located_at_its_declaration() {
     assert!(loc.uri.ends_with("/oracle.py"));
     assert_eq!(loc.line, line_of("oracle/oracle.py", "    item: T"));
     // and a deeper ask at the same position grafts the children in
-    let deeper = oracle().structure(&fixtures().join("oracle/oracle.py"), use_line, 4, 2, Members::Data).unwrap();
+    let deeper = oracle().structure(&fixtures().join("oracle/oracle.py"), use_line, 4, 2, Members::Data, false).unwrap();
     assert_eq!(data_rows(find(&deeper.roots[0], "item")), ["host", "port"]);
 }
 
@@ -304,7 +304,7 @@ fn an_unsaved_edit_is_what_the_oracle_answers_with() {
     let line = line_of("oracle/oracle.py", "    resp = fetch");
 
     // as on disk
-    let scope = oracle.structure(&path, line, 4, 2, Members::Data).unwrap();
+    let scope = oracle.structure(&path, line, 4, 2, Members::Data, false).unwrap();
     assert_eq!(find(&scope.roots[0], "status").ty.display, "int");
 
     // opened, then edited in memory without saving: status becomes a str
@@ -312,11 +312,124 @@ fn an_unsaved_edit_is_what_the_oracle_answers_with() {
     let edited = on_disk.replace("    status: int\n", "    status: str\n");
     assert_ne!(edited, on_disk);
     oracle.did_change(&path, edited);
-    let scope = oracle.structure(&path, line, 4, 2, Members::Data).unwrap();
+    let scope = oracle.structure(&path, line, 4, 2, Members::Data, false).unwrap();
     assert_eq!(find(&scope.roots[0], "status").ty.display, "str", "the overlay, not the disk");
 
     // closed: the disk is the truth again
     oracle.did_close(&path);
-    let scope = oracle.structure(&path, line, 4, 2, Members::Data).unwrap();
+    let scope = oracle.structure(&path, line, 4, 2, Members::Data, false).unwrap();
     assert_eq!(find(&scope.roots[0], "status").ty.display, "int");
+}
+
+// ---------------------------------------------------------------- scopes (12r)
+
+fn probe(file: &str, prefix: &str, col: u32, call: bool) -> Scope {
+    let line = line_of(file, prefix);
+    oracle()
+        .structure(&fixtures().join(file), line, col, 2, Members::Data, call)
+        .unwrap_or_else(|| panic!("{prefix}: no answer"))
+}
+
+#[test]
+fn a_function_scope_carries_the_call_shape_header_and_docstring() {
+    let s = probe("shapes.py", "def takes_config", 4, false);
+    assert_eq!(s.scope, "function");
+    assert_eq!(s.header.as_deref(), Some("takes_config(config, timeout=…) -> User"));
+    assert!(s.docstring.as_deref().unwrap_or("").starts_with("Hover the name: params expand"));
+    let kinds: Vec<&str> = s.roots.iter().map(|r| r.kind.as_str()).collect();
+    assert_eq!(kinds, ["param", "param", "return"]);
+
+    let s = probe("oracle/oracle.py", "def separators", 4, false);
+    assert_eq!(s.header.as_deref(), Some("separators(a, b=…, /, c=…, *, d, e=…) -> None"));
+    assert_eq!(s.roots[0].pass_mode.as_deref(), Some("/"));
+    assert_eq!(s.roots[3].pass_mode.as_deref(), Some("*"));
+}
+
+#[test]
+fn an_async_def_shows_its_declared_return() {
+    let s = probe("oracle/oracle.py", "async def fetch_async", 10, false);
+    assert_eq!(s.header.as_deref(), Some("fetch_async(url) -> Response"));
+    let ret = s.roots.iter().find(|r| r.kind == "return").unwrap();
+    assert_eq!(ret.ty.display, "Response");
+    assert!(!ret.inferred);
+}
+
+#[test]
+fn an_overload_set_is_the_same_from_any_of_its_defs_or_a_call() {
+    for (prefix, col) in [("def pick(key: int)", 4), ("def pick(key, default=None)", 4), ("x = pick(3)", 4)] {
+        let s = probe("oracle/oracle.py", prefix, col, false);
+        assert_eq!(s.scope, "function", "{prefix}");
+        assert_eq!(s.overloads, Some(2), "{prefix}");
+        assert_eq!(
+            s.headers.as_deref(),
+            Some(&["pick(key) -> int".to_owned(), "pick(key, default=…) -> str".to_owned()][..]),
+            "{prefix}"
+        );
+        assert_eq!(s.header.as_deref(), Some("pick(key) -> int"));
+        assert_eq!(s.roots.len(), 2);
+        assert_eq!(s.roots[0].kind, "overload");
+        assert_eq!(s.roots[0].badge.as_deref(), Some("[1/2]"));
+        assert_eq!(s.roots[1].badge.as_deref(), Some("[2/2]"));
+        assert_eq!(s.roots[1].children.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["key", "default", "returns"]);
+    }
+}
+
+#[test]
+fn a_class_scope_heads_with_its_category_and_written_bases() {
+    let s = probe("shapes.py", "class DerivedConfig", 6, false);
+    assert_eq!(s.scope, "class");
+    assert_eq!(s.roots[0].name, "DerivedConfig");
+    assert_eq!(s.roots[0].kind, "type");
+    assert_eq!(s.roots[0].ty.display, "(class ← BaseConfig)");
+    let s = probe("shapes.py", "class User", 6, false);
+    assert_eq!(s.roots[0].ty.display, "(pydantic)", "BaseModel is a marker, not a listed base");
+    assert!(s.docstring.is_none());
+}
+
+#[test]
+fn a_class_under_a_call_draws_its_constructor() {
+    // a dataclass: the fields are the parameters
+    let s = probe("shapes.py", "class ServerConfig", 6, true);
+    assert_eq!(s.scope, "constructor");
+    assert_eq!(s.header.as_deref(), Some("ServerConfig(host, port=…, debug=…) -> ServerConfig"));
+    let kinds: Vec<&str> = s.roots.iter().map(|r| r.kind.as_str()).collect();
+    assert_eq!(kinds, ["param", "param", "param", "return"]);
+    assert_eq!(s.roots[1].default.as_deref(), Some("8000"));
+    // a written __init__: its parameters, receiver dropped
+    let s = probe("shapes.py", "class InitAssigned", 6, true);
+    let params: Vec<&str> = s.roots.iter().filter(|r| r.kind == "param").map(|r| r.name.as_str()).collect();
+    assert_eq!(params, ["inflow"]);
+    assert_eq!(data_rows(s.roots.last().unwrap()), ["strong", "ant"], "what it makes");
+}
+
+#[test]
+fn understood_but_nothing_to_draw_is_empty_with_a_reason() {
+    let s = probe("oracle/oracle.py", "class Empty", 6, false);
+    assert_eq!(s.scope, "empty");
+    assert_eq!(s.reason.as_deref(), Some("Empty has no fields, methods or bases to draw"));
+    let s = probe("oracle/oracle.py", "    def n(self)", 8, false);
+    assert_eq!(s.scope, "empty");
+    assert_eq!(s.reason.as_deref(), Some("n has no parameters or return annotation"));
+}
+
+#[test]
+fn a_self_attribute_in_a_method_is_the_declaration_it_names() {
+    let s = probe("oracle/oracle.py", "        self.cfg", 13, false);
+    assert_eq!(s.scope, "declaration");
+    assert_eq!(s.roots[0].name, "self.cfg");
+    assert_eq!(s.roots[0].ty.display, "ServerConfig");
+    assert!(!s.roots[0].inferred);
+    assert_eq!(data_rows(&s.roots[0]), ["host", "port"]);
+    let s = probe("oracle/oracle.py", "        self.guess", 13, false);
+    assert_eq!(s.roots[0].name, "self.guess");
+    assert_eq!(s.roots[0].ty.display, "Response");
+    assert!(s.roots[0].inferred, "no annotation → ≈");
+}
+
+#[test]
+fn a_module_name_is_not_ours() {
+    // `from typing import Generic, TypeVar` — hovering `typing` in an import
+    // is a Module; K's job
+    let line = line_of("oracle/oracle.py", "from typing import Generic");
+    assert!(oracle().structure(&fixtures().join("oracle/oracle.py"), line, 5, 2, Members::Data, false).is_none());
 }

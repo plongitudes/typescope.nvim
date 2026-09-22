@@ -70,7 +70,8 @@ Request:
   "textDocument": { "uri": "file:///…/recipe_service.py" },
   "position": { "line": 113, "character": 4 },   // 0-based, UTF-16 like LSP
   "depth": 2,                                    // config.depth; how far to nest before returning lazy nodes
-  "members": "data"                              // "data" | "all" — decision 4; "all" is what expanding the methods row asks
+  "members": "data",                             // "data" | "all" — decision 4; "all" is what expanding the methods row asks
+  "call": false                                  // the cursor is on a CALL to whatever is under it — decision 5 (set from the buffer's syntax tree)
 }
 ```
 
@@ -79,13 +80,15 @@ Response: `null` when nothing is under the cursor (K's job), otherwise a **Scope
 ```jsonc
 {
   "scope": "function" | "class" | "declaration" | "constructor" | "empty",
-  "header": "get_recipe_by_id(db, recipe_id) -> Recipe | None",   // call-shape line; null for class/declaration
-  "docstring": "…",                                                 // null when none
-  "overloads": [ { "header": "…", "roots": [Node…] }, … ],          // present only for an overload set; else `roots`
+  "header": "get_recipe_by_id(db, recipe_id=…, /, *, flag) -> Recipe | None",   // call-shape line; absent for class/declaration
+  "docstring": "…",                                                 // absent when none
+  "headers": [ "…", "…" ], "overloads": 2,                          // an overload set: `roots` are the groups (kind "overload", badge "[i/n]"), one header each — the shape `meta.headers`/`meta.overloads` already has
   "roots": [ Node… ],
   "reason": "…"                                                     // only with scope "empty": why there was nothing to draw
 }
 ```
+
+Scope facts established by bead 4: a callee is asked with pyrefly's declaration-preserving type, so a call site sees the function (or the whole overload set), not the chosen signature; a cursor on an `@overload` stub re-asks at the implementation `def`, where the set lives; an `async def` answers its declared return (`Coroutine[…, X]` → `X`), like hover; `self.x` inside a method — which pyrefly does not type as an assignment target — is answered through the enclosing class's view of `x`, with the receiver identified by position; a class scope's root row is the header `(category ← written bases)`, construct markers omitted; the constructor scope uses a written `__init__` when the class has one and the instance's fields otherwise (what dataclass, pydantic, NamedTuple and TypedDict synthesize); `empty` reasons keep the resolver's wording; a Module under the cursor answers `null`.
 
 **Node** is `typescope.Node` from `lua/typescope/model.lua` with the resolver-private fields dropped and three added:
 

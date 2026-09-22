@@ -2,6 +2,7 @@
 //! `typescope/structure`. See `design/oracle.md`.
 //!
 //!   typescope-oracle --stdio
+//!   typescope-oracle --probe FILE LINE COL [DEPTH] [data|all] [--call]
 //!
 //! Neovim's built-in LSP client spawns it, keeps it fed with document sync
 //! (unsaved buffer contents), and sends the one custom request. Everything
@@ -11,6 +12,7 @@
 mod oracle;
 mod policy;
 mod protocol;
+mod scope;
 mod walk;
 #[cfg(test)]
 mod tests;
@@ -53,8 +55,9 @@ fn main() -> Result<()> {
             Some("all") => protocol::Members::All,
             _ => protocol::Members::Data,
         };
+        let call = args.iter().any(|a| a == "--call");
         let oracle = oracle::Oracle::new();
-        let scope = oracle.structure(&path, line, col, depth, members);
+        let scope = oracle.structure(&path, line, col, depth, members, call);
         println!("{}", serde_json::to_string_pretty(&scope)?);
         return Ok(());
     }
@@ -96,7 +99,7 @@ fn handle_request(oracle: &oracle::Oracle, req: Request) -> Response {
         protocol::STRUCTURE => match serde_json::from_value::<protocol::StructureParams>(req.params) {
             Ok(params) => match file_path(&params.text_document.uri) {
                 Some(path) => {
-                    let scope = oracle.structure(&path, params.position.line, params.position.character, params.depth, params.members);
+                    let scope = oracle.structure(&path, params.position.line, params.position.character, params.depth, params.members, params.call);
                     // `null` is the contract's "nothing under the cursor"
                     Response::new_ok(req.id, serde_json::to_value(scope).unwrap_or(serde_json::Value::Null))
                 }

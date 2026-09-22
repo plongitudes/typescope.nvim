@@ -22,11 +22,9 @@ use pyrefly_util::thread_pool::ThreadCount;
 use ruff_source_file::OneIndexed;
 use ruff_source_file::PositionEncoding;
 use ruff_source_file::SourceLocation;
-use serde::Serialize;
 
 use crate::protocol::Members;
-use crate::walk::Node;
-use crate::walk::Walker;
+use crate::scope::Scope;
 
 pub struct Oracle {
     state: State,
@@ -36,21 +34,6 @@ pub struct Oracle {
     /// contents. These are pyrefly memory overlays: a handle for an open
     /// file is a `ModulePath::memory` handle and reads from here, not disk.
     open: Mutex<HashMap<PathBuf, Arc<String>>>,
-}
-
-/// The answer to `typescope/structure` (design/oracle.md §4). Bead 4 fills
-/// in scope classification and headers; until then `scope` is derived from
-/// the type alone.
-#[derive(Debug, Clone, Serialize)]
-pub struct Scope {
-    pub scope: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub header: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub docstring: Option<String>,
-    pub roots: Vec<Node>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
 }
 
 impl Oracle {
@@ -137,7 +120,8 @@ impl Oracle {
     }
 
     /// The structure under (line, character) — 0-based, UTF-16 like LSP.
-    pub fn structure(&self, path: &Path, line: u32, character: u32, depth: u32, members: Members) -> Option<Scope> {
+    /// `call`: the cursor sits on a call to whatever is under it.
+    pub fn structure(&self, path: &Path, line: u32, character: u32, depth: u32, members: Members, call: bool) -> Option<Scope> {
         let handle = self.ensure_loaded(path);
         let tx = self.state.transaction();
         let module = tx.get_module_info(&handle)?;
@@ -151,21 +135,22 @@ impl Oracle {
         );
         // not on a name → not ours; K falls through to the real language server
         let ast = tx.get_ast(&handle)?;
-        if !crate::walk::identifier_at(&ast.body, offset) {
-            return None;
+        let cursor = crate::walk::identifier_at(&ast.body, module.contents(), offset)?;
+        // the declaration-preserving type: a callee in call position is the
+        // function (or the whole overload set), not the chosen signature
+        let mut ty = tx.get_type_at_preserving_declaration(&handle, offset);
+        if let Some(pyrefly_types::types::Type::Function(f)) = &ty
+            && f.metadata.flags.is_overload
+            && let Some(impl_range) = crate::walk::overload_implementation(&ast.body, cursor.range)
+        {
+            ty = tx.get_type_at_preserving_declaration(&handle, impl_range.start());
         }
-        let ty = tx.get_type_at(&handle, offset)?;
-        let walker = Walker { tx: &tx, handle: &handle, members };
-        use pyrefly_types::types::Type;
-        let (scope, name) = match &ty {
-            Type::Function(_) | Type::Overload(_) | Type::BoundMethod(_) | Type::Forall(_) => ("function", "function"),
-            Type::ClassDef(_) => ("class", "class"),
-            _ => ("declaration", "declaration"),
-        };
-        let root = walker.node(name, if scope == "class" { "type" } else { "field" }, &ty, depth);
-        // a function's params and returns ARE the roots; anything else is one root
-        let roots = if scope == "function" { root.children } else { vec![root] };
-        Some(Scope { scope: scope.to_owned(), header: None, docstring: None, roots, reason: None })
+        if ty.is_none() {
+            ty = crate::walk::self_attribute_type(&tx, &handle, &ast.body, module.contents(), &cursor);
+        }
+        let ty = ty?;
+        let req = crate::scope::Request { tx: &tx, handle: &handle, module: &module, cursor, depth, members, call };
+        crate::scope::build(&req, &ty)
     }
 
     /// The vendored pyrefly's own version string, for `:checkhealth`.
