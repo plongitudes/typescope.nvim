@@ -41,10 +41,28 @@ function M.check()
   local oracle = require("typescope.oracle")
   local bin = oracle.locate(cfg)
   if not bin then
-    health.error("typescope-oracle binary not found", {
-      "Set `oracle.path` to a build, or let the plugin download a release (oracle.download = true)",
-      "Build from this checkout: scripts/build-oracle.sh --release",
-    })
+    local target, why = oracle.target()
+    local advice = {
+      "Build from this checkout: scripts/build-oracle.sh --release, then set `oracle.path`",
+    }
+    if not cfg.oracle.download then
+      table.insert(
+        advice,
+        1,
+        "oracle.download is off: install the release binary at " .. select(2, oracle.install_path())
+      )
+    elseif oracle.download_error then
+      table.insert(advice, 1, "last download failed: " .. oracle.download_error)
+    elseif target then
+      table.insert(
+        advice,
+        1,
+        ("it downloads on the next Python buffer (%s, release %s)"):format(target, oracle.RELEASE)
+      )
+    else
+      table.insert(advice, 1, why)
+    end
+    health.error("typescope-oracle binary not found", advice)
   else
     local version = oracle.version(bin)
     if version then

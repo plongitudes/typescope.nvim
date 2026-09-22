@@ -9,7 +9,8 @@
 
 ---@class typescope.OracleConfig
 ---@field path string? an explicit typescope-oracle binary; nil = the downloaded one under stdpath("data"), then a build in this checkout
----@field download boolean fetch the release binary on first use when none is found (decision 2; the download itself is a later bead)
+---@field download boolean fetch the release binary on first use when none is found, verified against the release's SHA256SUMS
+---@field release_url string? override of the release base URL (tests only)
 
 ---@class typescope.UiConfig
 ---@field style "unicode"|"ascii"|"minimal"|"rounded"
@@ -109,6 +110,7 @@ local defaults = {
   oracle = {
     path = nil,
     download = true,
+    release_url = nil,
   },
   ui = {
     style = "rounded", -- "unicode" | "ascii" | "minimal" | "rounded"
@@ -189,6 +191,9 @@ local function validate(cfg)
   check("oracle.download", cfg.oracle.download, "boolean")
   if cfg.oracle.path ~= nil and type(cfg.oracle.path) ~= "string" then
     error("typescope.setup: `oracle.path` must be a string path or nil", 0)
+  end
+  if cfg.oracle.release_url ~= nil and type(cfg.oracle.release_url) ~= "string" then
+    error("typescope.setup: `oracle.release_url` must be a string URL or nil", 0)
   end
   check("insert_mode", cfg.insert_mode, "table")
   check("insert_mode.enabled", cfg.insert_mode.enabled, "boolean")

@@ -87,3 +87,10 @@ Newest at the bottom. One entry per tick: bead, what was done, what was verified
 - Retired with reasons in place: the evaluation-only expand mechanic (the ≈ arrives from the first paint), the per-position definition round-trip count, the treesitter `normalize` section (pinned as a Rust test of pyrefly's display).
 - Verified: cargo test 33/33; `./tests/run.sh` ALL SUITES PASS (10 suites); stylua clean; no stray processes.
 - Next: `tzb` download and `sjg` release pipeline (both ready), then `ipb` docs.
+
+## 2026-09-21 — tick 11 — `tzb` download
+
+- Done: `oracle.download(cfg, cb)` — target from `os_uname` (darwin/linux × arm64/x86_64), fetch `<release_url>/<RELEASE>/SHA256SUMS` first (a release without one is refused), then the asset to `<final>.download`, verify with `vim.fn.sha256` against the SHA256SUMS entry, chmod 0755, rename into `stdpath("data")/typescope/typescope-oracle`. The binary is never executed before the checksum matches. One download at a time. `attach()` triggers it once when nothing is located and `oracle.download` is on, then attaches every open Python buffer; opt-out and failures reach `:checkhealth`. `oracle.RELEASE = "v0.2.0"`, `oracle.release_url` config override for tests.
+- Verified: `tests/test_oracle_download.lua` against a local `python3 -m http.server` release (localhost only): install + `--version`, tampered checksum refused with nothing installed, missing SHA256SUMS refused; `./tests/run.sh` ALL SUITES PASS (11 suites); stylua clean; no stray processes.
+- Not verified: a real GitHub release (none exists yet; `sjg` writes the pipeline, Tony cuts the release — external action).
+- Next: `sjg` release pipeline.

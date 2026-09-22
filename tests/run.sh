@@ -14,7 +14,7 @@ fail=0
 # with a SKIP line, when there is none — the pure-Lua suites must not need a
 # Rust toolchain. The fixture markers in tests/fixtures/shapes.py are
 # asserted by `cargo test` in oracle/.
-for suite in tests/test_match.lua tests/test_render.lua tests/test_render_kinds.lua tests/test_float.lua tests/test_examples.lua tests/test_oracle_attach.lua tests/test_oracle_client.lua tests/test_resolve_oracle.lua tests/e2e_phase3.lua tests/e2e_declarations.lua; do
+for suite in tests/test_match.lua tests/test_render.lua tests/test_render_kinds.lua tests/test_float.lua tests/test_examples.lua tests/test_oracle_attach.lua tests/test_oracle_client.lua tests/test_resolve_oracle.lua tests/test_oracle_download.lua tests/e2e_phase3.lua tests/e2e_declarations.lua; do
   echo "=== $suite"
   out=$(nvim --headless --clean --cmd "$RTP" -c "luafile $suite" -c "qa!" 2>&1)
   echo "$out" | grep -E "FAIL|ALL PASS|FAILURES|^SKIP"

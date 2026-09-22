@@ -5,8 +5,10 @@
 -- The oracle advertises nothing but document sync plus its one custom
 -- request, so it never competes with basedpyright; nvim's own client does
 -- the spawning, the didOpen/didChange of unsaved contents, and the lifetime.
--- Locating the binary is `locate()`; downloading one (decision 2) is a later
--- bead and slots in ahead of the dev-build fallback there.
+-- Locating the binary is `locate()`; when nothing is found and
+-- `oracle.download` is on, `download()` fetches this plugin's release build
+-- for the platform into stdpath("data") and verifies it against the
+-- release's SHA256SUMS before it is ever executed (decision 2).
 
 local M = {}
 
@@ -19,9 +21,19 @@ M.PROTOCOL = 1
 M.CLIENT_NAME = "typescope-oracle"
 M.STRUCTURE = "typescope/structure"
 
+--- The release whose binary this plugin version downloads. Bumped with the
+--- plugin; the oracle and the plugin are released together.
+M.RELEASE = "v0.2.0"
+--- Where releases live. Overridable for tests (a local server) through
+--- `oracle.release_url`; users never set it.
+M.RELEASE_URL = "https://github.com/plongitudes/typescope.nvim/releases/download"
+
 --- Recorded protocol mismatch, for :checkhealth. nil when none seen.
 ---@type { got: any, want: integer, version: string? }?
 M.mismatch = nil
+--- The last download failure, for :checkhealth.
+---@type string?
+M.download_error = nil
 
 local group = nil
 local warned_missing = false
@@ -53,6 +65,117 @@ function M.locate(cfg)
     end
   end
   return nil
+end
+
+--- The downloaded binary's home. One file per plugin install; a new release
+--- overwrites it.
+---@return string dir, string path
+function M.install_path()
+  local dir = vim.fn.stdpath("data") .. "/typescope"
+  return dir, dir .. "/typescope-oracle"
+end
+
+--- The release asset name for this machine, or nil (and why) when there is
+--- no build for it.
+---@return string? target, string? why
+function M.target()
+  local u = vim.uv.os_uname()
+  local os = ({ Darwin = "darwin", Linux = "linux" })[u.sysname]
+  local arch = ({ arm64 = "arm64", aarch64 = "arm64", x86_64 = "x86_64", amd64 = "x86_64" })[u.machine]
+  if not os or not arch then
+    return nil, ("no release build for %s/%s"):format(u.sysname, u.machine)
+  end
+  return os .. "-" .. arch
+end
+
+--- Does `path`'s content hash to the entry for `name` in a SHA256SUMS file?
+--- Pure: the sums text is passed in.
+---@param path string
+---@param sums string SHA256SUMS contents (`<hex>  <name>` lines)
+---@param name string asset name
+---@return boolean ok, string why
+function M.verify(path, sums, name)
+  local want
+  for line in sums:gmatch("[^\n]+") do
+    local hex, file = line:match("^(%x+)%s+%*?(%S+)$")
+    if hex and file == name then
+      want = hex:lower()
+    end
+  end
+  if not want then
+    return false, "no SHA256SUMS entry for " .. name
+  end
+  local f = io.open(path, "rb")
+  if not f then
+    return false, "cannot read " .. path
+  end
+  local data = f:read("a")
+  f:close()
+  local got = vim.fn.sha256(data)
+  if got ~= want then
+    return false, ("checksum mismatch for %s: got %s, release says %s"):format(name, got:sub(1, 12), want:sub(1, 12))
+  end
+  return true, "ok"
+end
+
+local downloading = false
+
+--- Fetch the release binary for this platform, verify it, install it, and
+--- call back with (path) or (nil, why). Never runs the binary before the
+--- checksum matches. One download at a time; a second call while one is in
+--- flight reports so and does nothing.
+---@param cfg? typescope.Config
+---@param cb fun(path: string?, why: string?)
+function M.download(cfg, cb)
+  cfg = cfg or require("typescope.config").get()
+  if downloading then
+    return cb(nil, "download already in progress")
+  end
+  local target, why = M.target()
+  if not target then
+    return cb(nil, why)
+  end
+  if vim.fn.executable("curl") ~= 1 then
+    return cb(nil, "curl not found (needed to download the oracle; or set oracle.path)")
+  end
+  local base = (cfg.oracle.release_url or M.RELEASE_URL) .. "/" .. M.RELEASE
+  local name = "typescope-oracle-" .. target
+  local dir, final = M.install_path()
+  vim.fn.mkdir(dir, "p")
+  local tmp = final .. ".download"
+  downloading = true
+  local function finish(path, reason)
+    downloading = false
+    cb(path, reason)
+  end
+  -- SHA256SUMS first: a release without one is refused outright
+  vim.system({ "curl", "-fsSL", "--max-time", "30", base .. "/SHA256SUMS" }, { text = true }, function(sums)
+    vim.schedule(function()
+      if sums.code ~= 0 or not sums.stdout or sums.stdout == "" then
+        return finish(nil, ("could not fetch %s/SHA256SUMS (curl exit %d)"):format(base, sums.code))
+      end
+      vim.system({ "curl", "-fsSL", "--max-time", "300", "-o", tmp, base .. "/" .. name }, {}, function(bin)
+        vim.schedule(function()
+          if bin.code ~= 0 then
+            pcall(vim.uv.fs_unlink, tmp)
+            return finish(nil, ("could not fetch %s/%s (curl exit %d)"):format(base, name, bin.code))
+          end
+          local ok, reason = M.verify(tmp, sums.stdout, name)
+          if not ok then
+            pcall(vim.uv.fs_unlink, tmp)
+            return finish(nil, reason)
+          end
+          vim.uv.fs_chmod(tmp, 493) -- 0755
+          local renamed = vim.uv.fs_rename(tmp, final)
+          if not renamed then
+            pcall(vim.uv.fs_unlink, tmp)
+            return finish(nil, "could not install " .. final)
+          end
+          finish(final)
+        end)
+      end)
+    end)
+  end)
 end
 
 --- `typescope-oracle --version` output, e.g.
@@ -101,9 +224,34 @@ function M.attach(bufnr, cfg)
   cfg = cfg or require("typescope.config").get()
   local bin = M.locate(cfg)
   if not bin then
-    if not warned_missing then
+    if cfg.oracle.download then
+      -- fetch once, then attach every open Python buffer; a failure is
+      -- reported once and health says what to do
+      if not warned_missing then
+        warned_missing = true
+        M.download(cfg, function(path, why)
+          if path then
+            vim.notify("typescope: oracle " .. M.RELEASE .. " installed at " .. path, vim.log.levels.INFO)
+            for _, b in ipairs(vim.api.nvim_list_bufs()) do
+              if vim.api.nvim_buf_is_loaded(b) and vim.bo[b].filetype == "python" then
+                M.attach(b, cfg)
+              end
+            end
+          else
+            M.download_error = why
+            vim.notify(
+              "typescope: could not download the oracle — " .. why .. " (see :checkhealth typescope)",
+              vim.log.levels.WARN
+            )
+          end
+        end)
+      end
+    elseif not warned_missing then
       warned_missing = true
-      vim.notify("typescope: oracle binary not found — see :checkhealth typescope", vim.log.levels.WARN)
+      vim.notify(
+        "typescope: oracle binary not found and oracle.download is off — see :checkhealth typescope",
+        vim.log.levels.WARN
+      )
     end
     return nil
   end
