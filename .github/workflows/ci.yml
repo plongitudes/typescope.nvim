@@ -39,6 +39,26 @@ jobs:
       - name: Run the suites
         run: ./tests/run.sh
 
+  oracle:
+    # The Rust half: the fixture markers in tests/fixtures/shapes.py are
+    # asserted here, by cargo test against the patched, vendored pyrefly.
+    # The Lua suites above skip their oracle-backed cases without a binary,
+    # so this job is where the end-to-end behaviour is actually checked.
+    name: oracle (cargo test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: oracle
+      - name: Build (applies the pyrefly patch)
+        run: scripts/build-oracle.sh
+      - name: cargo test
+        run: cd oracle && cargo test
+
   lint:
     name: luacheck
     runs-on: ubuntu-latest

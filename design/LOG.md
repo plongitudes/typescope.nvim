@@ -94,3 +94,9 @@ Newest at the bottom. One entry per tick: bead, what was done, what was verified
 - Verified: `tests/test_oracle_download.lua` against a local `python3 -m http.server` release (localhost only): install + `--version`, tampered checksum refused with nothing installed, missing SHA256SUMS refused; `./tests/run.sh` ALL SUITES PASS (11 suites); stylua clean; no stray processes.
 - Not verified: a real GitHub release (none exists yet; `sjg` writes the pipeline, Tony cuts the release — external action).
 - Next: `sjg` release pipeline.
+
+## 2026-09-21 — tick 12 — `sjg` release-pipeline
+
+- Done: `.github/workflows/release.yml` — on a `v*` tag (or manual dispatch), a four-target matrix (macos-latest arm64, macos-13 x86_64, ubuntu-22.04 x86_64, ubuntu-22.04-arm arm64) checks out with the pyrefly submodule, runs `scripts/build-oracle.sh --release --target <triple>` (the patch applies there exactly as locally), names the asset `typescope-oracle-<target>`, and a publish job computes `SHA256SUMS` (`<hex>  <asset>`, the format `oracle.verify` parses), refuses to publish unless `oracle.RELEASE` in `lua/typescope/oracle.lua` equals the tag and all four assets exist, then attaches everything to the GitHub release. `ci.yml` gains an `oracle` job: build + `cargo test`, so the fixture markers are checked in CI too.
+- Verified: YAML parses; `scripts/build-oracle.sh` forwards `--release --target`; the local `./tests/run.sh` and stylua are unaffected. NOT run: the workflow itself — cutting a release is Tony's external action (LOOP stop condition), and the `ubuntu-22.04-arm` runner label and the actions' behaviour are asserted from their docs, not observed. First real run will tell.
+- Next: `ipb` docs (needs `tzb` ✓ and `73q` ✓) and `upm` footprint.

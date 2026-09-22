@@ -1,0 +1,118 @@
+name: Release
+
+# Builds typescope-oracle for the four supported targets when a version tag is
+# pushed, and publishes them with a SHA256SUMS the plugin verifies before it
+# ever runs a downloaded binary (lua/typescope/oracle.lua, decision 2 in
+# design/oracle.md). Asset names are what oracle.download() asks for:
+#   typescope-oracle-{darwin-arm64,darwin-x86_64,linux-x86_64,linux-arm64}
+# and SHA256SUMS holds `<hex>  <asset>` lines.
+#
+# The pyrefly submodule is pinned to a tag and patched by
+# scripts/build-oracle.sh; the patched tree is what gets built here, exactly
+# as on a developer machine.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            runner: macos-latest
+            rust_target: aarch64-apple-darwin
+          - target: darwin-x86_64
+            runner: macos-13
+            rust_target: x86_64-apple-darwin
+          - target: linux-x86_64
+            # the oldest still-supported Ubuntu, so the glibc the binary links
+            # against is as old as reasonably possible
+            runner: ubuntu-22.04
+            rust_target: x86_64-unknown-linux-gnu
+          - target: linux-arm64
+            runner: ubuntu-22.04-arm
+            rust_target: aarch64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: oracle
+
+      - name: Build the oracle (patched pyrefly, release profile)
+        run: scripts/build-oracle.sh --release --target ${{ matrix.rust_target }}
+
+      - name: Name the asset
+        run: |
+          mkdir -p dist
+          cp "oracle/target/${{ matrix.rust_target }}/release/typescope-oracle" "dist/typescope-oracle-${{ matrix.target }}"
+          "dist/typescope-oracle-${{ matrix.target }}" --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: typescope-oracle-${{ matrix.target }}
+          path: dist/typescope-oracle-${{ matrix.target }}
+          if-no-files-found: error
+
+  publish:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd dist
+          ls -la
+          sha256sum typescope-oracle-* > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: The tag must be what the plugin asks for
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          # oracle.RELEASE in lua/typescope/oracle.lua must equal this tag,
+          # or every install downloads a release that does not exist
+          if ! grep -q "^M.RELEASE = \"${TAG}\"$" lua/typescope/oracle.lua; then
+            echo "lua/typescope/oracle.lua pins a different release than tag ${TAG}:" >&2
+            grep -n "^M.RELEASE" lua/typescope/oracle.lua >&2
+            exit 1
+          fi
+          # and the four assets are all here
+          for t in darwin-arm64 darwin-x86_64 linux-x86_64 linux-arm64; do
+            test -f "dist/typescope-oracle-$t" || { echo "missing asset for $t" >&2; exit 1; }
+          done
+
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            dist/typescope-oracle-*
+            dist/SHA256SUMS
+          generate_release_notes: false
+          body: |
+            typescope-oracle for this plugin version. The plugin downloads the
+            asset for its platform on first use and verifies it against
+            SHA256SUMS before running it. See CHANGELOG.md for what changed.
