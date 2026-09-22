@@ -525,3 +525,56 @@ fn a_nested_third_party_class_waits_to_be_asked_for() {
     assert_eq!(direct.scope, "class");
     assert_eq!(data_rows(&direct.roots[0]), ["size", "label"]);
 }
+
+/// Open `widget` wherever it sits by sending back the `path` the oracle put on
+/// it — every scope kind, including those whose walk starts at a node that
+/// never becomes a row (`function`, `__init__`) and a declaration row named
+/// `self.held`.
+fn opens_by_its_path(file: &str, prefix: &str, col: u32, call: bool, root: &str) {
+    fn widget_under(node: &Node) -> Option<&Node> {
+        node.children.iter().find_map(|c| if c.name == "widget" { Some(c) } else { widget_under(c) })
+    }
+    let line = line_of(file, prefix);
+    let ask = |expand: Option<Vec<String>>| {
+        oracle().structure(&fixtures().join(file), line, col, 4, Members::Data, call, expand).unwrap()
+    };
+    let walk = |s: &Scope| -> Node {
+        let names: Vec<_> = s.roots.iter().map(|r| r.name.clone()).collect();
+        let r = s.roots.iter().find(|r| r.name == root).unwrap_or_else(|| panic!("{prefix}: no root {root} in {names:?}"));
+        widget_under(r).unwrap_or_else(|| panic!("{prefix}: no widget under {root}")).clone()
+    };
+    let closed = walk(&ask(None));
+    assert!(closed.expandable && closed.children.is_empty(), "{prefix}: widget starts closed");
+    let path = closed.path.clone().unwrap_or_else(|| panic!("{prefix}: an expandable node carries its path"));
+    let opened = walk(&ask(Some(path)));
+    assert_eq!(data_rows(&opened), ["size", "label"], "{prefix}: opened by its path");
+}
+
+#[test]
+fn a_nested_third_party_class_opens_by_its_path_from_every_scope() {
+    opens_by_its_path("oracle/oracle.py", "class UsesThirdParty", 6, false, "UsesThirdParty");
+    opens_by_its_path("oracle/oracle.py", "def takes_holder", 4, false, "h");
+    // the constructor's argument, and what it makes
+    opens_by_its_path("oracle/oracle.py", "made = HoldsHolder", 7, true, "h");
+    opens_by_its_path("oracle/oracle.py", "made = HoldsHolder", 7, true, "returns");
+    // a declaration row: `X | None` keeps the row rather than becoming X's float
+    opens_by_its_path("oracle/oracle.py", "        kept = self.held", 20, false, "self.held");
+}
+
+#[test]
+fn a_class_docstring_comes_from_the_module_that_defines_it() {
+    let want = "A project class whose field is an installed package's class.";
+    // hovered on its imported name, and under a call
+    let s = probe("oracle/importer.py", "from oracle.oracle import UsesThirdParty", 26, false);
+    assert_eq!(s.docstring.as_deref(), Some(want));
+    let s = probe("oracle/importer.py", "built = UsesThirdParty()", 8, true);
+    assert_eq!(s.docstring.as_deref(), Some(want));
+    // the cursor on a variable holding the class: read at the class's range
+    // in its own module, not this one
+    let s = probe("oracle/importer.py", "alias = UsesThirdParty", 0, false);
+    assert_eq!(s.scope, "class");
+    assert_eq!(s.docstring.as_deref(), Some(want));
+    // a stubbed third-party class: the runtime module's docstring
+    let s = probe("oracle/importer.py", "gadget = Widget()", 9, true);
+    assert_eq!(s.docstring.as_deref(), Some("A widget, documented in the runtime module."));
+}

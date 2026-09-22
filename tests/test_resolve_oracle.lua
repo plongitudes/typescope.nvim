@@ -248,6 +248,46 @@ do
   check(names(item.children) == "host,port", "grafted ServerConfig's fields (got " .. names(item.children) .. ")")
   check(item.children[1].id == "b.item.host", "grafted ids re-rooted under the node")
   require("typescope.config").setup({ oracle = { path = bin }, depth = 2 })
+
+  -- a third-party class nested under a PARAMETER opens: the expansion sends
+  -- back the oracle's own path (which starts at a `function` node the float
+  -- never shows), not one rebuilt from the row ids
+  resolve.clear_cache()
+  local hrow
+  for i, l in ipairs(qlines) do
+    if l:match("^def takes_holder%(") then
+      hrow = i
+    end
+  end
+  done = false
+  local rh
+  async.run(function()
+    rh = resolve.function_scope(nil, qb, vim.api.nvim_get_current_win(), async.token(), { hrow, 4 })
+    done = true
+  end)
+  vim.wait(20000, function()
+    return done
+  end, 10)
+  local widget
+  for _, c in ipairs(rh and rh[1].children or {}) do
+    if c.name == "widget" then
+      widget = c
+    end
+  end
+  check(widget and widget._lazy and widget._lazy.expand ~= nil, "takes_holder: h.widget is lazy and carries its path")
+  local opened = false
+  if widget then
+    resolve.recurse(nil, widget, async.token(), function()
+      opened = true
+    end)
+    vim.wait(20000, function()
+      return opened
+    end, 10)
+  end
+  check(
+    opened and widget.state.loaded and names(widget.children):match("^size,label") ~= nil,
+    "takes_holder: h.widget opened by its path (got " .. (widget and names(widget.children) or "nil") .. ")"
+  )
 end
 
 -- through the plugin: open the float on takes_config and read it

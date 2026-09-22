@@ -6,9 +6,11 @@
 //! reports on the message line where silence would look like a miss.
 
 use dupe::Dupe;
+use pyrefly::state::lsp::FindPreference;
 use pyrefly::state::state::Transaction;
 use pyrefly_build::handle::Handle;
 use pyrefly_python::module::Module;
+use pyrefly_python::symbol_kind::SymbolKind;
 use pyrefly_types::class::Class;
 use pyrefly_types::types::Forallable;
 use pyrefly_types::types::Type;
@@ -151,7 +153,7 @@ fn header_of(name: &str, fn_node: &Node) -> String {
 fn class_scope(req: &Request<'_>, walker: &Walker<'_>, cls: &Class, ty: &Type) -> Scope {
     let mut root = walker.node(cls.name().as_str(), "type", ty, req.depth);
     let bases = source_bases(req, cls);
-    let docstring = docstring_at(req, cls.range());
+    let docstring = class_docstring(req, cls);
     if root.children.is_empty() && bases.is_empty() {
         return Scope {
             scope: "empty".to_owned(),
@@ -206,7 +208,7 @@ fn source_bases(req: &Request<'_>, cls: &Class) -> Vec<String> {
 fn constructor_scope(req: &Request<'_>, walker: &Walker<'_>, cls: &Class, ty: &Type) -> Scope {
     let name = cls.name().as_str().to_owned();
     let instance = walker.node(&name, "return", ty, req.depth);
-    let docstring = docstring_at(req, cls.range());
+    let docstring = class_docstring(req, cls);
     let mut roots = Vec::new();
     let mut shape = Vec::new();
 
@@ -304,10 +306,33 @@ fn docstring_of_def(req: &Request<'_>, handle: &Handle, name: &str, name_range: 
 
 /// The docstring of the `def` or `class` whose NAME sits at `name_range`,
 /// in the request's own module.
-fn docstring_at(req: &Request<'_>, name_range: TextRange) -> Option<String> {
-    let ast = req.tx.get_ast(req.handle)?;
-    let body = find_body(&ast.body, name_range)?;
-    docstring_of_body(body)
+/// A class's docstring, found the way pyrefly's hover finds one: follow the
+/// name under the cursor to its class definition, preferring the runtime
+/// `.py` over a stub (whose body is usually `...`), then the stub. When the
+/// cursor is not on the class's name (`x` in `x = Widget`), the class's own
+/// module is read at the class's range.
+fn class_docstring(req: &Request<'_>, cls: &Class) -> Option<String> {
+    let from_definition = |prefer_pyi: bool| {
+        let mut pref = FindPreference::default();
+        pref.prefer_pyi = prefer_pyi;
+        // `Recipe(`: the class's docstring, not `__init__`'s
+        pref.resolve_call_dunders = false;
+        let items = req.tx.find_definition(req.handle, req.cursor.range.start(), pref).ok()?;
+        items.into_iter().find_map(|item| {
+            if item.metadata.symbol_kind() != Some(SymbolKind::Class) {
+                return None;
+            }
+            // the range is the docstring statement; our own formatting, so
+            // class and function docstrings read alike
+            let text = item.module.code_at(item.docstring_range?);
+            let ast = pyrefly_python::ast::Ast::parse(text, ruff_python_ast::PySourceType::Python).0;
+            docstring_of_body(&ast.body)
+        })
+    };
+    from_definition(false).or_else(|| from_definition(true)).or_else(|| {
+        let (ast, _) = ast_of(req, cls)?;
+        docstring_of_body(find_body(&ast.body, cls.range())?)
+    })
 }
 
 /// Quotes stripped and following lines dedented, as `docstring_of` did.

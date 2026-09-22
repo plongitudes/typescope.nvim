@@ -44,9 +44,10 @@ pub struct StructureParams {
     /// constructor (decision 5).
     #[serde(default)]
     pub call: bool,
-    /// An expansion: the names from the root row down to the node being
-    /// opened. Third-party classes nested as member types stay `expandable`
-    /// until asked for; along this path they open.
+    /// An expansion: the `path` of the `expandable` node being opened, sent
+    /// back exactly as the oracle emitted it. Third-party classes nested as
+    /// member types stay `expandable` until asked for; along this path they
+    /// open.
     #[serde(default)]
     pub expand: Option<Vec<String>>,
 }

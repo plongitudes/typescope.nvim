@@ -130,3 +130,25 @@ class UsesThirdParty:
 
     widget: Widget
     count: int
+
+
+# The same third-party class reached from every kind of scope: each one's
+# expandable `widget` opens by sending its `path` back.
+def takes_holder(h: UsesThirdParty) -> None:
+    """A parameter holds the class."""
+
+
+class HoldsHolder:
+    def __init__(self, h: UsesThirdParty) -> None:
+        self.h = h
+
+
+made = HoldsHolder(UsesThirdParty())
+
+
+class Keeper:
+    def __init__(self) -> None:
+        self.held: UsesThirdParty | None = UsesThirdParty()
+
+    def use(self) -> None:
+        kept = self.held

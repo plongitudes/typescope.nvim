@@ -73,6 +73,11 @@ pub struct Node {
     pub children: Vec<Node>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub expandable: bool,
+    /// On an `expandable` node: the walker's own path to it, which the
+    /// plugin sends back unchanged as `expand` to open it. Opaque to the
+    /// plugin, so the two sides never have to agree on how paths are named.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<Vec<String>>,
     /// When `type.display` is the annotation the author wrote (an alias
     /// name kept as vocabulary) and the row has no structure of its own,
     /// what the checker resolved it to — the plugin draws it as `≈ T`.
@@ -106,6 +111,7 @@ impl Node {
             location: None,
             children: Vec::new(),
             expandable: false,
+            path: None,
             resolved: None,
             shape: Vec::new(),
             def_name: None,
@@ -125,10 +131,12 @@ pub struct Walker<'a> {
     /// The request's depth: a class walked with less than this is NESTED
     /// (the type of a member or an argument), not what the cursor is on.
     pub top: u32,
-    /// The names from a root row down to a node being expanded; nested
-    /// third-party classes on this path open instead of staying expandable.
+    /// The path of a node being expanded, as this walker emitted it in that
+    /// node's `path`; nested third-party classes on it open instead of
+    /// staying expandable.
     pub pierce: Option<Vec<String>>,
-    /// Names from the root row to the node being built.
+    /// Names from the walk's first node to the node being built, including
+    /// the synthetic ones (`function`, `__init__`) that never become rows.
     pub path: std::cell::RefCell<Vec<String>>,
 }
 
@@ -395,6 +403,7 @@ impl<'a> Walker<'a> {
             let mut node = Node::leaf(name, kind, display(ty), category.as_str());
             node.location = class_location(&cls);
             node.expandable = true;
+            node.path = Some(self.path.borrow().clone());
             return node;
         }
         if policy::is_terminal_class(&cls) {
@@ -449,6 +458,7 @@ impl<'a> Walker<'a> {
         node.location = class_location(&cls);
         if depth == 0 {
             node.expandable = true;
+            node.path = Some(self.path.borrow().clone());
             return node;
         }
 

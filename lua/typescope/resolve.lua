@@ -56,7 +56,7 @@ end
 --- renderer then suppresses) or what a written alias resolved to.
 --- `expandable` becomes the lazy hook recurse() fires.
 ---@param n table wire node
----@param lazy { bufnr: integer, pos: table, members: string, call: boolean }
+---@param lazy { bufnr: integer, pos: table, members: string, call: boolean, expand: string[]? }
 ---@return table spec for model.new
 local function to_spec(n, lazy)
   local display = n.type and n.type.display or "?"
@@ -95,7 +95,8 @@ local function build(n, lazy, id)
   local function attach(wire, built)
     if wire.expandable then
       built.state.loaded = false
-      built._lazy = lazy
+      -- per node: the oracle's own path to it, sent back as `expand`
+      built._lazy = vim.tbl_extend("force", lazy, { expand = wire.path })
     end
     for i, c in ipairs(wire.children or {}) do
       if built.children[i] then
@@ -227,18 +228,12 @@ function M.recurse(client, node, token, cb)
   local oracle = require("typescope.oracle")
   async.run(function()
     local depth = id_depth(node.id) + 2
-    -- the names from the root row down to this node: the oracle opens a
-    -- nested third-party class only along the path being expanded
-    local expand = {}
-    for seg in node.id:gmatch("[^.]+") do
-      if not seg:match("^overload%d+$") then
-        table.insert(expand, seg)
-      end
-    end
     local err, scope = async.await(function(resume)
       oracle.request(
         lazy.bufnr,
-        { position = { line = lazy.pos[1], character = lazy.pos[2] }, depth = depth, call = lazy.call, expand = expand },
+        -- `expand` is the path the oracle put on this node, unread here: a
+        -- nested third-party class opens only along it
+        { position = { line = lazy.pos[1], character = lazy.pos[2] }, depth = depth, call = lazy.call, expand = lazy.expand },
         token,
         resume
       )
