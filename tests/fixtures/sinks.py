@@ -1,6 +1,6 @@
 # Mimics loguru's runtime module (_logger.py): untyped implementation code.
-# The real signatures live in sinks_stub.py, playing the .pyi role — pyright's
-# source mapper sends definition here; declaration answers from the stub.
+# The real signatures live in sinks.pyi beside it, which a checker prefers;
+# the docstring lives only here.
 
 
 def attach(sink, *, level=0, colorize=False):

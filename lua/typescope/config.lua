@@ -49,7 +49,6 @@
 ---@field example_mode "heuristic"|"llm"|"none"
 ---@field ollama typescope.OllamaConfig
 ---@field oracle typescope.OracleConfig
----@field resolver "legacy"|"oracle" TRANSITIONAL (removed in typescope.nvim-73q): which resolver the float uses while both exist for the parity gate
 ---@field ui typescope.UiConfig
 ---@field highlights table<string, vim.api.keyset.highlight>
 ---@field keymaps typescope.KeymapConfig
@@ -111,10 +110,6 @@ local defaults = {
     path = nil,
     download = true,
   },
-  -- TRANSITIONAL, removed when the treesitter resolver goes (design/oracle.md
-  -- bead 10): "legacy" is resolve.lua, "oracle" is resolve_oracle.lua. Both
-  -- exist so the parity gate can diff them; the default flips with bead 9.
-  resolver = "legacy",
   ui = {
     style = "rounded", -- "unicode" | "ascii" | "minimal" | "rounded"
     -- "ledger" (U6, the default): one line per param (name + type + short
@@ -190,7 +185,6 @@ end
 local function validate(cfg)
   check("trigger", cfg.trigger, { "hover", "manual" })
   check("prefetch", cfg.prefetch, "boolean")
-  check("resolver", cfg.resolver, { "legacy", "oracle" })
   check("oracle", cfg.oracle, "table")
   check("oracle.download", cfg.oracle.download, "boolean")
   if cfg.oracle.path ~= nil and type(cfg.oracle.path) ~= "string" then

@@ -1,4 +1,4 @@
--- resolve_oracle.lua against the real binary: the Scope → Node adapter, the
+-- resolve.lua against the real binary: the Scope → Node adapter, the
 -- three-way decline, the cache, lazy expansion by re-asking deeper, overload
 -- groups, the constructor on a call, and a float opened through the plugin.
 --
@@ -20,8 +20,8 @@ local function check(cond, msg)
   end
 end
 
-require("typescope").setup({ resolver = "oracle", oracle = { path = bin }, depth = 2 })
-local resolve = require("typescope.resolve_oracle")
+require("typescope").setup({ oracle = { path = bin }, depth = 2 })
+local resolve = require("typescope.resolve")
 local async = require("typescope.async")
 
 local fixture = vim.fn.getcwd() .. "/tests/fixtures/shapes.py"
@@ -201,7 +201,7 @@ do
   check(rc and names(rc) == "host,port,returns", "constructor roots (got " .. names(rc) .. ")")
 
   -- lazy expansion: depth 1 leaves `item` expandable; recurse re-asks deeper
-  require("typescope.config").setup({ resolver = "oracle", oracle = { path = bin }, depth = 1 })
+  require("typescope.config").setup({ oracle = { path = bin }, depth = 1 })
   resolve.clear_cache()
   local urow
   for i, l in ipairs(qlines) do
@@ -233,7 +233,7 @@ do
   check(grafted and item.state.loaded and item.state.expanded, "recurse loaded and expanded it")
   check(names(item.children) == "host,port", "grafted ServerConfig's fields (got " .. names(item.children) .. ")")
   check(item.children[1].id == "b.item.host", "grafted ids re-rooted under the node")
-  require("typescope.config").setup({ resolver = "oracle", oracle = { path = bin }, depth = 2 })
+  require("typescope.config").setup({ oracle = { path = bin }, depth = 2 })
 end
 
 -- through the plugin: open the float on takes_config and read it
@@ -264,7 +264,7 @@ end
 -- inside `ServerConfig("h")`'s parens, drive the insert entry point the way
 -- e2e_phase3 does (insert mode itself is unreachable headless)
 do
-  require("typescope").setup({ resolver = "oracle", oracle = { path = bin }, insert_mode = { enabled = true } })
+  require("typescope").setup({ oracle = { path = bin }, insert_mode = { enabled = true } })
   local q = vim.fn.getcwd() .. "/tests/fixtures/oracle/oracle.py"
   vim.cmd.edit(q)
   local qb = vim.api.nvim_get_current_buf()

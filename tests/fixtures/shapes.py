@@ -5,9 +5,9 @@ Two ways to use this file.
 MANUALLY — open it and hover each class. It is a QA sheet for the feature set:
 what expands, what shows fields, what shows nothing.
 
-AUTOMATICALLY — tests/test_shapes.lua reads the marker comments below and asserts
-extract.type_at agrees with each one. The markers are the expectation, so they
-cannot drift from the file the way a table in a test file would.
+AUTOMATICALLY — oracle/src/tests.rs reads the marker comments below and asserts
+the oracle's answer agrees with each one. The markers are the expectation, so
+they cannot drift from the file the way a table in a test file would.
 
 Two marker kinds, both comment lines directly above a construct (above any
 decorator), and both described here rather than written out so the parser sees
@@ -16,14 +16,6 @@ only the real ones.
 The class marker begins "typescope:" and carries "category=" and "fields=",
 where fields is a comma-separated list or the word NONE. Protocols may add
 "methods=", and an optional "note=" explains a NONE.
-
-A third kind, "typescope-oracle:", sits directly below a class marker and
-overrides its "category="/"fields=" for the oracle (oracle/src/tests.rs).
-It exists only while both readers are alive: it records a gap the oracle
-closes that the treesitter extractor still has, so the two suites can
-disagree on purpose until the extractor is deleted. Rule cited:
-design/oracle.md §4, `inferred` — an unannotated member carries pyrefly's
-inference and is drawn ≈, where the extractor had no type to report.
 
 The parameter marker begins "typescope-params:" and carries "params=", the
 parameters a caller actually supplies — so a method's receiver is absent from it
@@ -109,8 +101,7 @@ class BaseConfig:
 
 
 # Own fields first, then inherited ones, each tagged with the class it came from.
-# typescope: category=class fields=extra bases=BaseConfig
-# typescope-oracle: category=class fields=extra,env note=inherited members inline, tagged with their origin
+# typescope: category=class fields=extra,env note=inherited members inline, tagged with their origin
 class DerivedConfig(BaseConfig):
     extra: int = 1
 
@@ -179,22 +170,19 @@ class Initialisers:
         self.from_param: int = given
 
 
-# === NOT supported: the gaps, deliberately recorded =================
+# === Formerly unsupported: gaps the oracle closed (design/oracle.md §4) ===
 
 
-# Unannotated self-assignment: same reasoning as the class-level case below.
-# typescope: category=class fields=NONE note=no annotation on self.x
-# typescope-oracle: category=class fields=strong note=inferred str, drawn ≈
+# Unannotated self-assignment: no annotation to read, but the checker infers.
+# typescope: category=class fields=strong note=no annotation on self.x; the checker infers str, drawn ≈
 class UnannotatedSelf:
     def __init__(self) -> None:
         self.strong = "bar string"
 
 
-# Only the DIRECT children of __init__ are scanned. An attribute set inside a
-# conditional may not exist at runtime, and the class-level scan has the same
-# shallow contract — so this is a deliberate boundary, not an oversight.
-# typescope: category=class fields=always note=conditional self-assignment is not scanned
-# typescope-oracle: category=class fields=always,sometimes note=pyrefly binds the conditional attribute too
+# An attribute set inside a conditional may not exist at runtime; the checker
+# binds it as a field regardless, and so does the float.
+# typescope: category=class fields=always,sometimes note=a conditional self-assignment is still a field the checker binds
 class Conditional:
     def __init__(self, flag: bool) -> None:
         self.always: int = 1
@@ -210,11 +198,9 @@ class SelfDunder:
         self.shown: int = 2
 
 
-# Unannotated class-level assignments are skipped on purpose: without an
-# annotation there is no type to show, and guessing from the literal would be a
-# different feature (and often wrong).
-# typescope: category=class fields=NONE note=no annotation, so no type to report
-# typescope-oracle: category=class fields=strong,ant note=inferred from the literals, drawn ≈
+# Unannotated class-level assignments: no annotation, but the checker infers
+# from the literal and the float draws that ≈.
+# typescope: category=class fields=strong,ant note=no annotation; the checker infers from the literals, drawn ≈
 class Unannotated:
     strong = "bar string"
     ant = 42
@@ -266,12 +252,11 @@ class Receivers:
 def free_function(numpy_test, other: int) -> None: ...
 
 
-# === Hover targets: LSP-backed, NOT machine-checked here =============
+# === Hover targets ===================================================
 #
-# Everything above is pure treesitter and is asserted by test_shapes.lua.
-# The calls below need a language server, so they are a MANUAL sheet: open this
-# file with basedpyright attached and hover each one. e2e_phase3.lua covers the
-# same pipeline against a mock server, not against these lines.
+# Everything above is asserted by oracle/src/tests.rs through the markers.
+# The functions below are asserted there too (headers, docstrings), and are
+# a MANUAL sheet as well: open this file with the oracle attached and hover.
 
 
 def takes_config(config: ServerConfig, timeout: float = 30.0) -> User:

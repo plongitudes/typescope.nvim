@@ -14,25 +14,12 @@ function M.setup(opts)
   require("typescope.oracle").enable(cfg)
 end
 
---- The resolver module the float uses. TRANSITIONAL (design/oracle.md bead
---- 10 removes the switch): `config.resolver` picks between the treesitter
---- resolver and the oracle client while both exist for the parity gate.
-function M._resolver()
-  local which = require("typescope.config").get().resolver
-  return require(which == "oracle" and "typescope.resolve_oracle" or "typescope.resolve")
-end
-
---- Can the pipeline run in this buffer? The treesitter resolver needs a
---- client with definition support (basedpyright); the oracle resolver needs
---- the oracle, and uses basedpyright only for signatureHelp when present.
+--- Can the pipeline run in this buffer? It needs the oracle; basedpyright,
+--- when attached, only supplies signatureHelp's activeParameter.
 ---@param bufnr integer
 ---@return boolean
 function M._can_resolve(bufnr)
-  local lsp = require("typescope.lsp")
-  if require("typescope.config").get().resolver == "oracle" then
-    return lsp.oracle_for(bufnr) ~= nil
-  end
-  return lsp.client_for(bufnr) ~= nil
+  return require("typescope.lsp").oracle_for(bufnr) ~= nil
 end
 
 -- Suppression key of the last CursorHold attempt: don't re-fire the pipeline
@@ -176,7 +163,7 @@ function M._enable_warmstart(cfg)
         async.run(function()
           -- results and errors both discarded: the cache write inside
           -- function_scope is the entire point
-          M._resolver().function_scope(client, bufnr, win, token)
+          require("typescope.resolve").function_scope(client, bufnr, win, token)
           if prefetch_token == token then
             prefetch_token = nil
           end
@@ -320,7 +307,7 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
     on_close = M.close,
     on_recurse = function(node, done)
       if session then
-        M._resolver().recurse(session.client, node, session.token, done)
+        require("typescope.resolve").recurse(session.client, node, session.token, done)
       end
     end,
     on_llm = function(tree_roots, done, on_progress)
@@ -458,15 +445,15 @@ function M.open(opts)
   local bufnr = vim.api.nvim_get_current_buf()
   local win = vim.api.nvim_get_current_win()
   local lsp = require("typescope.lsp")
-  local client = lsp.client_for(bufnr) -- basedpyright: signatureHelp, and the legacy pipeline
+  local client = lsp.client_for(bufnr) -- basedpyright, for signatureHelp
   if not M._can_resolve(bufnr) then
     if opts.on_unresolved then
       opts.on_unresolved()
     elseif not opts.silent then
-      local what = require("typescope.config").get().resolver == "oracle"
-          and "the type oracle (see :checkhealth typescope)"
-        or "an LSP client with definition support"
-      vim.notify("typescope: " .. what .. " is not attached to this buffer", vim.log.levels.WARN)
+      vim.notify(
+        "typescope: the type oracle is not attached to this buffer (see :checkhealth typescope)",
+        vim.log.levels.WARN
+      )
     end
     return
   end
@@ -475,7 +462,7 @@ function M.open(opts)
   local token = async.token()
   open_token = token
   async.run(function()
-    local resolve = M._resolver()
+    local resolve = require("typescope.resolve")
     local roots, meta_or_err, why = resolve.function_scope(client, bufnr, win, token)
     if async.stale(token) then
       return

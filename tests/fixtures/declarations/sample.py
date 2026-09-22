@@ -1,15 +1,16 @@
-from models import Bar, Empty
-from typeshed_io import TextIO
+from pathlib import Path
 
-LOG: TextIO = open_log()
+from models import Bar, Empty
+
+LOG: Path = Path("log")
 
 
 class Holder:
-    handle: TextIO
+    handle: Path
 
     def __init__(self) -> None:
         self.bar: Bar = Bar()
-        self.blocked: TextIO = open_log()
+        self.blocked: Path = Path("blocked")
         self.strong: str = "s"
         self.mapping: dict[str, Bar] = {}
         self.empty: Empty = Empty()

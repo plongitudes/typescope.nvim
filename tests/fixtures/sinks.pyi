@@ -1,6 +1,6 @@
-# Plays loguru/__init__.pyi: the handwritten stub holding the @overload set
-# that declaration resolves to. (.py rather than .pyi only so the mock
-# server's glob picks it up; the parse path is identical.)
+# Plays loguru/__init__.pyi: the handwritten stub holding the @overload set.
+# A checker prefers this .pyi over sinks.py beside it; the runtime module
+# keeps the docstring.
 from typing import TextIO, overload
 
 

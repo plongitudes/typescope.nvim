@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from typing import Literal, Optional, TypedDict, overload
 
 from server_types import Response
+from sinks import attach
+from prompting import ask
 
 
 @dataclass

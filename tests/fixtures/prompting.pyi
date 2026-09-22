@@ -1,0 +1,3 @@
+# Plays the role of the typeshed stub beside prompting.py: the annotated def
+# a checker prefers over the runtime module's conditional alias.
+def ask(prompt: str = "? ", echo: bool = False) -> str: ...

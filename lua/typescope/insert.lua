@@ -183,40 +183,7 @@ local function placement(height)
   }
 end
 
--- The active param's shape (valid values / union expansion) may be behind a
--- _lazy hook (typeshed alias — open()'s OpenTextMode). Fetch just the ≈ view
--- on demand: one hover, cached on the shared node, structure untouched.
--- Pending state is the token itself, so a cancelled fetch can retry later.
 local repaint
----@param st typescope.InsertState
-local function ensure_shape(st)
-  local node = param_node(st)
-  local async = require("typescope.async")
-  if not node or node.evaluated or not node._lazy then
-    return
-  end
-  if node._eval_pending and not async.stale(node._eval_pending) then
-    return
-  end
-  -- The oracle resolver has nothing to evaluate lazily: an inferred type
-  -- arrives inline and a lazy node is structure, not an evaluation. Only the
-  -- treesitter resolver offers evaluate(); this goes with it (bead 10).
-  local resolver = require("typescope")._resolver()
-  if not resolver.evaluate then
-    return
-  end
-  local client = require("typescope.lsp").client_for(st.srcbuf)
-  if not client then
-    return
-  end
-  node._eval_pending = st.token
-  resolver.evaluate(client, node, st.token, function(filled)
-    node._eval_pending = nil
-    if filled and state == st then
-      repaint(st)
-    end
-  end)
-end
 
 -- Re-pin the open float to the current cursor screen position (cursor-
 -- relative floats anchor once; they don't follow view changes on their own).
@@ -228,7 +195,6 @@ end
 
 ---@param st typescope.InsertState
 repaint = function(st)
-  ensure_shape(st)
   local result = typing_result(st)
   if not result then
     close_float() -- an overload swap can land on a 0-param signature
@@ -319,15 +285,13 @@ local function open_for(srcbuf, key, frow0, fcol)
   local token = async.token()
   resolve_token = token
   local win = vim.api.nvim_get_current_win()
-  local typescope = require("typescope")
-  if not typescope._can_resolve(srcbuf) then
+  if not require("typescope")._can_resolve(srcbuf) then
     return
   end
-  -- basedpyright, when attached: the legacy pipeline needs it; the oracle
-  -- path only uses it for signatureHelp (refresh_active)
+  -- basedpyright, when attached, only feeds signatureHelp (refresh_active)
   local client = require("typescope.lsp").client_for(srcbuf)
   async.run(function()
-    local roots, meta = typescope._resolver().function_scope(client, srcbuf, win, token, { frow0 + 1, fcol })
+    local roots, meta = require("typescope.resolve").function_scope(client, srcbuf, win, token, { frow0 + 1, fcol })
     if async.stale(token) or pending_key ~= key then
       return
     end
@@ -376,7 +340,6 @@ local function open_for(srcbuf, key, frow0, fcol)
       focusable = false,
     })
     state = st
-    ensure_shape(st)
     refresh_active()
   end)
 end

@@ -1,11 +1,18 @@
--- End-to-end test of the phase-3 LSP pipeline against the in-process mock
--- server. Run headless:
+-- End-to-end test of the pipeline: the REAL oracle binary for structure
+-- (built by scripts/build-oracle.sh; the suite skips itself without one) and
+-- an in-process stand-in for basedpyright serving signatureHelp. Run headless:
 --   nvim --headless --clean \
 --     --cmd "set rtp+=. rtp+=~/.local/share/nvim/site" \
 --     -c "luafile tests/e2e_phase3.lua" -c "qa!"
 
 local root = vim.fn.getcwd()
 local fixture_dir = root .. "/tests/fixtures"
+local oracle_bin = vim.env.TYPESCOPE_ORACLE or (root .. "/oracle/target/debug/typescope-oracle")
+if vim.fn.executable(oracle_bin) ~= 1 then
+  print("SKIP e2e_phase3: no oracle binary at " .. oracle_bin .. " (scripts/build-oracle.sh)")
+  print("ALL PASS")
+  return
+end
 
 -- Most of this suite asserts on INLINE content — an example beside its leaf,
 -- an origin tag on an inherited field — which is the tree layout's shape. The
@@ -32,18 +39,23 @@ local function float_lines()
   end
 end
 
--- open the fixture and attach the mock server
+-- open the fixture: setup() attaches the oracle on FileType; the basedpyright
+-- stand-in is started by hand, as an LSP config would
 vim.cmd.edit(fixture_dir .. "/sample.py")
 local bufnr = vim.api.nvim_get_current_buf()
+vim.bo[bufnr].filetype = "python"
 vim.lsp.start({
   name = "typescope-mock",
-  cmd = require("tests.mock_server").cmd(fixture_dir),
+  cmd = require("tests.mock_basedpyright").cmd(fixture_dir),
   root_dir = fixture_dir,
 })
-vim.wait(1000, function()
-  return #vim.lsp.get_clients({ bufnr = bufnr }) > 0
-end)
-check("mock LSP attached", #vim.lsp.get_clients({ bufnr = bufnr }) > 0)
+vim.wait(20000, function()
+  local lsp = require("typescope.lsp")
+  local a, b = lsp.client_for(bufnr), lsp.oracle_for(bufnr)
+  return a ~= nil and b ~= nil and b.initialized
+end, 50)
+check("basedpyright stand-in attached", require("typescope.lsp").client_for(bufnr) ~= nil)
+check("oracle attached", require("typescope.lsp").oracle_for(bufnr) ~= nil)
 
 -- cursor on the create_server *call*
 local call_line
@@ -874,30 +886,14 @@ if lines9 then
   end)
   check("lazy overload param expands to class structure", table.concat(float_lines(), "\n"):find("max_attempts") ~= nil)
 
-  -- evaluation-only expansion (alias to a builtins-only RHS): the ≈ view
-  -- folds like a branch — h collapses the node itself, NOT the parent group
-  for i, l in ipairs(float_lines()) do
-    if l:find("mode%s") and l:find("LoopMode") then
-      vim.api.nvim_win_set_cursor(ov_win, { i, 0 })
-      break
-    end
-  end
-  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "x", false)
-  vim.wait(2000, function()
-    return table.concat(float_lines() or {}, "\n"):find("Literal") ~= nil
-  end)
-  check("evaluation-only expand decorates with ≈", table.concat(float_lines(), "\n"):find("Literal") ~= nil)
-  for i, l in ipairs(float_lines()) do
-    if l:find("mode%s") and l:find("LoopMode") then
-      vim.api.nvim_win_set_cursor(ov_win, { i, 0 })
-      break
-    end
-  end
-  vim.api.nvim_feedkeys("h", "x", false)
-  local after_h = table.concat(float_lines(), "\n")
-  check("h folds the ≈ view, not the parent", not after_h:find("Literal") and after_h:find("max_attempts") ~= nil)
-  vim.api.nvim_feedkeys("l", "x", false)
-  check("l re-expands the ≈ view without re-resolving", table.concat(float_lines(), "\n"):find("Literal") ~= nil)
+  -- an alias to a builtins-only RHS (`mode: LoopMode`) carries its
+  -- resolution from the first paint: the oracle answers `resolved` inline,
+  -- so there is no evaluation-only expansion to fold (that mechanic went
+  -- with the treesitter resolver, design/oracle.md §7)
+  check(
+    "alias leaf shows its resolution ≈ from the first paint",
+    table.concat(float_lines(), "\n"):find("Literal") ~= nil
+  )
 end
 require("typescope").close()
 
@@ -926,27 +922,8 @@ if lines7 then
 end
 require("typescope").close()
 
--- annotation normalization: old typing syntax → modern display
-do
-  local py = require("typescope.extract.python")
-  local src = 'def f(a: typing.Optional[str], b: typing.Union["X", typing.Callable, str],'
-    .. " c: typing.List[int], d: Optional[Union[int, str]], e: typing.Type[asyncio.Protocol]) -> None: ..."
-  local info = py.function_info(src, 0, 4)
-  local want = {
-    a = "str | None",
-    b = "X | Callable | str",
-    c = "list[int]",
-    d = "int | str | None",
-    e = "type[asyncio.Protocol]",
-  }
-  for _, p in ipairs(info.params) do
-    local got = py.annotation(src, p.type_node).display
-    check(("normalize %s -> %s"):format(p.name, want[p.name]), got == want[p.name])
-    if got ~= want[p.name] then
-      print(("  got: %q"):format(got))
-    end
-  end
-end
+-- (annotation normalization — typing.Optional[str] → str | None and
+-- friends — is the checker's own display now; pinned in oracle/src/tests.rs)
 
 -- active_param: name-based, immune to `*` separator entries (uvicorn case)
 do
@@ -1194,24 +1171,22 @@ do
   local resolve = require("typescope.resolve")
   local lsp = require("typescope.lsp")
   local client = lsp.client_for(bufnr)
-  local uri = vim.uri_from_fname(fixture_dir .. "/sample.py")
-
-  -- `ServerConfig` sits at line 20 of the fixture (0-based 19); a beyond-depth
-  -- placeholder points its ref there and carries no children of its own
+  -- a beyond-depth placeholder for `config` in the create_server float: its
+  -- hook remembers the ORIGINAL position, and expanding re-asks it deeper
+  local call_row0
+  for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+    if l:find("handle = create_server") then
+      call_row0 = i - 1
+    end
+  end
   local function lazy_node()
     local n = model.new({
       name = "config",
       kind = "param",
-      type = { raw = "ServerConfig", display = "ServerConfig", category = "generic" },
+      type = { raw = "ServerConfig", display = "ServerConfig", category = "dataclass" },
       loaded = false,
-      source = { uri = uri, range = { start = { line = 19, character = 0 } } },
     })
-    n._lazy = {
-      uri = uri,
-      refs = { { name = "ServerConfig", row = 19, col = 6 } },
-      ancestry = {},
-      impl = require("typescope.extract").get("python"),
-    }
+    n._lazy = { bufnr = bufnr, pos = { call_row0, 12 }, call = false }
     return n
   end
 

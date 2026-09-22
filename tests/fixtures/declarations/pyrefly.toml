@@ -1,0 +1,4 @@
+# This directory is its own little project: sample.py imports models and
+# typeshed_io from beside it.
+search-path = ["."]
+python-version = "3.12"

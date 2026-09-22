@@ -89,7 +89,7 @@ pub struct Node {
     #[serde(skip)]
     pub def_range: Option<TextRange>,
     #[serde(skip)]
-    pub def_module: Option<ModulePath>,
+    pub def_handle: Option<Handle>,
 }
 
 impl Node {
@@ -110,7 +110,7 @@ impl Node {
             shape: Vec::new(),
             def_name: None,
             def_range: None,
-            def_module: None,
+            def_handle: None,
         }
     }
 }
@@ -190,7 +190,7 @@ impl<'a> Walker<'a> {
         if let Some(d) = def {
             node.def_name = Some(d.qname.id().as_str().to_owned());
             node.def_range = Some(d.qname.range());
-            node.def_module = Some(d.qname.module().path().dupe());
+            node.def_handle = Some(Handle::new(d.qname.module_name(), d.qname.module().path().dupe(), self.handle.sys_info().dupe()));
         }
         let flags = &f.metadata.flags;
         // the receiver is dropped by POSITION: a method's first parameter
@@ -319,6 +319,13 @@ impl<'a> Walker<'a> {
             };
             let mut g = self.function_node(name, "overload", f, bound_to, depth);
             g.badge = Some(format!("[{}]", i + 1));
+            if i == 0 {
+                // the set is named and located by its first signature
+                node.def_name = g.def_name.clone();
+                node.def_range = g.def_range;
+                node.def_handle = g.def_handle.clone();
+                node.location = g.location.clone();
+            }
             node.children.push(g);
         }
         node
@@ -351,6 +358,21 @@ impl<'a> Walker<'a> {
         if policy::is_terminal_class(&cls) {
             let mut leaf = Node::leaf(name, kind, display(ty), "builtin");
             leaf.location = class_location(&cls);
+            // `dict[str, Bar]`: the wrapper is vocabulary, but a user class
+            // among its arguments is structure worth a variant row beneath
+            // (the resolver's olj decision: the member class nests, the
+            // declaration keeps its own type)
+            if depth > 0
+                && let Type::ClassType(ct) = ty
+            {
+                for arg in ct.targs().as_slice() {
+                    if let Type::ClassType(inner) = arg
+                        && !policy::is_terminal_class(inner.class_object())
+                    {
+                        leaf.children.push(self.node(&display(arg), "variant", arg, depth - 1));
+                    }
+                }
+            }
             return leaf;
         }
         let attrs = self.tx.attributes_of_type(self.handle, query_ty).unwrap_or_default();

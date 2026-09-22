@@ -123,7 +123,7 @@ Presentation policy lives in the **oracle**, not in Lua: the member filter, the 
 - `lsp.lua` keeps `client_for` (basedpyright, for `signatureHelp`), `signature_help`, `active_param`, `request_cb`; gains `oracle_for(bufnr)` that finds the `typescope-oracle` client; loses `definition`, `declaration`, `locate`, `hover_result_lines`, `load_buf`.
 - `oracle.lua` (new): `vim.lsp.config`/`vim.lsp.enable` of the binary on `FileType python`, the download-or-locate logic (decision 2), protocol-version check, `:checkhealth` hooks.
 - `extract/python.lua` → only `call_args` survives (plus the call/annotation classification decision 5 needs); everything else deleted with its tests.
-- `render.lua`/`interact.lua`: read `inferred` where they read `evaluated`; render `property`/`enum_member`/`group` kinds (three small branches next to the `method` one); nothing else.
+- `render.lua`/`interact.lua`: render `property`/`enum_member`/`group` kinds (three small branches next to the `method` one); nothing else. (Bead 10 settled the `inferred`/`evaluated` question: `evaluated` stays the ≈ *text* the renderer draws — an inferred type, or what a written alias resolved to — and `inferred` is the flag; one producer now, no rename needed.)
 - `insert.lua`: drop `evaluate`; unchanged otherwise.
 - `examples/`: heuristic and LLM prompts keep reading `type.display`; `enum_member` and `property` nodes are excluded from generation the way `Self@`/`T@` are today.
 - `config.lua`: `oracle = { path = nil, download = true }`; `depth` unchanged.

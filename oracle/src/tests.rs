@@ -416,11 +416,11 @@ fn understood_but_nothing_to_draw_is_empty_with_a_reason() {
 
 #[test]
 fn a_self_attribute_in_a_method_is_the_declaration_it_names() {
+    // `self.cfg: ServerConfig` — one class IS the annotation, so the class
+    // heads the float (the resolver's olj decision, e2e_declarations)
     let s = probe("oracle/oracle.py", "        self.cfg", 13, false);
-    assert_eq!(s.scope, "declaration");
-    assert_eq!(s.roots[0].name, "self.cfg");
-    assert_eq!(s.roots[0].ty.display, "ServerConfig");
-    assert!(!s.roots[0].inferred);
+    assert_eq!(s.scope, "class");
+    assert_eq!(s.roots[0].name, "ServerConfig");
     assert_eq!(data_rows(&s.roots[0]), ["host", "port"]);
     let s = probe("oracle/oracle.py", "        self.guess", 13, false);
     assert_eq!(s.roots[0].name, "self.guess");
@@ -489,4 +489,18 @@ fn an_unannotated_parameter_with_a_default_is_typed_by_the_default() {
     assert_eq!(count.ty.display, "int");
     assert!(count.inferred);
     assert_eq!(count.default.as_deref(), Some("3"));
+}
+
+#[test]
+fn old_typing_spellings_display_as_modern_syntax() {
+    let s = probe("oracle/oracle.py", "def legacy_spelling", 4, false);
+    let by_name = |n: &str| s.roots.iter().find(|r| r.name == n).unwrap().ty.display.clone();
+    assert_eq!(by_name("a"), "str | None");
+    // pyrefly spells a bare Callable as its shape and orders union members
+    // its own way; the point is the modern `|` spelling and the forward
+    // reference resolved
+    let b = by_name("b");
+    assert!(b.contains("Response") && b.contains(" | ") && b.contains("str") && !b.contains("Union"), "{b}");
+    assert_eq!(by_name("c"), "list[int]");
+    assert_eq!(by_name("d"), "int | str | None");
 }

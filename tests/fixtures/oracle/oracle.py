@@ -107,3 +107,16 @@ x = pick(3)
 class Quiet:
     def n(self):
         pass
+
+
+import typing
+from typing import Callable, Optional, Union
+
+
+def legacy_spelling(
+    a: typing.Optional[str],
+    b: typing.Union["Response", Callable, str],
+    c: typing.List[int],
+    d: Optional[Union[int, str]],
+) -> None:
+    """Old typing syntax reads as modern display."""

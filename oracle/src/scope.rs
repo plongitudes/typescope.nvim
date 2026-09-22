@@ -71,7 +71,10 @@ pub fn build(req: &Request<'_>, ty: &Type) -> Option<Scope> {
 fn function_scope(req: &Request<'_>, walker: &Walker<'_>, ty: &Type) -> Scope {
     let node = walker.node("function", "function", ty, req.depth);
     let name = node.def_name.clone().unwrap_or_else(|| req.cursor.text.clone());
-    let docstring = node.def_range.and_then(|r| docstring_at(req, r));
+    let docstring = match (&node.def_handle, node.def_range) {
+        (Some(handle), Some(range)) => docstring_of_def(req, handle, &name, range),
+        _ => None,
+    };
 
     if node.kind == "function" && node.children.iter().all(|c| c.kind == "overload") && !node.children.is_empty() {
         // an overload set: each signature is a group root, the plugin picks
@@ -237,6 +240,25 @@ fn constructor_scope(req: &Request<'_>, walker: &Walker<'_>, cls: &Class, ty: &T
 /// declaration still says what the symbol was declared as (the resolver's
 /// "prefer a row over a decline").
 fn declaration_scope(req: &Request<'_>, walker: &Walker<'_>, ty: &Type) -> Scope {
+    // `self.bar: Bar` — one class IS the whole annotation, so the class is
+    // the answer and heads the float as it would when hovered directly.
+    // `dict[str, Bar]`, `Bar | None` and builtins keep the declaration as
+    // the root row: collapsing to Bar there would head the float with a type
+    // the symbol does not have (the resolver's olj decision).
+    // An UNANNOTATED target (`resp = fetch()`) keeps its own row: the ≈ on
+    // it says the type is the checker's inference, which a class float
+    // would not.
+    if !req.cursor.inferred
+        && let Type::ClassType(ct) = ty
+        && ct.targs().is_empty()
+        && !policy::is_terminal_class(ct.class_object())
+    {
+        let cls = ct.class_object().dupe();
+        let as_class = class_scope(req, walker, &cls, &Type::ClassDef(cls.dupe()));
+        if as_class.scope == "class" {
+            return as_class;
+        }
+    }
     let mut root = walker.node(&req.cursor.text, "field", ty, req.depth);
     root.inferred = root.inferred || req.cursor.inferred;
     Scope { scope: "declaration".to_owned(), header: None, docstring: None, headers: None, overloads: None, roots: vec![root], reason: None }
@@ -249,12 +271,38 @@ fn ast_of<'a>(req: &Request<'a>, cls: &Class) -> Option<(std::sync::Arc<ruff_pyt
     Some((req.tx.get_ast(&handle)?, req.tx.get_module_info(&handle)?))
 }
 
+/// A function's docstring: from its own module, or — when it is defined in
+/// a `.pyi` whose body is `...` — from the same-named `def` in the runtime
+/// `.py` beside it. The treesitter resolver's "stub bodies are `...`; the
+/// runtime docstring rides along", carried forward.
+fn docstring_of_def(req: &Request<'_>, handle: &Handle, name: &str, name_range: TextRange) -> Option<String> {
+    if let Some(ast) = req.tx.get_ast(handle)
+        && let Some(body) = find_body(&ast.body, name_range)
+        && let Some(d) = docstring_of_body(body)
+    {
+        return Some(d);
+    }
+    let path = handle.path().as_path();
+    if path.extension().and_then(|e| e.to_str()) == Some("pyi") {
+        let runtime = path.with_extension("py");
+        let text = std::fs::read_to_string(&runtime).ok()?;
+        let ast = pyrefly_python::ast::Ast::parse(&text, ruff_python_ast::PySourceType::Python).0;
+        let body = find_body_by_name(&ast.body, name)?;
+        return docstring_of_body(body);
+    }
+    None
+}
+
 /// The docstring of the `def` or `class` whose NAME sits at `name_range`,
-/// in the request's own module (definitions elsewhere are found through
-/// their class). Quotes stripped and following lines dedented, as before.
+/// in the request's own module.
 fn docstring_at(req: &Request<'_>, name_range: TextRange) -> Option<String> {
     let ast = req.tx.get_ast(req.handle)?;
     let body = find_body(&ast.body, name_range)?;
+    docstring_of_body(body)
+}
+
+/// Quotes stripped and following lines dedented, as `docstring_of` did.
+fn docstring_of_body(body: &[Stmt]) -> Option<String> {
     let first = body.first()?;
     let Stmt::Expr(e) = first else { return None };
     let Expr::StringLiteral(s) = &*e.value else { return None };
@@ -267,6 +315,25 @@ fn docstring_at(req: &Request<'_>, name_range: TextRange) -> Option<String> {
     }
     let joined = out.join("\n").trim().to_owned();
     (!joined.is_empty()).then_some(joined)
+}
+
+/// The body of the last top-level or nested `def` called `name` (the
+/// runtime module behind a stub; the last one wins, as an overload
+/// implementation would).
+fn find_body_by_name<'a>(body: &'a [Stmt], name: &str) -> Option<&'a [Stmt]> {
+    let mut found = None;
+    for stmt in body {
+        match stmt {
+            Stmt::FunctionDef(f) if f.name.as_str() == name => found = Some(f.body.as_slice()),
+            Stmt::ClassDef(c) => {
+                if let Some(b) = find_body_by_name(&c.body, name) {
+                    found = Some(b);
+                }
+            }
+            _ => {}
+        }
+    }
+    found
 }
 
 /// The body of the `def`/`class` whose name is at `name_range`.

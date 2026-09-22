@@ -1,5 +1,5 @@
 -- End-to-end test of the DECLARATION paths in resolve.function_scope, against
--- the in-process mock server. Run headless:
+-- the real oracle binary (the suite skips itself without one). Run headless:
 --   nvim --headless --clean \
 --     --cmd "set rtp+=. rtp+=~/.local/share/nvim/site" \
 --     -c "luafile tests/e2e_declarations.lua" -c "qa!"
@@ -27,23 +27,19 @@ local function check(desc, cond)
   end
 end
 
-local mock = require("tests.mock_server")
 local resolve = require("typescope.resolve")
 local async = require("typescope.async")
 local model = require("typescope.model")
 
 vim.cmd.edit(fixture_dir .. "/sample.py")
 local bufnr = vim.api.nvim_get_current_buf()
-vim.lsp.start({
-  name = "typescope-mock-decl",
-  cmd = mock.cmd(fixture_dir),
-  root_dir = fixture_dir,
-})
-vim.wait(1000, function()
-  return #vim.lsp.get_clients({ bufnr = bufnr }) > 0
-end)
-local client = vim.lsp.get_clients({ bufnr = bufnr })[1]
-check("mock LSP attached", client ~= nil)
+vim.bo[bufnr].filetype = "python" -- setup() attaches the oracle on FileType
+local client
+vim.wait(20000, function()
+  client = require("typescope.lsp").oracle_for(bufnr)
+  return client ~= nil and client.initialized
+end, 50)
+check("oracle attached", client ~= nil)
 
 ---------------------------------------------------------------- driving resolve
 
@@ -63,17 +59,15 @@ local function resolve_at(pat, needle)
   local col = assert(text:find(needle, 1, true), needle .. " not on that line") - 1
 
   resolve.clear_cache() -- each case asks its own question, not a warm one
-  mock.reset_counts()
   local out, done = {}, false
   async.run(function()
     out.roots, out.meta, out.why = resolve.function_scope(client, bufnr, 0, async.token(), { row, col })
     done = true
   end)
-  vim.wait(3000, function()
+  vim.wait(20000, function()
     return done
   end)
   out.finished = done
-  out.defs = mock.counts.definition -- round trips this one case cost
   return out
 end
 
@@ -99,11 +93,12 @@ check("  ... with its own fields beneath it", bar.roots and names(bar.roots[1].c
 
 ------------------------------------------- nothing to draw still draws a row
 
--- TextIO has fields and a method; only the typeshed guard stops class_scope.
-local blocked = resolve_at("self.blocked: TextIO", "blocked")
+-- Path has plenty of structure in typeshed; a typeshed class is a terminal
+-- leaf (vocabulary, not shape), so the declaration is the row.
+local blocked = resolve_at("self.blocked: Path", "blocked")
 check("typeshed-blocked attribute draws one row", blocked.roots and #blocked.roots == 1)
 check("  ... named for the declaration, not the method", blocked.roots and blocked.roots[1].name == "self.blocked")
-check("  ... carrying the declared type", blocked.roots and blocked.roots[1].type.display == "TextIO")
+check("  ... carrying the declared type", blocked.roots and blocked.roots[1].type.display == "Path")
 check("  ... with nothing invented beneath it", blocked.roots and #blocked.roots[1].children == 0)
 check("  ... and it is a float, not a decline", blocked.why == nil)
 
@@ -130,23 +125,18 @@ check("  ... and nesting the member class beneath it", mapping.roots and #mappin
 -- The regression guards. Neither of these sits inside a method, so the walk
 -- that answers with __init__ finds nothing -- and the fall-through that used
 -- to follow answered with the enclosing CLASS, or with nothing at all.
-local in_class = resolve_at("    handle: TextIO", "handle")
+local in_class = resolve_at("    handle: Path", "handle")
 check("class-body declaration draws itself", in_class.roots and #in_class.roots == 1 and in_class.why == nil)
 check("  ... not the enclosing class's fields", in_class.roots and in_class.roots[1].name == "handle")
 check("  ... and not Holder's other members", names(in_class.roots):find("bar") == nil)
 
-local at_module = resolve_at("LOG: TextIO", "LOG")
+local at_module = resolve_at("LOG: Path", "LOG")
 check("module-level declaration draws itself", at_module.roots and #at_module.roots == 1)
 check("  ... rather than ending at absent", at_module.why == nil)
 check("  ... named for the declaration", at_module.roots and at_module.roots[1].name == "LOG")
 
------------------------------------------------------------------- round trips
-
--- The declaration arm resolves the annotation's ref to see whether class_scope
--- can draw it; when it declines, attach_type wants that same position again.
--- `blocked` is the case that goes down both halves: one request for the
--- hovered symbol, one for TextIO. A third means the memo stopped working.
-check("a definition is asked for once per position", blocked.defs == 2)
+-- (The "one definition round trip per position" check went with the
+-- definition chase: the oracle answers a declaration in one request.)
 
 ---------------------------------------------------------------------- node ids
 

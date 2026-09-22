@@ -1,7 +1,9 @@
--- In-process mock LSP server for tests: serves textDocument/definition by
--- grepping fixture files for `class X` / `def X` definitions. The client-side
--- path (client.request, handlers, uri plumbing) is identical to production —
--- only the server side is fake.
+-- In-process stand-in for basedpyright in tests. In production basedpyright
+-- supplies exactly one thing to TypeScope — signatureHelp's activeParameter /
+-- activeSignature — so that is all this serves, by grepping fixture files
+-- for single-line `def`s. It advertises definition support so
+-- lsp.client_for picks it the way it picks basedpyright, and answers those
+-- requests with nothing. Structure comes from the real oracle binary.
 
 local M = {}
 
@@ -12,7 +14,7 @@ local M = {}
 M.counts = {}
 
 function M.reset_counts()
-  M.counts = { definition = 0, declaration = 0, hover = 0, signatureHelp = 0 }
+  M.counts = { signatureHelp = 0 }
 end
 
 M.reset_counts()
@@ -36,61 +38,6 @@ function M.cmd(fixture_dir)
       end
       init = e + 1
     end
-  end
-
-  -- pyright's source mapper in miniature: definition answers from runtime
-  -- files even when a stub exists; declaration prefers the stub universe.
-  -- Fixtures mark their stub role with "_stub" in the filename.
-  local function ordered(stub_first)
-    local sorted = vim.list_slice(files)
-    table.sort(sorted, function(a, b)
-      local astub, bstub = a:find("_stub") ~= nil, b:find("_stub") ~= nil
-      if astub ~= bstub then
-        return astub == stub_first
-      end
-      return a < b
-    end)
-    return sorted
-  end
-
-  local function find_by_patterns(word, patterns, search_files)
-    for _, pat_tpl in ipairs(patterns) do
-      local pat = pat_tpl:gsub("WORD", word)
-      for _, file in ipairs(search_files) do
-        for lnum, line in ipairs(vim.fn.readfile(file)) do
-          if line:match(pat) then
-            local col = line:find(word, 1, true) - 1
-            return {
-              uri = vim.uri_from_fname(file),
-              range = {
-                start = { line = lnum - 1, character = col },
-                ["end"] = { line = lnum - 1, character = col + #word },
-              },
-            }
-          end
-        end
-      end
-    end
-  end
-
-  -- definition mimics basedpyright's runtime-literal answer: a module-level
-  -- alias assignment wins over the def it aliases. declaration is the static
-  -- answer: class/def sites only (the "stub" universe).
-  -- the declaration shapes come LAST: they only answer where class/def/alias
-  -- found nothing, so no existing fixture changes which site it resolves to.
-  --   `self.bar: Bar = Bar()`   attribute declaration inside a method
-  --   `handle: TextIO`          class-body or module-level annotated name
-  local function find_definition(word)
-    return find_by_patterns(word, {
-      "^WORD%s*=",
-      "^%s*class%s+WORD%f[%W]",
-      "^%s*def%s+WORD%f[%W]",
-      "^%s*self%.WORD%s*[:=]",
-      "^%s*WORD%s*:%s*%w",
-    }, ordered(false))
-  end
-  local function find_declaration(word)
-    return find_by_patterns(word, { "^%s*class%s+WORD%f[%W]", "^%s*def%s+WORD%f[%W]" }, ordered(true))
   end
 
   -- naive signatureHelp: every single-line def of the word becomes one
@@ -141,10 +88,7 @@ function M.cmd(fixture_dir)
       elseif method == "shutdown" then
         callback(nil, nil)
       elseif method == "textDocument/definition" or method == "textDocument/declaration" then
-        local fname = vim.uri_to_fname(params.textDocument.uri)
-        local word = word_at(fname, params.position.line, params.position.character)
-        local finder = method == "textDocument/definition" and find_definition or find_declaration
-        callback(nil, word and finder(word) or nil)
+        callback(nil, nil) -- advertised so client_for picks us; never asked in earnest
       elseif method == "textDocument/signatureHelp" then
         local fname = vim.uri_to_fname(params.textDocument.uri)
         local word = word_at(fname, params.position.line, params.position.character)
@@ -169,31 +113,11 @@ function M.cmd(fixture_dir)
         end
         callback(nil, sig)
       elseif method == "textDocument/hover" then
+        -- K's fallback: a real server shows SOMETHING for a module or a
+        -- keyword; the float's existence is what the fallback test asserts
         local fname = vim.uri_to_fname(params.textDocument.uri)
-        local word = word_at(fname, params.position.line, params.position.character)
-        if word then
-          -- mimic pyright hover shapes: "(type alias) X: rhs" for module-level
-          -- alias assignments, "(parameter) x: int" otherwise
-          local value
-          for _, file in ipairs(files) do
-            for _, line in ipairs(vim.fn.readfile(file)) do
-              local rhs = line:match("^" .. word .. "%s*=%s*(.+)$")
-              if rhs then
-                value = ("(type alias) %s: %s"):format(word, rhs)
-                break
-              end
-            end
-            if value then
-              break
-            end
-          end
-          value = value or ("(parameter) %s: int"):format(word)
-          callback(nil, {
-            contents = { kind = "markdown", value = "```python\n" .. value .. "\n```" },
-          })
-        else
-          callback(nil, nil)
-        end
+        local word = word_at(fname, params.position.line, params.position.character) or "?"
+        callback(nil, { contents = { kind = "markdown", value = "```python\n(module) " .. word .. "\n```" } })
       else
         callback(nil, nil)
       end
