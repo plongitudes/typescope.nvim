@@ -1,0 +1,91 @@
+//! typescope-oracle: a minimal LSP server over pyrefly that answers
+//! `typescope/structure`. See `design/oracle.md`.
+//!
+//!   typescope-oracle --stdio
+//!
+//! Neovim's built-in LSP client spawns it, keeps it fed with document sync
+//! (unsaved buffer contents), and sends the one custom request. Everything
+//! else — hover, definition, diagnostics — stays with the user's real Python
+//! language server; this one advertises nothing that would compete.
+
+mod oracle;
+mod protocol;
+
+use anyhow::Result;
+use lsp_server::Connection;
+use lsp_server::ErrorCode;
+use lsp_server::Message;
+use lsp_server::Notification;
+use lsp_server::Request;
+use lsp_server::Response;
+use lsp_types::notification::DidChangeTextDocument;
+use lsp_types::notification::DidCloseTextDocument;
+use lsp_types::notification::DidOpenTextDocument;
+use lsp_types::notification::Notification as _;
+
+fn main() -> Result<()> {
+    // `--stdio` is the only transport; other flags are accepted and ignored
+    // so an LSP client that passes its own conventions still starts us.
+    if std::env::args().any(|a| a == "--version" || a == "-V") {
+        println!(
+            "{} {} (protocol {}, pyrefly {})",
+            protocol::SERVER_NAME,
+            env!("CARGO_PKG_VERSION"),
+            protocol::PROTOCOL,
+            oracle::Oracle::pyrefly_version()
+        );
+        return Ok(());
+    }
+
+    let (connection, io_threads) = Connection::stdio();
+
+    // initialize/initialized by hand rather than Connection::initialize, which
+    // only sends capabilities: the plugin reads serverInfo too.
+    let (init_id, _init_params) = connection.initialize_start()?;
+    let init_result = serde_json::to_value(protocol::initialize_result())?;
+    connection.initialize_finish(init_id, init_result)?;
+
+    let oracle = oracle::Oracle::new();
+    serve(&connection, oracle)?;
+
+    io_threads.join()?;
+    Ok(())
+}
+
+fn serve(connection: &Connection, _oracle: oracle::Oracle) -> Result<()> {
+    for msg in &connection.receiver {
+        match msg {
+            Message::Request(req) => {
+                if connection.handle_shutdown(&req)? {
+                    return Ok(());
+                }
+                let resp = handle_request(req);
+                connection.sender.send(Message::Response(resp))?;
+            }
+            Message::Notification(note) => handle_notification(note),
+            Message::Response(_) => {} // we send no requests, so nothing to match
+        }
+    }
+    Ok(())
+}
+
+fn handle_request(req: Request) -> Response {
+    match req.method.as_str() {
+        protocol::STRUCTURE => match serde_json::from_value::<protocol::StructureParams>(req.params) {
+            // bead 1: the request is routed and validated; beads 2 and 4 fill
+            // the answer. `null` is the contract's "nothing under the cursor".
+            Ok(_params) => Response::new_ok(req.id, serde_json::Value::Null),
+            Err(e) => Response::new_err(req.id, ErrorCode::InvalidParams as i32, e.to_string()),
+        },
+        other => Response::new_err(req.id, ErrorCode::MethodNotFound as i32, format!("unsupported request: {other}")),
+    }
+}
+
+fn handle_notification(note: Notification) {
+    match note.method.as_str() {
+        // bead 3 turns these into pyrefly overlays; until then the oracle
+        // reads files from disk, which is what the spike probes did
+        DidOpenTextDocument::METHOD | DidChangeTextDocument::METHOD | DidCloseTextDocument::METHOD => {}
+        _ => {}
+    }
+}

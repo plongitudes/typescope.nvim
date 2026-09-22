@@ -1,0 +1,21 @@
+diff --git a/pyrefly/lib/state/lsp.rs b/pyrefly/lib/state/lsp.rs
+index 7aad1e3..b0de116 100644
+--- a/pyrefly/lib/state/lsp.rs
++++ b/pyrefly/lib/state/lsp.rs
+@@ -827,6 +827,16 @@ impl PartialOrd for QuickfixAction {
+ }
+ 
+ impl<'a> Transaction<'a> {
++    /// TypeScope spike: every attribute reachable from `ty` (own + inherited,
++    /// through the MRO), with its type specialized against `ty`'s type args.
++    /// This is exactly what attribute completion computes; it is only
++    /// crate-private because nothing outside asked for it before.
++    pub fn attributes_of_type(&self, handle: &Handle, ty: Type) -> Option<Vec<crate::alt::attr::AttrInfo>> {
++        self.ad_hoc_solve(handle, "typescope_attributes", |solver| {
++            solver.completions(ty, None, true)
++        })
++    }
++
+     fn allows_explicit_reexport(handle: &Handle) -> bool {
+         matches!(
+             handle.path().details(),

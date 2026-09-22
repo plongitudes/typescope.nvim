@@ -1,0 +1,41 @@
+[package]
+name = "typescope-oracle"
+version = "0.2.0"
+edition = "2024"
+publish = false
+description = "TypeScope's type oracle: a minimal LSP server over pyrefly that answers typescope/structure"
+license = "MIT"
+
+[[bin]]
+name = "typescope-oracle"
+path = "src/main.rs"
+
+[dependencies]
+# pyrefly, vendored as a git submodule pinned to a tag and patched by
+# scripts/build-oracle.sh (see patches/). Its library surface is documented
+# as unstable, so the pin is deliberate and every bump is a tested step.
+pyrefly = { path = "vendor/pyrefly/pyrefly" }
+pyrefly_build = { path = "vendor/pyrefly/crates/pyrefly_build" }
+pyrefly_python = { path = "vendor/pyrefly/crates/pyrefly_python" }
+pyrefly_types = { path = "vendor/pyrefly/crates/pyrefly_types" }
+pyrefly_util = { path = "vendor/pyrefly/crates/pyrefly_util" }
+pyrefly_config = { path = "vendor/pyrefly/crates/pyrefly_config" }
+ruff_text_size = "0.0.14"
+dupe = "0.9.1"
+
+# the LSP loop: same scaffold crate pyrefly's own server uses
+lsp-server = "0.10.0"
+lsp-types = "0.97.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+
+# This is its own workspace root, and the vendored tree is NOT a member: cargo
+# would otherwise adopt every crate under vendor/ and drop pyrefly's own
+# `workspace.lints`, which its manifests inherit.
+[workspace]
+exclude = ["vendor/pyrefly"]
+
+[profile.release]
+debug = 0
+lto = "thin"
