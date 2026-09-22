@@ -122,11 +122,33 @@ pub struct Walker<'a> {
     /// The handle the request came in on; the solver is asked from here.
     pub handle: &'a Handle,
     pub members: Members,
+    /// The request's depth: a class walked with less than this is NESTED
+    /// (the type of a member or an argument), not what the cursor is on.
+    pub top: u32,
+    /// The names from a root row down to a node being expanded; nested
+    /// third-party classes on this path open instead of staying expandable.
+    pub pierce: Option<Vec<String>>,
+    /// Names from the root row to the node being built.
+    pub path: std::cell::RefCell<Vec<String>>,
 }
 
 impl<'a> Walker<'a> {
     /// The node for `ty` presented under `name`/`kind`, nested `depth` levels.
     pub fn node(&self, name: &str, kind: &str, ty: &Type, depth: u32) -> Node {
+        self.path.borrow_mut().push(name.to_owned());
+        let built = self.node_inner(name, kind, ty, depth);
+        self.path.borrow_mut().pop();
+        built
+    }
+
+    /// Is the node being built an ancestor of, or itself, the expansion
+    /// target?
+    fn on_pierce_path(&self) -> bool {
+        let path = self.path.borrow();
+        self.pierce.as_ref().is_some_and(|p| p.len() >= path.len() && p[..path.len()] == path[..])
+    }
+
+    fn node_inner(&self, name: &str, kind: &str, ty: &Type, depth: u32) -> Node {
         let ty = unwrap_type(ty);
         match ty {
             Type::ClassType(_) | Type::ClassDef(_) | Type::TypedDict(_) | Type::SelfType(_) => {
@@ -355,6 +377,26 @@ impl<'a> Walker<'a> {
             }
             _ => unreachable!(),
         };
+        // a third-party class as a nested type: on demand, not auto-walked
+        if depth < self.top && depth > 0 && policy::is_third_party(&cls) && !self.on_pierce_path() {
+            let attrs = self.tx.attributes_of_type(self.handle, query_ty).unwrap_or_default();
+            let policy_attrs: Vec<policy::Attr<'_>> = attrs
+                .iter()
+                .map(|a| policy::Attr {
+                    name: a.name.as_str(),
+                    ty: a.ty.as_ref(),
+                    defined_on: match &a.definition {
+                        AttrDefinition::FullyResolved { cls, .. } => Some(cls),
+                        _ => None,
+                    },
+                })
+                .collect();
+            let category = policy::classify(&cls, &policy_attrs);
+            let mut node = Node::leaf(name, kind, display(ty), category.as_str());
+            node.location = class_location(&cls);
+            node.expandable = true;
+            return node;
+        }
         if policy::is_terminal_class(&cls) {
             let mut leaf = Node::leaf(name, kind, display(ty), "builtin");
             leaf.location = class_location(&cls);
@@ -685,6 +727,24 @@ pub fn identifier_at(body: &[Stmt], text: &str, offset: ruff_text_size::TextSize
                         }
                     }
                     ruff_python_ast::visitor::walk_stmt(self, stmt);
+                }
+                // `from pkg import Name` / `import pkg`: the imported name is
+                // as hoverable as any use of it
+                Stmt::ImportFrom(i) => {
+                    for alias in &i.names {
+                        let target = alias.asname.as_ref().unwrap_or(&alias.name);
+                        if target.range().contains_inclusive(self.offset) {
+                            self.hit = Some(Cursor { text: target.to_string(), range: target.range(), inferred: false });
+                        }
+                    }
+                }
+                Stmt::Import(i) => {
+                    for alias in &i.names {
+                        let target = alias.asname.as_ref().unwrap_or(&alias.name);
+                        if target.range().contains_inclusive(self.offset) {
+                            self.hit = Some(Cursor { text: target.to_string(), range: target.range(), inferred: false });
+                        }
+                    }
                 }
                 _ => ruff_python_ast::visitor::walk_stmt(self, stmt),
             }

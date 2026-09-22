@@ -227,10 +227,18 @@ function M.recurse(client, node, token, cb)
   local oracle = require("typescope.oracle")
   async.run(function()
     local depth = id_depth(node.id) + 2
+    -- the names from the root row down to this node: the oracle opens a
+    -- nested third-party class only along the path being expanded
+    local expand = {}
+    for seg in node.id:gmatch("[^.]+") do
+      if not seg:match("^overload%d+$") then
+        table.insert(expand, seg)
+      end
+    end
     local err, scope = async.await(function(resume)
       oracle.request(
         lazy.bufnr,
-        { position = { line = lazy.pos[1], character = lazy.pos[2] }, depth = depth, call = lazy.call },
+        { position = { line = lazy.pos[1], character = lazy.pos[2] }, depth = depth, call = lazy.call, expand = expand },
         token,
         resume
       )

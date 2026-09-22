@@ -120,3 +120,13 @@ def legacy_spelling(
     d: Optional[Union[int, str]],
 ) -> None:
     """Old typing syntax reads as modern display."""
+
+
+from thirdparty import Widget
+
+
+class UsesThirdParty:
+    """A project class whose field is an installed package's class."""
+
+    widget: Widget
+    count: int

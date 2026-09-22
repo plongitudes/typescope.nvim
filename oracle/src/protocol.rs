@@ -44,6 +44,11 @@ pub struct StructureParams {
     /// constructor (decision 5).
     #[serde(default)]
     pub call: bool,
+    /// An expansion: the names from the root row down to the node being
+    /// opened. Third-party classes nested as member types stay `expandable`
+    /// until asked for; along this path they open.
+    #[serde(default)]
+    pub expand: Option<Vec<String>>,
 }
 
 fn default_depth() -> u32 {
@@ -101,5 +106,6 @@ mod tests {
         assert_eq!(p.depth, 2);
         assert_eq!(p.members, Members::Data);
         assert!(!p.call);
+        assert!(p.expand.is_none());
     }
 }

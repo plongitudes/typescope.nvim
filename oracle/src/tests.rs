@@ -28,7 +28,7 @@ fn oracle() -> &'static Oracle {
 }
 
 fn structure(file: &str, line0: u32, col0: u32) -> Option<Scope> {
-    oracle().structure(&fixtures().join(file), line0, col0, 2, Members::Data, false)
+    oracle().structure(&fixtures().join(file), line0, col0, 2, Members::Data, false, None)
 }
 
 /// 0-based line of the first line starting with `prefix` in a fixture, so
@@ -262,13 +262,13 @@ fn methods_are_grouped_for_data_and_flat_for_all() {
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("svc.py");
     std::fs::write(&file, source).unwrap();
-    let data = oracle().structure(&file, 0, 6, 2, Members::Data, false).unwrap();
+    let data = oracle().structure(&file, 0, 6, 2, Members::Data, false, None).unwrap();
     let kinds: Vec<&str> = data.roots[0].children.iter().map(|c| c.kind.as_str()).collect();
     assert_eq!(kinds, ["field", "group"]);
     let group = &data.roots[0].children[1];
     assert_eq!(group.name, "methods");
     assert_eq!(group.children[0].name, "run");
-    let all = oracle().structure(&file, 0, 6, 2, Members::All, false).unwrap();
+    let all = oracle().structure(&file, 0, 6, 2, Members::All, false, None).unwrap();
     let kinds: Vec<&str> = all.roots[0].children.iter().map(|c| c.kind.as_str()).collect();
     assert_eq!(kinds, ["field", "method"]);
     let run = &all.roots[0].children[1];
@@ -281,7 +281,7 @@ fn methods_are_grouped_for_data_and_flat_for_all() {
 #[test]
 fn beyond_depth_a_class_is_expandable_and_located_at_its_declaration() {
     let use_line = line_of("oracle/oracle.py", "def use(");
-    let scope = oracle().structure(&fixtures().join("oracle/oracle.py"), use_line, 4, 1, Members::Data, false).unwrap();
+    let scope = oracle().structure(&fixtures().join("oracle/oracle.py"), use_line, 4, 1, Members::Data, false, None).unwrap();
     let item = find(&scope.roots[0], "item");
     assert!(item.expandable);
     assert!(item.children.is_empty());
@@ -292,7 +292,7 @@ fn beyond_depth_a_class_is_expandable_and_located_at_its_declaration() {
     assert!(loc.uri.ends_with("/oracle.py"));
     assert_eq!(loc.line, line_of("oracle/oracle.py", "    item: T"));
     // and a deeper ask at the same position grafts the children in
-    let deeper = oracle().structure(&fixtures().join("oracle/oracle.py"), use_line, 4, 2, Members::Data, false).unwrap();
+    let deeper = oracle().structure(&fixtures().join("oracle/oracle.py"), use_line, 4, 2, Members::Data, false, None).unwrap();
     assert_eq!(data_rows(find(&deeper.roots[0], "item")), ["host", "port"]);
 }
 
@@ -306,7 +306,7 @@ fn an_unsaved_edit_is_what_the_oracle_answers_with() {
     let line = line_of("oracle/oracle.py", "    resp = fetch");
 
     // as on disk
-    let scope = oracle.structure(&path, line, 4, 2, Members::Data, false).unwrap();
+    let scope = oracle.structure(&path, line, 4, 2, Members::Data, false, None).unwrap();
     assert_eq!(find(&scope.roots[0], "status").ty.display, "int");
 
     // opened, then edited in memory without saving: status becomes a str
@@ -314,12 +314,12 @@ fn an_unsaved_edit_is_what_the_oracle_answers_with() {
     let edited = on_disk.replace("    status: int\n", "    status: str\n");
     assert_ne!(edited, on_disk);
     oracle.did_change(&path, edited);
-    let scope = oracle.structure(&path, line, 4, 2, Members::Data, false).unwrap();
+    let scope = oracle.structure(&path, line, 4, 2, Members::Data, false, None).unwrap();
     assert_eq!(find(&scope.roots[0], "status").ty.display, "str", "the overlay, not the disk");
 
     // closed: the disk is the truth again
     oracle.did_close(&path);
-    let scope = oracle.structure(&path, line, 4, 2, Members::Data, false).unwrap();
+    let scope = oracle.structure(&path, line, 4, 2, Members::Data, false, None).unwrap();
     assert_eq!(find(&scope.roots[0], "status").ty.display, "int");
 }
 
@@ -328,7 +328,7 @@ fn an_unsaved_edit_is_what_the_oracle_answers_with() {
 fn probe(file: &str, prefix: &str, col: u32, call: bool) -> Scope {
     let line = line_of(file, prefix);
     oracle()
-        .structure(&fixtures().join(file), line, col, 2, Members::Data, call)
+        .structure(&fixtures().join(file), line, col, 2, Members::Data, call, None)
         .unwrap_or_else(|| panic!("{prefix}: no answer"))
 }
 
@@ -433,7 +433,7 @@ fn a_module_name_is_not_ours() {
     // `from typing import Generic, TypeVar` — hovering `typing` in an import
     // is a Module; K's job
     let line = line_of("oracle/oracle.py", "from typing import Generic");
-    assert!(oracle().structure(&fixtures().join("oracle/oracle.py"), line, 5, 2, Members::Data, false).is_none());
+    assert!(oracle().structure(&fixtures().join("oracle/oracle.py"), line, 5, 2, Members::Data, false, None).is_none());
 }
 
 // ---------------------------------------------------------------- parity gate (1mv)
@@ -503,4 +503,25 @@ fn old_typing_spellings_display_as_modern_syntax() {
     assert!(b.contains("Response") && b.contains(" | ") && b.contains("str") && !b.contains("Union"), "{b}");
     assert_eq!(by_name("c"), "list[int]");
     assert_eq!(by_name("d"), "int | str | None");
+}
+
+#[test]
+fn a_nested_third_party_class_waits_to_be_asked_for() {
+    // widget: Widget — Widget comes from site-packages
+    let s = probe("oracle/oracle.py", "class UsesThirdParty", 6, false);
+    let widget = find(&s.roots[0], "widget");
+    assert!(widget.expandable, "nested third-party class is expandable, not walked");
+    assert!(widget.children.is_empty());
+    assert_eq!(widget.ty.category, "class");
+    // opened on demand: the expansion names its path and the class walks
+    let line = line_of("oracle/oracle.py", "class UsesThirdParty");
+    let opened = oracle()
+        .structure(&fixtures().join("oracle/oracle.py"), line, 6, 3, Members::Data, false, Some(vec!["UsesThirdParty".into(), "widget".into()]))
+        .unwrap();
+    let widget = find(&opened.roots[0], "widget");
+    assert_eq!(data_rows(widget), ["size", "label"]);
+    // hovered directly it draws as any class
+    let direct = probe("oracle/oracle.py", "from thirdparty import Widget", 23, false);
+    assert_eq!(direct.scope, "class");
+    assert_eq!(data_rows(&direct.roots[0]), ["size", "label"]);
 }

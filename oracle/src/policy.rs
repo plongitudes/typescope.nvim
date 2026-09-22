@@ -127,6 +127,17 @@ pub fn is_terminal_class(cls: &Class) -> bool {
     )
 }
 
+/// A class from an installed package rather than the user's project. Its
+/// shape is worth drawing when it is what the cursor is ON (`db:
+/// AsyncSession`, `Result[tuple[Recipe]]`), but a project class's field
+/// typed as `Column[UUID]` must not auto-expand into thirty SQLAlchemy
+/// internals — a model with seventeen columns drew 1,700 rows. Nested
+/// third-party classes are `expandable` on demand instead.
+pub fn is_third_party(cls: &Class) -> bool {
+    let p = cls.module_path().as_path().to_string_lossy();
+    p.contains("/site-packages/") || p.contains("/dist-packages/") || p.contains("/node_modules/")
+}
+
 /// Names the float never draws: private and dunder members.
 pub fn is_hidden_name(name: &str) -> bool {
     name.starts_with('_')

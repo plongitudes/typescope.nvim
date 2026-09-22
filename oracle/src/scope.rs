@@ -52,10 +52,19 @@ pub struct Request<'a> {
     pub members: Members,
     /// The cursor sits on a call to whatever is under it (decision 5).
     pub call: bool,
+    /// An expansion's target path (see `StructureParams::expand`).
+    pub expand: Option<Vec<String>>,
 }
 
 pub fn build(req: &Request<'_>, ty: &Type) -> Option<Scope> {
-    let walker = Walker { tx: req.tx, handle: req.handle, members: req.members };
+    let walker = Walker {
+        tx: req.tx,
+        handle: req.handle,
+        members: req.members,
+        top: req.depth,
+        pierce: req.expand.clone(),
+        path: std::cell::RefCell::new(Vec::new()),
+    };
     match ty {
         Type::Module(_) => None, // `import os` — K's job
         Type::Function(_) | Type::BoundMethod(_) | Type::Overload(_) => Some(function_scope(req, &walker, ty)),

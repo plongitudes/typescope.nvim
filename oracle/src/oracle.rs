@@ -121,7 +121,16 @@ impl Oracle {
 
     /// The structure under (line, character) — 0-based, UTF-16 like LSP.
     /// `call`: the cursor sits on a call to whatever is under it.
-    pub fn structure(&self, path: &Path, line: u32, character: u32, depth: u32, members: Members, call: bool) -> Option<Scope> {
+    pub fn structure(
+        &self,
+        path: &Path,
+        line: u32,
+        character: u32,
+        depth: u32,
+        members: Members,
+        call: bool,
+        expand: Option<Vec<String>>,
+    ) -> Option<Scope> {
         let handle = self.ensure_loaded(path);
         let tx = self.state.transaction();
         let module = tx.get_module_info(&handle)?;
@@ -149,7 +158,7 @@ impl Oracle {
             ty = crate::walk::self_attribute_type(&tx, &handle, &ast.body, module.contents(), &cursor);
         }
         let ty = ty?;
-        let req = crate::scope::Request { tx: &tx, handle: &handle, module: &module, cursor, depth, members, call };
+        let req = crate::scope::Request { tx: &tx, handle: &handle, module: &module, cursor, depth, members, call, expand };
         crate::scope::build(&req, &ty)
     }
 
