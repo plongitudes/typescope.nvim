@@ -14,7 +14,7 @@
 
 ---@class typescope.UiConfig
 ---@field style "unicode"|"ascii"|"minimal"|"rounded"
----@field layout "ledger"|"tree"|"table" one-line rows with a cursor-follow detail block (default) vs flowing segments vs column grid (deprecated)
+---@field layout "ledger"|"tree" one-line rows with a cursor-follow detail block (default) vs flowing segments vs column grid (deprecated)
 ---@field animations boolean
 ---@field align "left"|"right" name column alignment (tree layout)
 ---@field max_width number >1: absolute columns; <=1: fraction of editor width
@@ -118,8 +118,7 @@ local defaults = {
     -- default); the row under the cursor expands into a detail block (≈
     -- evaluation, example, origin) that follows as the cursor moves.
     -- "tree": flowing segments, type/default/example trailing the name.
-    -- "table" (U5) is DEPRECATED and goes away in the next release — see
-    -- the notify in validate() below.
+    -- ("table", the column grid, was removed in 0.2.0.)
     layout = "ledger",
     animations = true,
     align = "left", -- "left" | "right" name column alignment
@@ -218,19 +217,12 @@ local function validate(cfg)
 
   check("ui", cfg.ui, "table")
   check("ui.style", cfg.ui.style, { "unicode", "ascii", "minimal", "rounded" })
-  check("ui.layout", cfg.ui.layout, { "tree", "table", "ledger" })
   if cfg.ui.layout == "table" then
-    -- Warn, do not error: someone who set this deliberately keeps working
-    -- until the removal. notify_once rather than vim.deprecate because
-    -- setup() may run more than once and vim.deprecate's behaviour varies
-    -- across the 0.10/0.11 range this plugin supports — the same reason
-    -- check() above is hand-rolled instead of using vim.validate.
-    vim.notify_once(
-      'typescope: `ui.layout = "table"` is deprecated and will be removed in the next release. '
-        .. 'Use "ledger" (the default) or "tree".',
-      vim.log.levels.WARN
-    )
+    -- removed in 0.2.0 after a release of deprecation: say so plainly
+    -- rather than failing the enum check with a list
+    error('typescope.setup: `ui.layout = "table"` was removed in 0.2.0; use "ledger" (the default) or "tree"', 0)
   end
+  check("ui.layout", cfg.ui.layout, { "tree", "ledger" })
   check("ui.animations", cfg.ui.animations, "boolean")
   check("ui.align", cfg.ui.align, { "left", "right" })
   if type(cfg.ui.max_width) ~= "number" or cfg.ui.max_width <= 0 then

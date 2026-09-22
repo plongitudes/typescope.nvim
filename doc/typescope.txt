@@ -26,12 +26,13 @@ CONTENTS                                                 *typescope-contents*
 ==============================================================================
 1. INTRODUCTION                                      *typescope-introduction*
 
-TypeScope resolves the function under the cursor through basedpyright, walks
-the type of every parameter and of the return value, and draws the result as
-a tree in a floating window.
+TypeScope asks a type checker what the symbol under the cursor is — a
+function's parameters and return, a class's shape, a variable's type — and
+draws the answer as a tree in a floating window.
 
-Where a parameter is a dataclass, a Pydantic model, a TypedDict or a Protocol,
-you get its fields — not just its name: >
+Where a parameter is a dataclass, a Pydantic model, a TypedDict, a NamedTuple,
+an Enum, a Protocol or a plain class with annotated attributes, you get its
+fields — not just its name: >
 
     ▾ config   ServerConfig
       ├─ · host   str  "localhost"
@@ -43,7 +44,10 @@ you get its fields — not just its name: >
       ╰─ · body    bytes
 <
 TypeScope performs no type inference of its own. Every type shown comes from
-basedpyright; every field list is read out of the TreeSitter syntax tree.
+the oracle: a small binary wrapping the pyrefly checker, run beside your
+Python language server as a second LSP server that answers one request.
+Generics arrive specialized, an unannotated name shows the checker's
+inference (drawn ≈), a narrowed variable shows its narrowed type.
 
 ==============================================================================
 2. REQUIREMENTS                                      *typescope-requirements*
@@ -54,20 +58,36 @@ missing.
 Neovim 0.10+                The plugin refuses to load below this and notifies
                             once.
 
-basedpyright                Attached to your Python buffers. This is the sole
-                            source of type information. >
-                                pip install basedpyright
-<
-TreeSitter python parser    Field extraction reads class bodies from the
-                            syntax tree. >
+typescope-oracle            The binary every type comes from. With the
+                            default `oracle.download = true` the plugin
+                            fetches the release build for your platform
+                            (macOS or Linux, arm64 or x86_64) into
+                            stdpath("data")/typescope/ the first time a
+                            Python buffer opens, verifies it against the
+                            release's SHA256SUMS before running it, and
+                            says so once. Needs curl. To skip the
+                            download, build it (|typescope-development|)
+                            and set `oracle.path`, or set
+                            `oracle.download = false` and place the binary
+                            at that path yourself.
+
+TreeSitter python parser    The float's highlighting and the call-site
+                            questions (is the cursor on a call, what was
+                            written in it) read the syntax tree. >
                                 :TSInstall python
 <
+Recommended:
+
+basedpyright                Attached to your Python buffers. No longer
+                            needed to resolve types; used for signatureHelp
+                            (the active parameter as you type) and as the
+                            hover <Plug>(TypeScopeHover) falls back to. Any
+                            Python server with those capabilities works.
+
 Optional:
 
 ollama                      LLM-generated example values. Off by default.
                             See |typescope-ollama-ram| before enabling.
-
-curl                        Only needed when ollama is enabled.
 
 ==============================================================================
 3. SETUP                                                    *typescope-setup*
@@ -187,6 +207,10 @@ Defaults in full: >lua
         max_width = nil,
         max_detail_lines = 3,
       },
+      oracle = {
+        path = nil,          -- an explicit binary; nil = the downloaded one
+        download = true,     -- fetch the release build when none is found
+      },
 
       ollama = {
         enabled = false,
@@ -277,13 +301,8 @@ tree ~
     Flowing segments; type, default and example trail the name and wrap with
     a hanging indent when they run out of room.
 
-                                                    *typescope-layout-table*
-table ~
-    DEPRECATED. It will be removed in v0.2.0.
-
-    True columns — name, mutability, type, default, example, origin — with
-    alternating row backgrounds. It still works and still validates, but
-    setting it emits a warning once per session. Use "ledger" or "tree".
+(The "table" layout, deprecated in 0.1.0, was removed in 0.2.0; setting it
+is an error that names the replacement.)
 
 ==============================================================================
 9. INSERT MODE                                       *typescope-insert-mode*
@@ -375,6 +394,9 @@ Every group links to something sensible in your colorscheme, so TypeScope
 inherits your theme rather than overriding it.
 
     TypeScopeField              @variable
+    TypeScopeProperty           @property
+    TypeScopeEnumMember         @constant
+    TypeScopeGroup              NonText
     TypeScopeParam              @variable.parameter
     TypeScopeType               @type
     TypeScopeDefault            @constant
@@ -391,7 +413,6 @@ inherits your theme rather than overriding it.
     TypeScopeHint               Comment
     TypeScopeActive             LspSignatureActiveParameter
     TypeScopeTitle              FloatTitle
-    TypeScopeRowOdd             CursorLine
 
 Override through `highlights`: >lua
 
@@ -406,19 +427,31 @@ Override through `highlights`: >lua
 >
     :checkhealth typescope
 <
-Reports the Neovim version, the Python parser, and basedpyright (an active
-client, or failing that the executable on PATH). When ollama is enabled it
-also checks for curl and probes the server for reachability.
+Reports the Neovim version, the Python parser, basedpyright (an active
+client, or failing that the executable on PATH), and the oracle: where the
+binary is, its version and protocol, whether a client is attached, and why a
+download failed if one did. When ollama is enabled it also checks for curl
+and probes the server for reachability.
 
 ==============================================================================
 14. DEVELOPMENT                                       *typescope-development*
 >
-    ./tests/run.sh          all seven suites, headless
-    stylua lua/ tests/      formatting
+    scripts/build-oracle.sh             the oracle, debug build (Rust)
+    scripts/build-oracle.sh --release   the binary that ships
+    (cd oracle && cargo test)           the oracle's own tests
+    ./tests/run.sh                      every Lua suite, headless
+    stylua lua/ tests/                  formatting
 <
+The oracle lives in oracle/: a Rust crate over pyrefly, vendored as a git
+submodule pinned to a tag (`git submodule update --init` if you cloned
+without it). The build script applies the one small patch in
+oracle/patches/ and builds. design/oracle.md records the contract and the
+decisions behind it.
+
 tests/run.sh adds your local site directory and nvim-treesitter to the
-runtimepath, since the Python parser and its highlight queries are what the
-extraction and injection paths need.
+runtimepath for the Python parser and its highlight queries. The suites that
+drive the real oracle skip themselves when oracle/target/debug/ has no
+binary, so the pure-Lua suites need no Rust toolchain.
 
 NOTE: stylua needs two passes to converge on this tree, so `stylua --check`
 immediately after `stylua` can still report a diff. Run it twice.

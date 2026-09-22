@@ -43,7 +43,7 @@ check(
   target == "darwin-arm64" or target == "darwin-x86_64" or target == "linux-x86_64" or target == "linux-arm64",
   "target(): " .. tostring(target)
 )
-local dir, final = oracle.install_path()
+local _, final = oracle.install_path()
 check(final == tmp .. "/data/typescope/typescope-oracle", "install_path() is under stdpath('data')")
 
 local sums_of = function(path, name)

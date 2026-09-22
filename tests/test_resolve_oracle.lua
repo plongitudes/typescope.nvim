@@ -113,7 +113,7 @@ end
 
 -- the empty decline
 do
-  local roots, reason, why = scope_at(line_of("    def oddly_named"), 8)
+  local roots = scope_at(line_of("    def oddly_named"), 8)
   -- oddly_named(numpy_test) -> None: receiver only, declared None return → returns row only
   check(roots ~= nil and names(roots) == "returns", "receiver-only def with -> None keeps its returns row")
   local q = vim.fn.getcwd() .. "/tests/fixtures/oracle/oracle.py"

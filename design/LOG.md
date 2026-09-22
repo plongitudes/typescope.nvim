@@ -107,3 +107,10 @@ Newest at the bottom. One entry per tick: bead, what was done, what was verified
 - Found by the measurement and fixed: the SQLAlchemy `Recipe(` constructor drew **751 lines** — every `Column[UUID]` field auto-walked into thirty site-packages internals (the old resolver drew nothing for those unannotated fields). Policy added (§4): a third-party class nested as a member's type is `expandable`, not walked; the expansion request carries an `expand` path so the oracle opens exactly the node asked for (`recurse` sends the id path minus overload group ids). `Recipe(` is 20 lines now. Fixture `tests/fixtures/site-packages/thirdparty/` + Rust test. Also fixed: import aliases (`from x import Name`) were not hoverable — `identifier_at` now sees them.
 - Verified: cargo test 34/34; `./tests/run.sh` ALL SUITES PASS; no stray processes.
 - Next: `ipb` docs (last bead).
+
+## 2026-09-21 — tick 14 — `ipb` docs-0.2.0
+
+- Done: README (intro rewritten around the oracle; Requirements: oracle hard, basedpyright recommended, curl for the download; setup() note; `oracle` config block; table layout gone; health, development, highlights), CHANGELOG `[0.2.0] — Unreleased` (Changed / Added / Removed / Fixed / Development, with the footprint numbers), `doc/typescope.txt` (same sections, helptags builds clean), CONTRIBUTING (Rust toolchain, submodule, build script, markers are policy). `hdt` folded in: `render.lua`'s table layout (195 lines) and `TypeScopeRowOdd` removed, `ui.layout = "table"` is now an error naming the replacement, the table golden and the width-sweep entry removed from `test_render.lua`.
+- Verified: `./tests/run.sh` ALL SUITES PASS; `luacheck lua/ tests/` 0 warnings; stylua clean; no stray processes.
+- Not done, deliberately: tagging `v0.2.0` and cutting the release (external action; the changelog says "Unreleased"). `oracle.RELEASE` is `v0.2.0`, so the first download works only once that tag's release exists — Tony's step.
+- This was the last `5ag` bead.

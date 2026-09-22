@@ -2,7 +2,9 @@
 
 See the *shape* of the types in a Python call, without leaving the call.
 
-TypeScope resolves the function under your cursor through basedpyright, walks the type of every parameter and of the return, and draws the result as a tree in a float. Where a parameter is a dataclass, a Pydantic model, a TypedDict or a Protocol, you get its fields — not just its name.
+TypeScope asks a type checker what the symbol under your cursor *is* — a function's parameters and return, a class's shape, a variable's type — and draws the answer as a tree in a float. Where a parameter is a dataclass, a Pydantic model, a TypedDict, a NamedTuple, an Enum, a Protocol or a plain class with annotated attributes, you get its fields — not just its name. Generics arrive specialized (`Box[ServerConfig]` shows `item ServerConfig`), an unannotated local shows the type the checker inferred (drawn `≈`), and a narrowed variable shows its narrowed type.
+
+The checker is [pyrefly](https://github.com/facebook/pyrefly), wrapped in a small binary TypeScope calls its **oracle**: it runs beside your Python language server as a second LSP server that answers exactly one request, and it is downloaded for your platform the first time you open a Python buffer (see [Requirements](#requirements)).
 
 ```
 ▾ config       ServerConfig
@@ -25,13 +27,16 @@ One compact line per parameter, and the row under your cursor opens a detail blo
 These are hard requirements. TypeScope does nothing useful without them, and `:checkhealth typescope` will tell you which is missing.
 
 - **Neovim 0.10+**. The plugin refuses to load below this and says so once.
-- **[basedpyright](https://github.com/DetachHead/basedpyright)**, attached to your Python buffers. This is where every type actually comes from — TypeScope asks it for hovers and definitions and does no inference of its own. `pip install basedpyright`.
-- **The TreeSitter Python parser.** Field extraction reads class bodies out of the syntax tree. `:TSInstall python`.
+- **The oracle binary, `typescope-oracle`.** This is where every type comes from. With the default `oracle.download = true` the plugin fetches the release build for your platform (macOS or Linux, arm64 or x86_64) into `stdpath("data")/typescope/` the first time a Python buffer opens, verifies it against the release's `SHA256SUMS` before running it, and tells you once when it is in place. It needs `curl`. To skip the download, build it yourself (see [Development](#development)) and set `oracle.path`, or set `oracle.download = false` and put the binary at that path. The oracle settles at about 150 MB of memory on a real project.
+- **The TreeSitter Python parser.** The float's own highlighting and the call-site questions (is the cursor on a call? what was written in it?) read the syntax tree. `:TSInstall python`.
+
+Recommended:
+
+- **[basedpyright](https://github.com/DetachHead/basedpyright)** attached to your Python buffers. TypeScope no longer needs it to resolve types, but it uses its `signatureHelp` to mark the active parameter as you type, and `<Plug>(TypeScopeHover)` falls back to its hover for anything that is not a symbol. Any Python language server with those two capabilities works the same way.
 
 Optional:
 
 - **[ollama](https://ollama.com)** for LLM-generated example values. Off by default. See [Examples](#examples) for what turning it on costs you in RAM.
-- **curl**, only if you enable ollama.
 
 ## Install
 
@@ -60,6 +65,7 @@ use({
 
 `setup()` is optional in the sense that the plugin loads and `:TypeScope` works without it. But **three features are wired only from `setup()`**, so skipping it silently turns them off:
 
+- the oracle itself — `setup()` is what attaches it to Python buffers (and downloads it the first time)
 - `prefetch` — cache warming while the cursor rests, so the first open paints warm
 - warmstart — kicking basedpyright's analysis when it attaches, instead of on your first request
 - the `trigger = "hover"` auto-open autocmd
@@ -131,6 +137,11 @@ require("typescope").setup({
     max_detail_lines = 3,    -- cap on the wrapped detail before the shape elides
   },
 
+  oracle = {
+    path = nil,              -- an explicit typescope-oracle binary; nil = the downloaded one
+    download = true,         -- fetch the release build on first use when none is found
+  },
+
   ollama = {
     enabled = false,
     autostart = false,       -- spawn `ollama serve` if the port refuses; dies with nvim
@@ -143,7 +154,7 @@ require("typescope").setup({
 
   ui = {
     style = "rounded",       -- "unicode" | "ascii" | "minimal" | "rounded"
-    layout = "ledger",       -- "ledger" | "tree" | "table" (table is deprecated)
+    layout = "ledger",       -- "ledger" | "tree"
     animations = true,
     align = "left",          -- name column alignment (tree layout)
     max_width = 0.5,         -- <=1: fraction of editor width; >1: absolute columns
@@ -206,15 +217,7 @@ Press `L` for a transient peek that opens *every* row's detail block at once; th
 · timeout  float = 30.0  30.0
 ```
 
-**`table`** — *deprecated; it will be removed in v0.2.0.* True columns with alternating row backgrounds. It still works and still validates, but setting it emits a warning once. Use `ledger` or `tree`:
-
-```
-▾ config       ServerConfig
-  ├─ · host    str                    "localhost"
-  ├─ · port    int                    8080
-  ╰─ · debug   bool          = False  True
-· timeout      float         = 30.0   30.0
-```
+(The `table` layout, deprecated in 0.1.0, was removed in 0.2.0.)
 
 ## Insert mode
 
@@ -323,7 +326,7 @@ To see them live rather than guess, run `:TypeScope spike`. It opens the real fl
 
 Every group links to something sensible in your colorscheme, so TypeScope inherits your theme rather than fighting it. Override any of them through `highlights`:
 
-`TypeScopeField` `TypeScopeParam` `TypeScopeType` `TypeScopeDefault` `TypeScopeExample` `TypeScopeExamplePending` `TypeScopeChrome` `TypeScopeKeyword` `TypeScopeBadge` `TypeScopeEvaluated` `TypeScopeHeader` `TypeScopeHeaderDim` `TypeScopeDocstring` `TypeScopeUnresolved` `TypeScopeHint` `TypeScopeActive` `TypeScopeTitle` `TypeScopeRowOdd`
+`TypeScopeField` `TypeScopeProperty` `TypeScopeEnumMember` `TypeScopeGroup` `TypeScopeParam` `TypeScopeType` `TypeScopeDefault` `TypeScopeExample` `TypeScopeExamplePending` `TypeScopeChrome` `TypeScopeKeyword` `TypeScopeBadge` `TypeScopeEvaluated` `TypeScopeHeader` `TypeScopeHeaderDim` `TypeScopeDocstring` `TypeScopeUnresolved` `TypeScopeHint` `TypeScopeActive` `TypeScopeTitle`
 
 ```lua
 require("typescope").setup({
@@ -339,16 +342,21 @@ require("typescope").setup({
 :checkhealth typescope
 ```
 
-Reports Neovim version, the Python parser, basedpyright (active client, or just the executable), and — only when you have enabled it — curl and ollama reachability.
+Reports Neovim version, the Python parser, basedpyright (active client, or just the executable), the oracle (where the binary is, its version and protocol, whether a client is attached, and why a download failed if one did), and — only when you have enabled it — curl and ollama reachability.
 
 ## Development
 
 ```sh
-./tests/run.sh      # every suite, headless
-stylua lua/ tests/  # formatting; run it twice, it needs two passes to converge
+scripts/build-oracle.sh              # the oracle, debug build (Rust toolchain; ~4 min cold)
+scripts/build-oracle.sh --release    # the binary that ships
+(cd oracle && cargo test)            # the oracle's tests: every marker in tests/fixtures/shapes.py
+./tests/run.sh                       # every Lua suite, headless
+stylua lua/ tests/                   # formatting; run it twice, it needs two passes to converge
 ```
 
-`tests/run.sh` adds your local `site` directory and `nvim-treesitter` to the runtimepath, since the Python parser and its highlight queries are what the extraction and injection paths need.
+The oracle lives in `oracle/`: a Rust crate over [pyrefly](https://github.com/facebook/pyrefly), vendored as a git submodule pinned to a tag (`git submodule update --init` if you cloned without it). `scripts/build-oracle.sh` applies the one small patch in `oracle/patches/` — a `pub fn` exposing the attribute listing pyrefly computes for completion — and builds. The design, the wire contract and the decisions behind them are in `design/oracle.md`.
+
+`tests/run.sh` adds your local `site` directory and `nvim-treesitter` to the runtimepath for the Python parser and its highlight queries. The suites that drive the real oracle (`e2e_*`, `test_oracle_*`, `test_resolve_oracle`) skip themselves when `oracle/target/debug/typescope-oracle` is not built, so the pure-Lua suites need no Rust toolchain.
 
 ## License
 

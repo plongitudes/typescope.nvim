@@ -2,9 +2,38 @@
 
 Notable changes to TypeScope, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [Semantic Versioning](https://semver.org/), with the usual 0.x caveat that a minor bump may break something. Each release is an annotated git tag carrying the same notes.
 
-## [Unreleased]
+## [0.2.0] — Unreleased
 
-Nothing yet. The deprecated `table` layout is scheduled for removal in v0.2.0.
+TypeScope no longer reads types out of Python syntax. It asks a type checker. Everything this release adds follows from that one change, and so does its one new requirement.
+
+### Changed
+
+- **Types come from a checker now.** A small binary, `typescope-oracle` (pyrefly, wrapped), runs beside your Python language server as a second LSP server and answers one request: the structure of whatever the cursor is on. The plugin downloads the release build for your platform (macOS/Linux, arm64/x86_64) into `stdpath("data")/typescope/` the first time a Python buffer opens, verifies it against the release's `SHA256SUMS` before running it, and never runs an unverified file. `curl` is required for the download; `oracle.path` points at your own build and `oracle.download = false` opts out. `:checkhealth typescope` has an oracle section. On a FastAPI + SQLAlchemy backend the oracle settles at about 154 MB beside basedpyright's 528.
+- **basedpyright is recommended, not required.** It still supplies `signatureHelp` (the active parameter as you type) and the hover `<Plug>(TypeScopeHover)` falls back to; any Python server with those capabilities does the same. It no longer resolves anything for TypeScope.
+- `depth` still means "how far to nest before an explicit expand", and expanding re-asks the oracle rather than chasing a definition, so a nested generic expands to its *specialized* members.
+
+### Added
+
+- Everything the syntax reader could not see: **enums** (members with their values), **generics specialized** at the use site (`Box[ServerConfig]` shows `item ServerConfig`; `first([1, 2, 3])` is `int`), **unannotated locals and parameters** drawn with the checker's inference (`≈`) instead of the enclosing function, **narrowed** types inside an `if`, **properties**, **methods** (collected under one collapsed `methods (n)` row, expanded with `l`), inherited fields tagged with their origin through any depth, `Self`, forward-reference strings, `Optional`/`Union`/`List` spellings displayed in modern syntax, docstrings of functions defined in other modules and of stubbed functions (the runtime `.py`'s docstring rides along with the `.pyi`'s signature).
+- Hovering a **class under a call** (`Recipe(`) draws its constructor — the written `__init__`, or the fields a dataclass, Pydantic model, NamedTuple or TypedDict synthesizes — with the instance's shape as the return.
+- Import names (`from pkg import Name`) are hoverable.
+- New row highlights: `TypeScopeProperty`, `TypeScopeEnumMember`, `TypeScopeGroup`.
+
+### Removed
+
+- The deprecated `table` layout. `ui.layout = "table"` is now an error naming the replacement; `ledger` (the default) and `tree` remain. `TypeScopeRowOdd` went with it.
+- The treesitter type reader (`extract/python.lua` keeps only call-site syntax), the definition/declaration chase, the hover-prose parsing, and the alias hop — all replaced by the oracle.
+
+### Fixed
+
+- A method row inside a class shows its receiver-less signature, `(key: str) -> bytes`, with no expand arrow that leads nowhere.
+- An unannotated parameter reads `Any`; with a literal default it reads the default's type (`count=3` → `int ≈`).
+- A parameter typed as a TypedDict lists its keys, with `Required`/`NotRequired` badges.
+- A written alias (`data: Payload`) stays the vocabulary of its row; a leaf alias is decorated with what it resolved to.
+
+### Development
+
+- `oracle/`: a Rust crate over pyrefly, vendored as a git submodule pinned to a tag, with the one `pub fn` it needs applied by `scripts/build-oracle.sh`. `cargo test` asserts every `typescope:` marker in `tests/fixtures/shapes.py`. The Lua suites drive the real binary and skip without one. `design/oracle.md` records the contract and the decisions.
 
 ## [0.1.1] — 2026-09-16
 
@@ -35,6 +64,6 @@ First public release. Type structure for the Python function under your cursor: 
 - Four charsets, all plain Unicode/ASCII; no Nerd Font required.
 - Requires Neovim 0.10+, basedpyright, and the TreeSitter python parser.
 
-[Unreleased]: https://github.com/plongitudes/typescope.nvim/compare/v0.1.1...HEAD
+[0.2.0]: https://github.com/plongitudes/typescope.nvim/compare/v0.1.1...HEAD
 [0.1.1]: https://github.com/plongitudes/typescope.nvim/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/plongitudes/typescope.nvim/releases/tag/v0.1.0

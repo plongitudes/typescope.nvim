@@ -2,11 +2,15 @@
 
 ## Getting set up
 
-You need the same things TypeScope needs at runtime — Neovim 0.10+, [basedpyright](https://github.com/DetachHead/basedpyright), and the TreeSitter Python parser — plus [stylua](https://github.com/JohnnyMorganz/StyLua) and [luacheck](https://github.com/lunarmodules/luacheck) for the two contracts CI enforces.
+You need the same things TypeScope needs at runtime — Neovim 0.10+, the TreeSitter Python parser, and the oracle binary — plus [stylua](https://github.com/JohnnyMorganz/StyLua) and [luacheck](https://github.com/lunarmodules/luacheck) for the two contracts CI enforces, and a Rust toolchain to build and test the oracle.
 
 ```sh
 brew install stylua luacheck   # or your platform's equivalent
+git submodule update --init    # the pinned pyrefly checkout under oracle/vendor
+scripts/build-oracle.sh        # applies oracle/patches and builds a debug binary (~4 min cold)
 ```
+
+The Lua suites find `oracle/target/debug/typescope-oracle` on their own; without it, the suites that need it skip and say so. `(cd oracle && cargo test)` runs the oracle's own tests. [basedpyright](https://github.com/DetachHead/basedpyright) is not needed for the tests (a stand-in serves its `signatureHelp`), but it is what you want attached while you develop.
 
 ## The three gates
 
@@ -18,11 +22,11 @@ luacheck lua/ tests/    # 0 warnings, 0 errors
 stylua --check lua/ tests/
 ```
 
-`tests/run.sh` adds your local `site` directory and `nvim-treesitter` to the runtimepath, because the Python parser and its highlight queries are what the extraction and injection code paths need. If the e2e suite fails and nothing else does, that is the first thing to check.
+`tests/run.sh` adds your local `site` directory and `nvim-treesitter` to the runtimepath, because the Python parser and its highlight queries are what the call-site and injection code paths need. If the e2e suite fails and nothing else does, that is the first thing to check.
 
 **stylua needs two passes to converge on this tree** — the second collapses calls the first has only just unwrapped. `stylua --check` immediately after `stylua` can still be red. Run `stylua lua/ tests/` twice.
 
-Two tables opt out of formatting with `-- stylua: ignore`: the builtins list in `extract/python.lua` and the fixture table in `spike.lua`. Both are hand-wrapped, and stylua only splits the rows that overflow, which leaves a ragged mix of one-line and five-line entries in tables whose whole job is to be scannable. If you add a similar table, mark it the same way and say why.
+One table opts out of formatting with `-- stylua: ignore`: the fixture table in `spike.lua`. It is hand-wrapped, and stylua only splits the rows that overflow, which leaves a ragged mix of one-line and five-line entries in a table whose whole job is to be scannable. If you add a similar table, mark it the same way and say why.
 
 Shadowing warnings (luacheck 411/421/431) are off for `tests/` only. The suites are long files of numbered, independent sections, and each one reusing `local r` for its own fixture is the point. `lua/` is strict and clean.
 
@@ -34,7 +38,7 @@ Some things this suite learned the hard way:
 - **Prefer invariants to goldens for anything positional.** `check_injections` asserts that every emitted injection describes a slice that fits its line, across every result. A golden asserting the text would not have caught the bug it was written for.
 - **Sweep widths rather than picking one.** A truncation only misbehaves at the widths where its cut lands mid-character. Section 14 sweeps every layout across widths 20..80 for this reason.
 - **Headless float geometry is not real geometry.** With no UI attached there is no anchor to measure against, so assert on `nvim_win_get_config` rather than on positions a headless probe reports.
-- **`tests/fixtures/shapes.py` is the capability sheet.** It records every class shape the extractor reads *and* the ones it doesn't, as `typescope:` marker comments that `test_shapes.lua` asserts against. Markers reading `fields=NONE` document real gaps on purpose: closing one turns that suite red until the marker is updated, which is how the sheet stays honest. Add a marker whenever you teach the extractor a new shape.
+- **`tests/fixtures/shapes.py` is the capability sheet.** It records every class shape the oracle draws, as `typescope:` marker comments that `cargo test` in `oracle/` asserts against. A marker is a statement of policy (`design/oracle.md` §4), not a test expectation to be edited into passing: change one only with the rule that justifies it in the commit message. Add a marker whenever you teach the oracle a new shape.
 
 ## Style
 
