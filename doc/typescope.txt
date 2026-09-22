@@ -61,15 +61,20 @@ Neovim 0.10+                The plugin refuses to load below this and notifies
 typescope-oracle            The binary every type comes from. With the
                             default `oracle.download = true` the plugin
                             fetches the release build for your platform
-                            (macOS or Linux, arm64 or x86_64) into
-                            stdpath("data")/typescope/ the first time a
-                            Python buffer opens, verifies it against the
-                            release's SHA256SUMS before running it, and
-                            says so once. Needs curl. To skip the
+                            (Apple Silicon macOS, or Linux on x86_64 or
+                            arm64) into
+                            stdpath("data")/typescope/oracle/<release>/
+                            the first time a Python buffer opens, verifies
+                            it against the release's SHA256SUMS before
+                            running it, and says so once. A plugin update
+                            that pins a different release fetches that one
+                            and removes the old. Needs curl. To skip the
                             download, build it (|typescope-development|)
                             and set `oracle.path`, or set
                             `oracle.download = false` and place the binary
-                            at that path yourself.
+                            at the path |:checkhealth| names. Intel Macs
+                            have no release build: build it and set
+                            `oracle.path`.
 
 TreeSitter python parser    The float's highlighting and the call-site
                             questions (is the cursor on a call, what was

@@ -1,10 +1,13 @@
 name: Release
 
-# Builds typescope-oracle for the four supported targets when a version tag is
+# Builds typescope-oracle for the three supported targets when a version tag is
 # pushed, and publishes them with a SHA256SUMS the plugin verifies before it
 # ever runs a downloaded binary (lua/typescope/oracle.lua, decision 2 in
 # design/oracle.md). Asset names are what oracle.download() asks for:
-#   typescope-oracle-{darwin-arm64,darwin-x86_64,linux-x86_64,linux-arm64}
+#   typescope-oracle-{darwin-arm64,linux-x86_64,linux-arm64}
+# There is no darwin-x86_64 build: GitHub's Intel macOS runners sit in the
+# queue so long that a release gated on one would rarely publish. Intel Macs
+# build it themselves (scripts/build-oracle.sh) and set `oracle.path`.
 # and SHA256SUMS holds `<hex>  <asset>` lines.
 #
 # The pyrefly submodule is pinned to a tag and patched by
@@ -30,9 +33,6 @@ jobs:
           - target: darwin-arm64
             runner: macos-latest
             rust_target: aarch64-apple-darwin
-          - target: darwin-x86_64
-            runner: macos-13
-            rust_target: x86_64-apple-darwin
           - target: linux-x86_64
             # the oldest still-supported Ubuntu, so the glibc the binary links
             # against is as old as reasonably possible
@@ -100,8 +100,8 @@ jobs:
             grep -n "^M.RELEASE" lua/typescope/oracle.lua >&2
             exit 1
           fi
-          # and the four assets are all here
-          for t in darwin-arm64 darwin-x86_64 linux-x86_64 linux-arm64; do
+          # and the three assets are all here
+          for t in darwin-arm64 linux-x86_64 linux-arm64; do
             test -f "dist/typescope-oracle-$t" || { echo "missing asset for $t" >&2; exit 1; }
           done
 

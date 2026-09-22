@@ -263,8 +263,14 @@ function M.recurse(client, node, token, cb)
       end
       node.state.loaded = true
       node.state.expanded = true
-    else
+    elseif twin then
       node.state.loaded = true -- honest leaf: nothing behind the marker
+      node.state.expanded = false
+    else
+      -- no answer about this node (an error, an oracle restart, a buffer
+      -- edited under the saved position): keep the hook so a later press
+      -- can ask again, rather than caching a leaf that was never confirmed
+      node._lazy = lazy
       node.state.expanded = false
     end
     require("typescope.examples").annotate({ node })

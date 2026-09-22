@@ -9,6 +9,10 @@
 -- `oracle.download` is on, `download()` fetches this plugin's release build
 -- for the platform into stdpath("data") and verifies it against the
 -- release's SHA256SUMS before it is ever executed (decision 2).
+--
+-- Downloads live in a directory named for the release, so a plugin that pins
+-- a different release (an upgrade or a downgrade) finds nothing at its own
+-- path and fetches its own; a successful install then removes the others.
 
 local M = {}
 
@@ -55,7 +59,7 @@ function M.locate(cfg)
   if cfg.oracle.path and cfg.oracle.path ~= "" then
     table.insert(candidates, vim.fn.expand(cfg.oracle.path))
   end
-  table.insert(candidates, vim.fn.stdpath("data") .. "/typescope/typescope-oracle")
+  table.insert(candidates, select(2, M.install_path()))
   local root = plugin_root()
   table.insert(candidates, root .. "/oracle/target/release/typescope-oracle")
   table.insert(candidates, root .. "/oracle/target/debug/typescope-oracle")
@@ -67,12 +71,31 @@ function M.locate(cfg)
   return nil
 end
 
---- The downloaded binary's home. One file per plugin install; a new release
---- overwrites it.
+--- Where downloaded releases live, one subdirectory per release.
+---@return string
+function M.releases_dir()
+  return vim.fn.stdpath("data") .. "/typescope/oracle"
+end
+
+--- The downloaded binary's home for the release this plugin pins.
 ---@return string dir, string path
 function M.install_path()
-  local dir = vim.fn.stdpath("data") .. "/typescope"
+  local dir = M.releases_dir() .. "/" .. M.RELEASE
   return dir, dir .. "/typescope-oracle"
+end
+
+--- Remove every downloaded release but `keep`, and the unversioned binary
+--- pre-release builds of 0.2.0 installed at stdpath("data")/typescope/.
+--- Unlinking a binary a running oracle was started from is fine on unix.
+---@param keep string release name, e.g. "v0.2.0"
+function M.prune(keep)
+  local root = M.releases_dir()
+  for name, kind in vim.fs.dir(root) do
+    if name ~= keep and kind == "directory" then
+      vim.fn.delete(root .. "/" .. name, "rf")
+    end
+  end
+  vim.fn.delete(vim.fn.stdpath("data") .. "/typescope/typescope-oracle")
 end
 
 --- The release asset name for this machine, or nil (and why) when there is
@@ -82,8 +105,13 @@ function M.target()
   local u = vim.uv.os_uname()
   local os = ({ Darwin = "darwin", Linux = "linux" })[u.sysname]
   local arch = ({ arm64 = "arm64", aarch64 = "arm64", x86_64 = "x86_64", amd64 = "x86_64" })[u.machine]
-  if not os or not arch then
-    return nil, ("no release build for %s/%s"):format(u.sysname, u.machine)
+  -- Intel Macs are left out of the release matrix (release.yml says why)
+  if not os or not arch or (os == "darwin" and arch == "x86_64") then
+    return nil,
+      ("no release build for %s/%s: build it (scripts/build-oracle.sh --release) and set oracle.path"):format(
+        u.sysname,
+        u.machine
+      )
   end
   return os .. "-" .. arch
 end
@@ -171,6 +199,7 @@ function M.download(cfg, cb)
             pcall(vim.uv.fs_unlink, tmp)
             return finish(nil, "could not install " .. final)
           end
+          M.prune(M.RELEASE)
           finish(final)
         end)
       end)

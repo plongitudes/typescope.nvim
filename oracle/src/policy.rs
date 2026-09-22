@@ -99,7 +99,15 @@ pub fn category_from_decorator(text: &str) -> Option<Category> {
 }
 
 fn is_pydantic_model_base(cls: &Class) -> bool {
-    cls.name().as_str() == "BaseModel" && cls.module_name().as_str().starts_with("pydantic")
+    cls.name().as_str() == "BaseModel" && is_pydantic_module(cls.module_name().as_str())
+}
+
+/// A module of pydantic's own packages (`pydantic`, `pydantic_core`,
+/// `pydantic_settings`) — not a user module that merely starts with the word,
+/// like `pydantic_models`.
+fn is_pydantic_module(module: &str) -> bool {
+    let top = module.split('.').next().unwrap_or(module);
+    matches!(top, "pydantic" | "pydantic_core" | "pydantic_settings")
 }
 
 /// The MRO cut: members defined on these classes are machinery, not shape.
@@ -111,7 +119,7 @@ fn is_pydantic_model_base(cls: &Class) -> bool {
 pub fn is_cut_base(cls: &Class) -> bool {
     is_terminal_class(cls)
         || is_pydantic_model_base(cls)
-        || cls.module_name().as_str().starts_with("pydantic")
+        || is_pydantic_module(cls.module_name().as_str())
 }
 
 /// A class from the bundled typeshed (stdlib and `typing`) is a terminal
@@ -219,6 +227,16 @@ mod tests {
         assert_eq!(category_from_decorator("dataclasses.dataclass(frozen=True)"), Some(Category::Dataclass));
         assert_eq!(category_from_decorator("pydantic.dataclasses.dataclass"), Some(Category::Pydantic));
         assert_eq!(category_from_decorator("functools.total_ordering"), None);
+    }
+
+    #[test]
+    fn pydantic_modules() {
+        assert!(is_pydantic_module("pydantic"));
+        assert!(is_pydantic_module("pydantic.main"));
+        assert!(is_pydantic_module("pydantic_settings.main"));
+        assert!(is_pydantic_module("pydantic_core"));
+        assert!(!is_pydantic_module("pydantic_models"));
+        assert!(!is_pydantic_module("app.pydantic_schemas"));
     }
 
     #[test]

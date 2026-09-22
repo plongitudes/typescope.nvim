@@ -21,7 +21,7 @@ pyrefly wins on the axis Tony named as the objection — distribution — and is
 
 **DECISION 2 — install: TypeScope downloads the release binary on first use.** Default: yes, with a manual override.
 
-Into `stdpath("data")/typescope/`, from GitHub Releases, verified against a checksum published alongside, platform-selected (`darwin-arm64`, `darwin-x86_64`, `linux-x86_64`, `linux-arm64`). `:checkhealth` reports the binary's version and path; `config.oracle.path` overrides the download for people who build it themselves; `config.oracle.download = false` turns the download off and makes health say what to install. This is how mason and several plugins already behave, so users have a model for it.
+Into `stdpath("data")/typescope/`, from GitHub Releases, verified against a checksum published alongside, platform-selected (`darwin-arm64`, `linux-x86_64`, `linux-arm64`; no `darwin-x86_64`, since GitHub's Intel macOS runners queue too long to gate a release on). Each release installs under `typescope/oracle/<release>/`, so a plugin pinning a different release (upgrade or downgrade) finds nothing at its own path and downloads; a successful install removes the other releases. `:checkhealth` reports the binary's version and path; `config.oracle.path` overrides the download for people who build it themselves; `config.oracle.download = false` turns the download off and makes health say what to install. This is how mason and several plugins already behave, so users have a model for it.
 
 **DECISION 3 — one code path: the treesitter resolver is deleted, the binary is a hard requirement.** Default: yes.
 
@@ -137,7 +137,7 @@ Lives in this repo under `oracle/` (a Cargo workspace member of one crate), so a
 - `walk.rs`: the port of the spike probe's `describe`: type at position → Scope; class → members via `attributes_of_type` filtered by policy → Nodes with locations; function → params/return; union → variants; overloads → groups. Depth-limited; beyond depth emits `expandable` with `location`.
 - `policy.rs`: the member filter, MRO cut, async return rule, informative-inference rule. Pure functions over `pyrefly_types`, unit-tested in Rust against the spike fixture.
 - `vendor/pyrefly` as a **git submodule** pinned to a tag, plus `typescope-attributes.patch` applied by `build.rs`-free means: a `just build` / `scripts/build-oracle.sh` that does `git submodule update`, `git apply --check`, `cargo build --release`. No build-time patching magic; the patched tree is what CI builds.
-- Release: a GitHub Actions matrix builds the four targets, uploads binaries + `SHA256SUMS` to the release the plugin tag creates. Local dev builds on the M1 in 3.5 min cold.
+- Release: a GitHub Actions matrix builds the three targets (no Intel macOS), uploads binaries + `SHA256SUMS` to the release the plugin tag creates. Local dev builds on the M1 in 3.5 min cold.
 
 ## 7. Verification
 

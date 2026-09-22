@@ -223,6 +223,20 @@ do
     item and item.name == "item" and not item.state.loaded and item._lazy ~= nil,
     "depth 1: Box.item is a lazy node"
   )
+  -- an expand that gets no answer (here: a buffer with no oracle attached)
+  -- keeps the hook for a later press instead of caching an unconfirmed leaf
+  local real_lazy = item._lazy
+  item._lazy = vim.tbl_extend("force", real_lazy, { bufnr = vim.api.nvim_create_buf(false, true) })
+  local answered = false
+  resolve.recurse(nil, item, async.token(), function()
+    answered = true
+  end)
+  vim.wait(5000, function()
+    return answered
+  end, 10)
+  check(answered and not item.state.loaded and item._lazy ~= nil, "a failed expand keeps the lazy hook")
+  item._lazy = real_lazy
+
   local grafted = false
   resolve.recurse(nil, item, async.token(), function()
     grafted = true
