@@ -41,8 +41,8 @@ Two paths (oracle when present, old resolver when not) would keep the plugin wor
 
 ```
   nvim                                          typescope-oracle (Rust binary)
-  ┌──────────────────────────────┐              ┌──────────────────────────────┐
-  │ init / interact / render     │              │ lsp_server loop              │
+  ┌──────────────────────────────┐              ┌───────────────────────────────┐
+  │ init / interact / render     │              │ lsp_server loop               │
   │   float, keys, examples      │              │   initialize: textDocumentSync│
   │            │                 │              │   didOpen/didChange/didClose  │
   │            ▼                 │   LSP over   │        │                      │
@@ -54,7 +54,7 @@ Two paths (oracle when present, old resolver when not) would keep the plugin wor
   └──────────────────────────────┘              │        │                      │
                                                 │        ▼                      │
                                                 │ structure walk → JSON Node    │
-                                                └──────────────────────────────┘
+                                                └───────────────────────────────┘
 ```
 
 The oracle speaks **LSP**, not a bespoke protocol, and advertises **no capabilities except document sync**, so it never competes with basedpyright for hover, definition or diagnostics. That choice buys, for free from `vim.lsp`: spawn and restart, root detection, `didOpen`/`didChange` carrying *unsaved buffer contents*, cancellation, and `lsp.client_for`-style discovery. The one custom request is `typescope/structure`. basedpyright stays attached for `signatureHelp` (the `activeParameter` the ledger opens on) and for everything K falls through to.
