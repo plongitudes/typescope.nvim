@@ -356,11 +356,7 @@ do
 end
 
 for _, c in ipairs(vim.lsp.get_clients({ name = "typescope-oracle" })) do
-  if vim.fn.has("nvim-0.11") == 1 then
-    c:stop(true)
-  else
-    vim.lsp.stop_client(c.id, true)
-  end
+  c:stop(true)
 end
 vim.wait(1000)
 

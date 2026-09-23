@@ -51,10 +51,7 @@ check(
 )
 
 local sums_of = function(path, name)
-  local f = assert(io.open(path, "rb"))
-  local data = f:read("a")
-  f:close()
-  return vim.fn.sha256(data) .. "  " .. name .. "\n"
+  return assert(oracle.sha256_file(path)) .. "  " .. name .. "\n"
 end
 local name = "typescope-oracle-" .. target
 check(oracle.verify(bin, sums_of(bin, name), name) == true, "verify() accepts a matching SHA256SUMS line")

@@ -152,8 +152,8 @@ local defaults = {
 ---@type typescope.Config?
 local options = nil
 
--- vim.validate's arg-form is 0.11+ and its table-form is deprecated there,
--- so we roll a minimal checker that works identically on 0.10 and 0.11.
+-- A minimal checker rather than vim.validate: its messages name the full
+-- dotted setup key and the allowed values, which vim.validate's do not.
 ---@param path string dotted key path, for error messages
 ---@param value any
 ---@param expected string|string[] lua type name(s) or a list of allowed values prefixed with "enum"

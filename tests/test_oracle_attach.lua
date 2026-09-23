@@ -40,6 +40,11 @@ vim.wait(20000, function()
 end, 50)
 check(client and client.initialized, "client initialized")
 
+--- A request through the plugin's own path.
+local function ask(method, params, cb)
+  require("typescope.lsp").request_cb(client, method, params, require("typescope.async").token(), cb)
+end
+
 if client and client.initialized then
   local info = client.server_info or {}
   check(info.name == "typescope-oracle", "serverInfo.name is typescope-oracle (got " .. tostring(info.name) .. ")")
@@ -65,12 +70,12 @@ if client and client.initialized then
     end
   end
   local done, result, err
-  client:request("typescope/structure", {
+  ask("typescope/structure", {
     textDocument = { uri = vim.uri_from_bufnr(bufnr) },
     position = { line = class_line, character = 6 },
   }, function(e, r)
     done, err, result = true, e, r
-  end, bufnr)
+  end)
   vim.wait(20000, function()
     return done
   end, 10)
@@ -103,12 +108,12 @@ if client and client.initialized then
   vim.api.nvim_buf_set_lines(bufnr, port_line, port_line + 1, false, { "    port: str = 8000" })
   vim.wait(200) -- let the didChange notification go out
   local done1, result1
-  client:request("typescope/structure", {
+  ask("typescope/structure", {
     textDocument = { uri = vim.uri_from_bufnr(bufnr) },
     position = { line = class_line, character = 6 },
   }, function(_, r)
     done1, result1 = true, r
-  end, bufnr)
+  end)
   vim.wait(20000, function()
     return done1
   end, 10)
@@ -127,12 +132,12 @@ if client and client.initialized then
 
   -- a position with nothing under it answers null, not an error
   local done0, result0, err0
-  client:request("typescope/structure", {
+  ask("typescope/structure", {
     textDocument = { uri = vim.uri_from_bufnr(bufnr) },
     position = { line = 0, character = 0 },
   }, function(e, r)
     done0, err0, result0 = true, e, r
-  end, bufnr)
+  end)
   vim.wait(10000, function()
     return done0
   end, 10)
@@ -140,9 +145,9 @@ if client and client.initialized then
 
   -- an unknown method is refused cleanly, not crashed on
   local done2, err2
-  client:request("typescope/nonexistent", {}, function(e)
+  ask("typescope/nonexistent", {}, function(e)
     done2, err2 = true, e
-  end, bufnr)
+  end)
   vim.wait(5000, function()
     return done2
   end, 10)

@@ -8,7 +8,7 @@ TypeScope no longer reads types out of Python syntax. It asks a type checker. Ev
 
 ### Changed
 
-- **Types come from a checker now.** A small binary, `typescope-oracle` (pyrefly, wrapped), runs beside your Python language server as a second LSP server and answers one request: the structure of whatever the cursor is on. The plugin downloads the release build for your platform (Apple Silicon macOS; Linux x86_64/arm64) into `stdpath("data")/typescope/oracle/<release>/` the first time a Python buffer opens, replaces it when a plugin update pins a different release, verifies it against the release's `SHA256SUMS` before running it, and never runs an unverified file. `curl` is required for the download; `oracle.path` points at your own build (the way to run it on an Intel Mac, which has no release build) and `oracle.download = false` opts out. `:checkhealth typescope` has an oracle section. On a FastAPI + SQLAlchemy backend the oracle settles at about 154 MB beside basedpyright's 528.
+- **Types come from a checker now.** A small binary, `typescope-oracle` (pyrefly, wrapped), runs beside your Python language server as a second LSP server and answers one request: the structure of whatever the cursor is on. The plugin downloads the release build for your platform (Apple Silicon macOS; Linux x86_64/arm64) into `stdpath("data")/typescope/oracle/<release>/` the first time a Python buffer opens, replaces it when a plugin update pins a different release, verifies it against the release's `SHA256SUMS` before running it, and never runs an unverified file. `curl` and `sha256sum` or `shasum` are required for the download; `oracle.path` points at your own build (the way to run it on an Intel Mac, which has no release build) and `oracle.download = false` opts out. `:checkhealth typescope` has an oracle section. On a FastAPI + SQLAlchemy backend the oracle settles at about 154 MB beside basedpyright's 528.
 - **basedpyright is recommended, not required.** It still supplies `signatureHelp` (the active parameter as you type) and the hover `<Plug>(TypeScopeHover)` falls back to; any Python server with those capabilities does the same. It no longer resolves anything for TypeScope.
 - `depth` still means "how far to nest before an explicit expand", and expanding re-asks the oracle rather than chasing a definition, so a nested generic expands to its *specialized* members.
 
@@ -21,6 +21,7 @@ TypeScope no longer reads types out of Python syntax. It asks a type checker. Ev
 
 ### Removed
 
+- **Neovim 0.10 support.** 0.11 is the floor now, as it is for nvim-lspconfig, gitsigns and telescope; below it the plugin says so once and does not load. On Debian stable's packaged 0.10, install a current release from [neovim/neovim](https://github.com/neovim/neovim/releases).
 - The deprecated `table` layout. `ui.layout = "table"` is now an error naming the replacement; `ledger` (the default) and `tree` remain. `TypeScopeRowOdd` went with it.
 - The treesitter type reader (`extract/python.lua` keeps only call-site syntax), the definition/declaration chase, the hover-prose parsing, and the alias hop — all replaced by the oracle.
 

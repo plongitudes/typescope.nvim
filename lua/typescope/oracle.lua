@@ -16,8 +16,6 @@
 
 local M = {}
 
-local has_011 = vim.fn.has("nvim-0.11") == 1
-
 --- The protocol number this plugin speaks; the binary reports its own in
 --- `experimental.typescope.protocol` and a mismatch refuses to attach.
 M.PROTOCOL = 1
@@ -42,10 +40,12 @@ M.download_error = nil
 local group = nil
 local warned_missing = false
 
---- The plugin's own checkout, for the dev-build fallback.
+--- The plugin's own checkout, for the dev-build fallback. Absolute: with the
+--- plugin on the runtimepath as `.`, the source path is relative, and a
+--- relative binary path breaks when the LSP client spawns from root_dir.
 local function plugin_root()
   local src = debug.getinfo(1, "S").source:sub(2)
-  return vim.fn.fnamemodify(src, ":h:h:h")
+  return vim.fn.fnamemodify(src, ":p:h:h:h")
 end
 
 --- Where the binary is, in order of intent: the user's explicit path, the
@@ -116,6 +116,27 @@ function M.target()
   return os .. "-" .. arch
 end
 
+--- The SHA-256 of a file's contents, lowercase hex, or nil and why. Not
+--- vim.fn.sha256(): through at least nvim 0.11.0 it refuses a string with
+--- NUL bytes, which is every binary. sha256sum (Linux, recent macOS) or
+--- shasum (every macOS) instead — one path on every supported version.
+---@param path string
+---@return string? hex, string? why
+function M.sha256_file(path)
+  local cmd = vim.fn.executable("sha256sum") == 1 and { "sha256sum", path }
+    or vim.fn.executable("shasum") == 1 and { "shasum", "-a", "256", path }
+    or nil
+  if not cmd then
+    return nil, "neither sha256sum nor shasum found (needed to verify the oracle download)"
+  end
+  local out = vim.system(cmd, { text = true }):wait()
+  local hex = out.code == 0 and (out.stdout or ""):match("^(%x+)")
+  if not hex then
+    return nil, ("%s failed on %s"):format(cmd[1], path)
+  end
+  return hex:lower()
+end
+
 --- Does `path`'s content hash to the entry for `name` in a SHA256SUMS file?
 --- Pure: the sums text is passed in.
 ---@param path string
@@ -133,13 +154,10 @@ function M.verify(path, sums, name)
   if not want then
     return false, "no SHA256SUMS entry for " .. name
   end
-  local f = io.open(path, "rb")
-  if not f then
-    return false, "cannot read " .. path
+  local got, why = M.sha256_file(path)
+  if not got then
+    return false, why
   end
-  local data = f:read("a")
-  f:close()
-  local got = vim.fn.sha256(data)
   if got ~= want then
     return false, ("checksum mismatch for %s: got %s, release says %s"):format(name, got:sub(1, 12), want:sub(1, 12))
   end
@@ -235,13 +253,9 @@ function M.protocol_ok(capabilities)
 end
 
 local function stop(client)
-  if has_011 then
-    pcall(function()
-      client:stop(true)
-    end)
-  else
-    pcall(vim.lsp.stop_client, client.id, true)
-  end
+  pcall(function()
+    client:stop(true)
+  end)
 end
 
 --- Attach the oracle to a Python buffer (idempotent: vim.lsp.start reuses a

@@ -5,16 +5,16 @@ local health = vim.health
 function M.check()
   health.start("typescope.nvim")
 
-  if vim.fn.has("nvim-0.10") == 1 then
-    health.ok("Neovim >= 0.10")
+  if vim.fn.has("nvim-0.11") == 1 then
+    health.ok("Neovim >= 0.11")
   else
-    health.error("Neovim 0.10+ required")
+    health.error("Neovim 0.11+ required")
   end
 
   -- python treesitter parser (required for type definition extraction)
-  -- language.add errors on 0.10 but returns false on 0.11+ — check both
+  -- language.add returns true when loaded and nil (plus why) when not
   local ok, added = pcall(vim.treesitter.language.add, "python")
-  local has_parser = ok and added ~= false
+  local has_parser = ok and added == true
   if has_parser then
     health.ok("TreeSitter python parser installed")
   else
