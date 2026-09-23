@@ -7,6 +7,15 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 RTP="set rtp+=. rtp+=$HOME/.local/share/nvim/site rtp+=$HOME/.local/share/nvim/lazy/nvim-treesitter"
+
+# An empty stdpath("data") for the run. --clean does not isolate it, and
+# oracle.locate() prefers a downloaded release there over the checkout build,
+# so once a release is installed the suites would silently test it instead of
+# what was just built. The paths above are absolute, so nothing they load
+# comes from here.
+XDG_DATA_HOME=$(mktemp -d)
+export XDG_DATA_HOME
+trap 'rm -rf "$XDG_DATA_HOME"' EXIT
 fail=0
 
 # The oracle suites (e2e_*, test_oracle_*, test_resolve_oracle) need a built
