@@ -6,8 +6,7 @@ You need the same things TypeScope needs at runtime — Neovim 0.11+, the TreeSi
 
 ```sh
 brew install stylua luacheck   # or your platform's equivalent
-git submodule update --init    # the pinned pyrefly checkout under oracle/vendor
-scripts/build-oracle.sh        # applies oracle/patches and builds a debug binary (~4 min cold)
+scripts/build-oracle.sh        # fetches pyrefly at oracle/pyrefly.rev, applies oracle/patches, builds a debug binary (~4 min cold)
 ```
 
 The Lua suites find `oracle/target/debug/typescope-oracle` on their own; without it, the suites that need it skip and say so. `(cd oracle && cargo test)` runs the oracle's own tests. [basedpyright](https://github.com/DetachHead/basedpyright) is not needed for the tests (a stand-in serves its `signatureHelp`), but it is what you want attached while you develop.

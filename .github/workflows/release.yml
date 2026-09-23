@@ -10,7 +10,7 @@ name: Release
 # build it themselves (scripts/build-oracle.sh) and set `oracle.path`.
 # and SHA256SUMS holds `<hex>  <asset>` lines.
 #
-# The pyrefly submodule is pinned to a tag and patched by
+# pyrefly is fetched at the commit in oracle/pyrefly.rev and patched by
 # scripts/build-oracle.sh; the patched tree is what gets built here, exactly
 # as on a developer machine.
 
@@ -43,8 +43,6 @@ jobs:
             rust_target: aarch64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: true
 
       - uses: dtolnay/rust-toolchain@stable
         with:

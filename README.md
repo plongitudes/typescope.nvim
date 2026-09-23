@@ -354,7 +354,7 @@ scripts/build-oracle.sh --release    # the binary that ships
 stylua lua/ tests/                   # formatting; run it twice, it needs two passes to converge
 ```
 
-The oracle lives in `oracle/`: a Rust crate over [pyrefly](https://github.com/facebook/pyrefly), vendored as a git submodule pinned to a tag (`git submodule update --init` if you cloned without it). `scripts/build-oracle.sh` applies the one small patch in `oracle/patches/` — a `pub fn` exposing the attribute listing pyrefly computes for completion — and builds. The design, the wire contract and the decisions behind them are in `design/oracle.md`.
+The oracle lives in `oracle/`: a Rust crate over [pyrefly](https://github.com/facebook/pyrefly), pinned to the commit in `oracle/pyrefly.rev`. `scripts/build-oracle.sh` fetches that commit (shallow, about 35 MB), applies the one small patch in `oracle/patches/` — a `pub fn` exposing the attribute listing pyrefly computes for completion — and builds. The design, the wire contract and the decisions behind them are in `design/oracle.md`.
 
 `tests/run.sh` adds your local `site` directory and `nvim-treesitter` to the runtimepath for the Python parser and its highlight queries. The suites that drive the real oracle (`e2e_*`, `test_oracle_*`, `test_resolve_oracle`) skip themselves when `oracle/target/debug/typescope-oracle` is not built, so the pure-Lua suites need no Rust toolchain.
 
