@@ -8,6 +8,7 @@ use dupe::Dupe;
 use pyrefly::alt::attr::AttrDefinition;
 use pyrefly::state::state::Transaction;
 use pyrefly_build::handle::Handle;
+use pyrefly_python::module::Module;
 use pyrefly_python::module_path::ModulePath;
 use pyrefly_types::callable::Param;
 use pyrefly_types::callable::Params;
@@ -119,6 +120,21 @@ impl Node {
             def_handle: None,
         }
     }
+}
+
+/// A module's syntax tree and source, for reading what its statements say
+/// (decorators, literal defaults, docstrings). pyrefly keeps a syntax tree
+/// only for modules it checked in full; one reached only as an import may
+/// have dropped it, so this loads the module and re-parses the source pyrefly
+/// always keeps — the fallback pyrefly's own
+/// `search_corresponding_py_module_for_attribute` uses.
+pub fn module_source(tx: &Transaction<'_>, handle: &Handle) -> Option<(std::sync::Arc<ruff_python_ast::ModModule>, Module)> {
+    let _ = tx.get_exports(handle); // loads the module if nothing has yet
+    let module = tx.get_module_info(handle)?;
+    let ast = tx
+        .get_ast(handle)
+        .unwrap_or_else(|| pyrefly_python::ast::Ast::parse(module.contents(), module.source_type()).0.into());
+    Some((ast, module))
 }
 
 // ------------------------------------------------------------------ walker
@@ -316,7 +332,7 @@ impl<'a> Walker<'a> {
                 character: loc.character_offset.to_zero_indexed() as u32,
             });
         }
-        if let Some(ast) = self.tx.get_ast(&handle)
+        if let Some((ast, _)) = module_source(self.tx, &handle)
             && let Some(fd) = find_function_def(&ast.body, range)
         {
             facts.return_annotated = fd.returns.is_some();
@@ -583,7 +599,7 @@ impl<'a> Walker<'a> {
         }
         // the initializer: the RHS of the declaring statement, kept only when
         // it is a literal (a name or a call is noise, as the resolver decided)
-        if let (Some(ast), Some(module)) = (self.tx.get_ast(&handle), self.tx.get_module_info(&handle)) {
+        if let Some((ast, module)) = module_source(self.tx, &handle) {
             let text = module.contents();
             if let Some((value, annotation)) = find_declaration(&ast.body, range) {
                 if let Some(value) = value {
@@ -616,7 +632,7 @@ impl<'a> Walker<'a> {
     fn class_def_facts(&self, cls: &Class) -> ClassDefFacts {
         let handle = handle_for(self.handle, cls);
         let mut facts = ClassDefFacts { decorator_category: None, total: true };
-        if let (Some(ast), Some(module)) = (self.tx.get_ast(&handle), self.tx.get_module_info(&handle))
+        if let Some((ast, module)) = module_source(self.tx, &handle)
             && let Some(cd) = find_class_def(&ast.body, cls.range())
         {
             let text = module.contents();
