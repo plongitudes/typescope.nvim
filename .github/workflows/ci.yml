@@ -10,6 +10,10 @@ jobs:
     name: tests (nvim ${{ matrix.nvim }})
     runs-on: ubuntu-latest
     continue-on-error: ${{ matrix.nvim == 'nightly' }}
+    # the oracle-backed suites run against the binary the oracle job built;
+    # without it they skip, and CI would say nothing about the plugin and the
+    # oracle talking to each other
+    needs: oracle
     strategy:
       fail-fast: false
       matrix:
@@ -36,14 +40,24 @@ jobs:
             --cmd "set rtp+=$HOME/.local/share/nvim/lazy/nvim-treesitter" \
             -c "TSInstallSync python" -c "qa!"
 
+      # where a local `scripts/build-oracle.sh` puts it, so every suite finds
+      # it the same way a dev checkout does (oracle.locate's checkout
+      # fallback); artifacts drop the executable bit
+      - uses: actions/download-artifact@v4
+        with:
+          name: typescope-oracle-debug
+          path: oracle/target/debug
+      - name: Make the oracle executable
+        run: chmod +x oracle/target/debug/typescope-oracle
+
       - name: Run the suites
         run: ./tests/run.sh
 
   oracle:
     # The Rust half: the fixture markers in tests/fixtures/shapes.py are
     # asserted here, by cargo test against the patched, vendored pyrefly.
-    # The Lua suites above skip their oracle-backed cases without a binary,
-    # so this job is where the end-to-end behaviour is actually checked.
+    # The debug binary it builds is handed to the nvim jobs above, which run
+    # the Lua side's oracle-backed suites against it.
     name: oracle (cargo test)
     runs-on: ubuntu-latest
     steps:
@@ -58,6 +72,12 @@ jobs:
         run: scripts/build-oracle.sh
       - name: cargo test
         run: cd oracle && cargo test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: typescope-oracle-debug
+          path: oracle/target/debug/typescope-oracle
+          if-no-files-found: error
+          retention-days: 1
 
   lint:
     name: luacheck

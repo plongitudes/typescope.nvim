@@ -16,8 +16,16 @@
 
 local root = vim.fn.getcwd()
 local fixture_dir = root .. "/tests/fixtures/declarations"
+local oracle_bin = vim.env.TYPESCOPE_ORACLE or (root .. "/oracle/target/debug/typescope-oracle")
+if vim.fn.executable(oracle_bin) ~= 1 then
+  print("SKIP e2e_declarations: no oracle binary at " .. oracle_bin .. " (scripts/build-oracle.sh)")
+  print("ALL PASS")
+  return
+end
 
-require("typescope").setup({ ui = { layout = "tree" } })
+-- the binary under test, never a download: a suite must not depend on a
+-- published release existing
+require("typescope").setup({ ui = { layout = "tree" }, oracle = { path = oracle_bin, download = false } })
 
 local failures = 0
 local function check(desc, cond)
