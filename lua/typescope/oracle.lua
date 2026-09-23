@@ -42,10 +42,12 @@ M.download_error = nil
 local group = nil
 local warned_missing = false
 
---- The plugin's own checkout, for the dev-build fallback.
+--- The plugin's own checkout, for the dev-build fallback. Absolute: with the
+--- plugin on the runtimepath as `.`, the source path is relative, and a
+--- relative binary path breaks when the LSP client spawns from root_dir.
 local function plugin_root()
   local src = debug.getinfo(1, "S").source:sub(2)
-  return vim.fn.fnamemodify(src, ":h:h:h")
+  return vim.fn.fnamemodify(src, ":p:h:h:h")
 end
 
 --- Where the binary is, in order of intent: the user's explicit path, the
@@ -116,6 +118,35 @@ function M.target()
   return os .. "-" .. arch
 end
 
+--- The SHA-256 of a file's contents, lowercase hex, or nil and why.
+--- nvim 0.10's sha256() refuses a string with NUL bytes (every binary), so
+--- there the hash comes from sha256sum / shasum instead.
+---@param path string
+---@return string? hex, string? why
+function M.sha256_file(path)
+  if has_011 then
+    local f = io.open(path, "rb")
+    if not f then
+      return nil, "cannot read " .. path
+    end
+    local data = f:read("a")
+    f:close()
+    return vim.fn.sha256(data)
+  end
+  local cmd = vim.fn.executable("sha256sum") == 1 and { "sha256sum", path }
+    or vim.fn.executable("shasum") == 1 and { "shasum", "-a", "256", path }
+    or nil
+  if not cmd then
+    return nil, "neither sha256sum nor shasum found (needed on nvim 0.10 to verify the oracle)"
+  end
+  local out = vim.system(cmd, { text = true }):wait()
+  local hex = out.code == 0 and (out.stdout or ""):match("^(%x+)")
+  if not hex then
+    return nil, ("%s failed on %s"):format(cmd[1], path)
+  end
+  return hex:lower()
+end
+
 --- Does `path`'s content hash to the entry for `name` in a SHA256SUMS file?
 --- Pure: the sums text is passed in.
 ---@param path string
@@ -133,13 +164,10 @@ function M.verify(path, sums, name)
   if not want then
     return false, "no SHA256SUMS entry for " .. name
   end
-  local f = io.open(path, "rb")
-  if not f then
-    return false, "cannot read " .. path
+  local got, why = M.sha256_file(path)
+  if not got then
+    return false, why
   end
-  local data = f:read("a")
-  f:close()
-  local got = vim.fn.sha256(data)
   if got ~= want then
     return false, ("checksum mismatch for %s: got %s, release says %s"):format(name, got:sub(1, 12), want:sub(1, 12))
   end

@@ -40,10 +40,19 @@ vim.wait(20000, function()
 end, 50)
 check(client and client.initialized, "client initialized")
 
+--- A request through the plugin's own path, which carries the 0.10 / 0.11
+--- client call shapes (`client.request` vs `client:request`).
+local function ask(method, params, cb)
+  require("typescope.lsp").request_cb(client, method, params, require("typescope.async").token(), cb)
+end
+
 if client and client.initialized then
-  local info = client.server_info or {}
-  check(info.name == "typescope-oracle", "serverInfo.name is typescope-oracle (got " .. tostring(info.name) .. ")")
-  check(type(info.version) == "string", "serverInfo.version is a string")
+  -- nvim 0.10's client does not keep serverInfo; cargo test asserts it
+  if vim.fn.has("nvim-0.11") == 1 then
+    local info = client.server_info or {}
+    check(info.name == "typescope-oracle", "serverInfo.name is typescope-oracle (got " .. tostring(info.name) .. ")")
+    check(type(info.version) == "string", "serverInfo.version is a string")
+  end
   local caps = client.server_capabilities or {}
   local exp = caps.experimental and caps.experimental.typescope
   check(exp and exp.protocol == 1, "experimental.typescope.protocol == 1")
@@ -65,12 +74,12 @@ if client and client.initialized then
     end
   end
   local done, result, err
-  client:request("typescope/structure", {
+  ask("typescope/structure", {
     textDocument = { uri = vim.uri_from_bufnr(bufnr) },
     position = { line = class_line, character = 6 },
   }, function(e, r)
     done, err, result = true, e, r
-  end, bufnr)
+  end)
   vim.wait(20000, function()
     return done
   end, 10)
@@ -103,12 +112,12 @@ if client and client.initialized then
   vim.api.nvim_buf_set_lines(bufnr, port_line, port_line + 1, false, { "    port: str = 8000" })
   vim.wait(200) -- let the didChange notification go out
   local done1, result1
-  client:request("typescope/structure", {
+  ask("typescope/structure", {
     textDocument = { uri = vim.uri_from_bufnr(bufnr) },
     position = { line = class_line, character = 6 },
   }, function(_, r)
     done1, result1 = true, r
-  end, bufnr)
+  end)
   vim.wait(20000, function()
     return done1
   end, 10)
@@ -127,12 +136,12 @@ if client and client.initialized then
 
   -- a position with nothing under it answers null, not an error
   local done0, result0, err0
-  client:request("typescope/structure", {
+  ask("typescope/structure", {
     textDocument = { uri = vim.uri_from_bufnr(bufnr) },
     position = { line = 0, character = 0 },
   }, function(e, r)
     done0, err0, result0 = true, e, r
-  end, bufnr)
+  end)
   vim.wait(10000, function()
     return done0
   end, 10)
@@ -140,15 +149,19 @@ if client and client.initialized then
 
   -- an unknown method is refused cleanly, not crashed on
   local done2, err2
-  client:request("typescope/nonexistent", {}, function(e)
+  ask("typescope/nonexistent", {}, function(e)
     done2, err2 = true, e
-  end, bufnr)
+  end)
   vim.wait(5000, function()
     return done2
   end, 10)
   check(done2 and err2 and err2.code == -32601, "unknown request → MethodNotFound")
 
-  client:stop(true)
+  if vim.fn.has("nvim-0.11") == 1 then
+    client:stop(true)
+  else
+    vim.lsp.stop_client(client.id, true)
+  end
   vim.wait(2000, function()
     return not vim.lsp.get_client_by_id(client_id)
   end, 50)
