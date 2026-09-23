@@ -2,6 +2,12 @@
 
 Notable changes to TypeScope, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [Semantic Versioning](https://semver.org/), with the usual 0.x caveat that a minor bump may break something. Each release is an annotated git tag carrying the same notes.
 
+## [0.2.1] — 2026-09-23
+
+### Fixed
+
+- **Installing or updating 0.2.0 through a plugin manager downloaded pyrefly's whole git history** (about 1.9 GB), because the oracle's source pulled it in as a git submodule and lazy.nvim clones submodules. Lazy's two-minute limit usually cut the clone short and left the checkout broken (`fatal: could not reset submodule index`). The plugin repository has no submodules now; only building the oracle yourself fetches pyrefly, shallow, at the pinned commit (about 35 MB). If 0.2.0 left your checkout broken, delete the plugin's directory (`~/.local/share/nvim/lazy/typescope.nvim` for lazy.nvim) and install again.
+
 ## [0.2.0] — 2026-09-23
 
 TypeScope no longer reads types out of Python syntax. It asks a type checker. Everything this release adds follows from that one change, and so does its one new requirement.
@@ -65,6 +71,7 @@ First public release. Type structure for the Python function under your cursor: 
 - Four charsets, all plain Unicode/ASCII; no Nerd Font required.
 - Requires Neovim 0.10+, basedpyright, and the TreeSitter python parser.
 
+[0.2.1]: https://github.com/plongitudes/typescope.nvim/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/plongitudes/typescope.nvim/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/plongitudes/typescope.nvim/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/plongitudes/typescope.nvim/releases/tag/v0.1.0

@@ -171,7 +171,8 @@ impl Oracle {
 }
 
 /// Written by scripts/build-oracle.sh? No — kept in sync by hand with the
-/// submodule pin, and asserted by the test below so a bump cannot forget it.
+/// pin in oracle/pyrefly.rev, and asserted by the test below so a bump cannot
+/// forget it.
 pub const PYREFLY_CRATE_VERSION: &str = "1.4.0-dev.1";
 
 #[cfg(test)]

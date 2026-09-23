@@ -1,6 +1,6 @@
 [package]
 name = "typescope-oracle"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 publish = false
 description = "TypeScope's type oracle: a minimal LSP server over pyrefly that answers typescope/structure"
@@ -11,7 +11,7 @@ name = "typescope-oracle"
 path = "src/main.rs"
 
 [dependencies]
-# pyrefly, vendored as a git submodule pinned to a tag and patched by
+# pyrefly, fetched at the commit in pyrefly.rev and patched by
 # scripts/build-oracle.sh (see patches/). Its library surface is documented
 # as unstable, so the pin is deliberate and every bump is a tested step.
 pyrefly = { path = "vendor/pyrefly/pyrefly" }

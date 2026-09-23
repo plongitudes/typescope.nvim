@@ -9,3 +9,6 @@ doc/tags
 # design docs and captures live in scratch/; never track binaries at the root
 *.pdf
 *.mov
+
+# pyrefly at the commit in oracle/pyrefly.rev, fetched by scripts/build-oracle.sh
+/oracle/vendor/pyrefly/

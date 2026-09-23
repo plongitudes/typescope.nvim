@@ -448,10 +448,9 @@ and probes the server for reachability.
     ./tests/run.sh                      every Lua suite, headless
     stylua lua/ tests/                  formatting
 <
-The oracle lives in oracle/: a Rust crate over pyrefly, vendored as a git
-submodule pinned to a tag (`git submodule update --init` if you cloned
-without it). The build script applies the one small patch in
-oracle/patches/ and builds. design/oracle.md records the contract and the
+The oracle lives in oracle/: a Rust crate over pyrefly, pinned to the
+commit in oracle/pyrefly.rev. The build script fetches that commit
+(shallow), applies the one small patch in oracle/patches/ and builds. design/oracle.md records the contract and the
 decisions behind it.
 
 tests/run.sh adds your local site directory and nvim-treesitter to the

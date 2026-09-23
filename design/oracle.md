@@ -137,7 +137,7 @@ Lives in this repo under `oracle/` (a Cargo workspace member of one crate), so a
 - `state.rs`: one pyrefly `State` per workspace root, config found by pyrefly's own finder (it reads `pyrightconfig.json` and `pyproject.toml`, spike 3), files added lazily on first request.
 - `walk.rs`: the port of the spike probe's `describe`: type at position → Scope; class → members via `attributes_of_type` filtered by policy → Nodes with locations; function → params/return; union → variants; overloads → groups. Depth-limited; beyond depth emits `expandable` with `location`.
 - `policy.rs`: the member filter, MRO cut, async return rule, informative-inference rule. Pure functions over `pyrefly_types`, unit-tested in Rust against the spike fixture.
-- `vendor/pyrefly` as a **git submodule** pinned to a tag, plus `typescope-attributes.patch` applied by `build.rs`-free means: a `just build` / `scripts/build-oracle.sh` that does `git submodule update`, `git apply --check`, `cargo build --release`. No build-time patching magic; the patched tree is what CI builds.
+- `vendor/pyrefly` pinned to the commit in `oracle/pyrefly.rev`, plus `typescope-attributes.patch` applied by `build.rs`-free means: `scripts/build-oracle.sh` does a shallow fetch of that commit into the gitignored `vendor/pyrefly`, `git apply --check`, `cargo build --release`. No build-time patching magic; the patched tree is what CI builds. (0.2.0 had it as a git submodule; plugin managers clone submodules, and pyrefly's history is ~1.9 GB, so lazy.nvim timed out mid-checkout. 0.2.1 moved the pin to a file.)
 - Release: a GitHub Actions matrix builds the three targets (no Intel macOS), uploads binaries + `SHA256SUMS` to the release the plugin tag creates. Local dev builds on the M1 in 3.5 min cold.
 
 ## 7. Verification
@@ -179,5 +179,5 @@ A second language's oracle (the contract is designed for it, nothing is built); 
 
 - **pydantic.** Not probed with pyrefly. If its `BaseModel` handling differs materially from basedpyright's, the pydantic floats — the plugin's best case today — could regress. **Mitigation:** bead 2's fixture set includes the pydantic classes from `shapes.py` and one `Field(...)`-heavy model, and the parity gate diffs them first. If pyrefly is wrong there, that's a stop-and-report, not a workaround.
 - **pyrefly API churn.** The library surface is documented as unstable. Pinning to a tag and vendoring makes each bump a deliberate, tested step; the patch is ten lines and moves with it.
-- **Binary trust.** Downloading executables is a step some users refuse on principle; decision 2's override and opt-out exist for them, and the build is reproducible from the tagged submodule.
+- **Binary trust.** Downloading executables is a step some users refuse on principle; decision 2's override and opt-out exist for them, and the build is reproducible from the pinned commit and the patch.
 - **Two checkers disagreeing** in a way a user notices: TypeScope's float says one thing, basedpyright's diagnostics another. Cosmetic in spike 3; the changelog says plainly that structure comes from pyrefly.
