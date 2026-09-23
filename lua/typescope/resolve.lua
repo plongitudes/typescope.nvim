@@ -233,7 +233,12 @@ function M.recurse(client, node, token, cb)
         lazy.bufnr,
         -- `expand` is the path the oracle put on this node, unread here: a
         -- nested third-party class opens only along it
-        { position = { line = lazy.pos[1], character = lazy.pos[2] }, depth = depth, call = lazy.call, expand = lazy.expand },
+        {
+          position = { line = lazy.pos[1], character = lazy.pos[2] },
+          depth = depth,
+          call = lazy.call,
+          expand = lazy.expand,
+        },
         token,
         resume
       )

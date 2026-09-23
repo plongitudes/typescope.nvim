@@ -43,10 +43,7 @@ end
 
 -- pure parts
 local target = oracle.target()
-check(
-  target == "darwin-arm64" or target == "linux-x86_64" or target == "linux-arm64",
-  "target(): " .. tostring(target)
-)
+check(target == "darwin-arm64" or target == "linux-x86_64" or target == "linux-arm64", "target(): " .. tostring(target))
 local _, final = oracle.install_path()
 check(
   final == tmp .. "/data/typescope/oracle/" .. oracle.RELEASE .. "/typescope-oracle",
