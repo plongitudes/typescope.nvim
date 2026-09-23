@@ -1,3 +1,4 @@
 [submodule "oracle/vendor/pyrefly"]
 	path = oracle/vendor/pyrefly
 	url = https://github.com/facebook/pyrefly.git
+    ignore = dirty
