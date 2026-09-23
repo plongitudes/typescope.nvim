@@ -561,6 +561,26 @@ fn a_nested_third_party_class_opens_by_its_path_from_every_scope() {
     opens_by_its_path("oracle/oracle.py", "        kept = self.held", 20, false, "self.held");
 }
 
+/// Facts read from a class's own source (docstring, decorator, literal
+/// defaults) when its module was only ever reached as an import. A fresh
+/// State, so no other test has opened `oracle/oracle.py` for it: pyrefly
+/// keeps a syntax tree only for modules it checked in full, and the shared
+/// State hid that every one of these came back empty.
+#[test]
+fn source_facts_survive_a_module_that_was_only_imported() {
+    let fresh = Oracle::new();
+    let ask = |prefix: &str, col: u32| {
+        let line = line_of("oracle/importer.py", prefix);
+        fresh.structure(&fixtures().join("oracle/importer.py"), line, col, 2, Members::Data, false, None).unwrap()
+    };
+    let alias = ask("alias = UsesThirdParty", 0);
+    assert_eq!(alias.docstring.as_deref(), Some("A project class whose field is an installed package's class."));
+    let cfg = ask("from oracle.oracle import ServerConfig", 26);
+    assert_eq!(cfg.roots[0].ty.category, "dataclass", "@dataclass read from the defining module");
+    let port = find(&cfg.roots[0], "port");
+    assert_eq!(port.default.as_deref(), Some("8000"), "literal default read from the defining module");
+}
+
 #[test]
 fn a_class_docstring_comes_from_the_module_that_defines_it() {
     let want = "A project class whose field is an installed package's class.";

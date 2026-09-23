@@ -279,7 +279,7 @@ fn declaration_scope(req: &Request<'_>, walker: &Walker<'_>, ty: &Type) -> Scope
 
 fn ast_of<'a>(req: &Request<'a>, cls: &Class) -> Option<(std::sync::Arc<ruff_python_ast::ModModule>, Module)> {
     let handle = Handle::new(cls.module_name(), cls.module_path().dupe(), req.handle.sys_info().dupe());
-    Some((req.tx.get_ast(&handle)?, req.tx.get_module_info(&handle)?))
+    crate::walk::module_source(req.tx, &handle)
 }
 
 /// A function's docstring: from its own module, or — when it is defined in
@@ -287,7 +287,7 @@ fn ast_of<'a>(req: &Request<'a>, cls: &Class) -> Option<(std::sync::Arc<ruff_pyt
 /// `.py` beside it. The treesitter resolver's "stub bodies are `...`; the
 /// runtime docstring rides along", carried forward.
 fn docstring_of_def(req: &Request<'_>, handle: &Handle, name: &str, name_range: TextRange) -> Option<String> {
-    if let Some(ast) = req.tx.get_ast(handle)
+    if let Some((ast, _)) = crate::walk::module_source(req.tx, handle)
         && let Some(body) = find_body(&ast.body, name_range)
         && let Some(d) = docstring_of_body(body)
     {
