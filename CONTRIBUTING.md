@@ -2,7 +2,7 @@
 
 ## Getting set up
 
-You need the same things TypeScope needs at runtime — Neovim 0.10+, the TreeSitter Python parser, and the oracle binary — plus [stylua](https://github.com/JohnnyMorganz/StyLua) and [luacheck](https://github.com/lunarmodules/luacheck) for the two contracts CI enforces, and a Rust toolchain to build and test the oracle.
+You need the same things TypeScope needs at runtime — Neovim 0.11+, the TreeSitter Python parser, and the oracle binary — plus [stylua](https://github.com/JohnnyMorganz/StyLua) and [luacheck](https://github.com/lunarmodules/luacheck) for the two contracts CI enforces, and a Rust toolchain to build and test the oracle.
 
 ```sh
 brew install stylua luacheck   # or your platform's equivalent

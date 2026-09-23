@@ -1522,11 +1522,8 @@ do
 
   -- and the cut lands on a character boundary, never inside one — the other
   -- half of what the byte-indexed scan got wrong
-  -- NOT vim.str_utfindex: its signature changed between 0.10 and 0.11 (the
-  -- reason lsp.lua:33 carries a shim), and the 0.11 form errors on 0.10 —
-  -- which took this whole file down on the CI floor while passing locally.
-  -- str_utf_pos is stable across both; the lead byte gives the length, the
-  -- same inline decode render.lua uses.
+  -- str_utf_pos: the lead byte gives the length, the same inline decode
+  -- render.lua uses.
   local function ends_clean(s)
     if #s == 0 then
       return true

@@ -16,8 +16,6 @@
 
 local M = {}
 
-local has_011 = vim.fn.has("nvim-0.11") == 1
-
 --- The protocol number this plugin speaks; the binary reports its own in
 --- `experimental.typescope.protocol` and a mismatch refuses to attach.
 M.PROTOCOL = 1
@@ -118,26 +116,18 @@ function M.target()
   return os .. "-" .. arch
 end
 
---- The SHA-256 of a file's contents, lowercase hex, or nil and why.
---- nvim 0.10's sha256() refuses a string with NUL bytes (every binary), so
---- there the hash comes from sha256sum / shasum instead.
+--- The SHA-256 of a file's contents, lowercase hex, or nil and why. Not
+--- vim.fn.sha256(): through at least nvim 0.11.0 it refuses a string with
+--- NUL bytes, which is every binary. sha256sum (Linux, recent macOS) or
+--- shasum (every macOS) instead — one path on every supported version.
 ---@param path string
 ---@return string? hex, string? why
 function M.sha256_file(path)
-  if has_011 then
-    local f = io.open(path, "rb")
-    if not f then
-      return nil, "cannot read " .. path
-    end
-    local data = f:read("a")
-    f:close()
-    return vim.fn.sha256(data)
-  end
   local cmd = vim.fn.executable("sha256sum") == 1 and { "sha256sum", path }
     or vim.fn.executable("shasum") == 1 and { "shasum", "-a", "256", path }
     or nil
   if not cmd then
-    return nil, "neither sha256sum nor shasum found (needed on nvim 0.10 to verify the oracle)"
+    return nil, "neither sha256sum nor shasum found (needed to verify the oracle download)"
   end
   local out = vim.system(cmd, { text = true }):wait()
   local hex = out.code == 0 and (out.stdout or ""):match("^(%x+)")
@@ -263,13 +253,9 @@ function M.protocol_ok(capabilities)
 end
 
 local function stop(client)
-  if has_011 then
-    pcall(function()
-      client:stop(true)
-    end)
-  else
-    pcall(vim.lsp.stop_client, client.id, true)
-  end
+  pcall(function()
+    client:stop(true)
+  end)
 end
 
 --- Attach the oracle to a Python buffer (idempotent: vim.lsp.start reuses a

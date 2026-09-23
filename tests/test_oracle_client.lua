@@ -105,11 +105,7 @@ vim.wait(500)
 check(#vim.lsp.get_clients({ name = "typescope-oracle" }) == 1, "setup() twice keeps one oracle client")
 
 if client then
-  if vim.fn.has("nvim-0.11") == 1 then
-    client:stop(true)
-  else
-    vim.lsp.stop_client(client.id, true)
-  end
+  client:stop(true)
   vim.wait(2000, function()
     return vim.lsp.get_client_by_id(client.id) == nil
   end, 50)

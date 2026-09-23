@@ -1,4 +1,4 @@
--- Awaitable LSP request helpers + 0.10/0.11 compat shims.
+-- Awaitable LSP request helpers.
 --
 -- Requests go through a captured client object (client.request), NOT
 -- vim.lsp.buf.* : definition requests are fired at positions inside type
@@ -9,21 +9,14 @@ local async = require("typescope.async")
 
 local M = {}
 
-local has_011 = vim.fn.has("nvim-0.11") == 1
-
 --- First client attached to bufnr that can serve textDocument/definition.
 ---@param bufnr integer
 ---@return vim.lsp.Client?
 function M.client_for(bufnr)
   for _, client in ipairs(vim.lsp.get_clients({ bufnr = bufnr })) do
-    local ok, supported
-    if has_011 then
-      ok, supported = pcall(function()
-        return client:supports_method("textDocument/definition")
-      end)
-    else
-      ok, supported = pcall(client.supports_method, "textDocument/definition")
-    end
+    local ok, supported = pcall(function()
+      return client:supports_method("textDocument/definition")
+    end)
     if ok and supported then
       return client
     end
@@ -39,7 +32,6 @@ function M.oracle_for(bufnr)
   return require("typescope.oracle").client_for(bufnr)
 end
 
--- vim.str_utfindex/str_byteindex changed signatures between 0.10 and 0.11.
 ---@param line string
 ---@param byte_col integer
 ---@return integer utf-16 column
@@ -48,11 +40,7 @@ function M.to_utf16(line, byte_col)
   if byte_col <= 0 then
     return 0
   end
-  if has_011 then
-    return vim.str_utfindex(line, "utf-16", byte_col, false)
-  end
-  local _, utf16 = vim.str_utfindex(line, byte_col)
-  return utf16
+  return vim.str_utfindex(line, "utf-16", byte_col, false)
 end
 
 ---@param line string
@@ -62,12 +50,7 @@ function M.to_byte(line, utf16_col)
   if utf16_col <= 0 then
     return 0
   end
-  local ok, byte_col
-  if has_011 then
-    ok, byte_col = pcall(vim.str_byteindex, line, "utf-16", utf16_col, false)
-  else
-    ok, byte_col = pcall(vim.str_byteindex, line, utf16_col, true)
-  end
+  local ok, byte_col = pcall(vim.str_byteindex, line, "utf-16", utf16_col, false)
   return ok and byte_col or math.min(utf16_col, #line)
 end
 
@@ -93,25 +76,16 @@ function M.request_cb(client, method, params, token, cb)
   local handler = function(e, r)
     finish(e, r)
   end
-  local ok, request_id
-  if has_011 then
-    ok, request_id = client:request(method, params, handler)
-  else
-    ok, request_id = client.request(method, params, handler)
-  end
+  local ok, request_id = client:request(method, params, handler)
   if not ok then
     finish("request failed")
     return
   end
   table.insert(token.cancels, function()
     if request_id then
-      if has_011 then
-        pcall(function()
-          client:cancel_request(request_id)
-        end)
-      else
-        pcall(client.cancel_request, request_id)
-      end
+      pcall(function()
+        client:cancel_request(request_id)
+      end)
     end
     finish("cancelled")
   end)

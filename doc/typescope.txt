@@ -55,7 +55,7 @@ inference (drawn ≈), a narrowed variable shows its narrowed type.
 These are hard requirements. Run |:checkhealth| typescope to see which are
 missing.
 
-Neovim 0.10+                The plugin refuses to load below this and notifies
+Neovim 0.11+                The plugin refuses to load below this and notifies
                             once.
 
 typescope-oracle            The binary every type comes from. With the
@@ -68,7 +68,8 @@ typescope-oracle            The binary every type comes from. With the
                             it against the release's SHA256SUMS before
                             running it, and says so once. A plugin update
                             that pins a different release fetches that one
-                            and removes the old. Needs curl. To skip the
+                            and removes the old. Needs curl, and sha256sum
+                            or shasum for the check. To skip the
                             download, build it (|typescope-development|)
                             and set `oracle.path`, or set
                             `oracle.download = false` and place the binary

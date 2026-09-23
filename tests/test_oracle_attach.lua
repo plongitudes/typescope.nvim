@@ -40,19 +40,15 @@ vim.wait(20000, function()
 end, 50)
 check(client and client.initialized, "client initialized")
 
---- A request through the plugin's own path, which carries the 0.10 / 0.11
---- client call shapes (`client.request` vs `client:request`).
+--- A request through the plugin's own path.
 local function ask(method, params, cb)
   require("typescope.lsp").request_cb(client, method, params, require("typescope.async").token(), cb)
 end
 
 if client and client.initialized then
-  -- nvim 0.10's client does not keep serverInfo; cargo test asserts it
-  if vim.fn.has("nvim-0.11") == 1 then
-    local info = client.server_info or {}
-    check(info.name == "typescope-oracle", "serverInfo.name is typescope-oracle (got " .. tostring(info.name) .. ")")
-    check(type(info.version) == "string", "serverInfo.version is a string")
-  end
+  local info = client.server_info or {}
+  check(info.name == "typescope-oracle", "serverInfo.name is typescope-oracle (got " .. tostring(info.name) .. ")")
+  check(type(info.version) == "string", "serverInfo.version is a string")
   local caps = client.server_capabilities or {}
   local exp = caps.experimental and caps.experimental.typescope
   check(exp and exp.protocol == 1, "experimental.typescope.protocol == 1")
@@ -157,11 +153,7 @@ if client and client.initialized then
   end, 10)
   check(done2 and err2 and err2.code == -32601, "unknown request → MethodNotFound")
 
-  if vim.fn.has("nvim-0.11") == 1 then
-    client:stop(true)
-  else
-    vim.lsp.stop_client(client.id, true)
-  end
+  client:stop(true)
   vim.wait(2000, function()
     return not vim.lsp.get_client_by_id(client_id)
   end, 50)

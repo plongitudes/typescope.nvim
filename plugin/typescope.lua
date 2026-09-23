@@ -3,8 +3,8 @@ if vim.g.loaded_typescope then
 end
 vim.g.loaded_typescope = true
 
-if vim.fn.has("nvim-0.10") ~= 1 then
-  vim.notify_once("typescope.nvim requires Neovim 0.10+", vim.log.levels.ERROR)
+if vim.fn.has("nvim-0.11") ~= 1 then
+  vim.notify_once("typescope.nvim requires Neovim 0.11+", vim.log.levels.ERROR)
   return
 end
 
