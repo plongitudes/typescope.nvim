@@ -7,6 +7,7 @@ Notable changes to TypeScope, newest first. The format follows [Keep a Changelog
 ### Fixed
 
 - **Installing or updating 0.2.0 through a plugin manager downloaded pyrefly's whole git history** (about 1.9 GB), because the oracle's source pulled it in as a git submodule and lazy.nvim clones submodules. Lazy's two-minute limit usually cut the clone short and left the checkout broken (`fatal: could not reset submodule index`). The plugin repository has no submodules now; only building the oracle yourself fetches pyrefly, shallow, at the pinned commit (about 35 MB). If 0.2.0 left your checkout broken, delete the plugin's directory (`~/.local/share/nvim/lazy/typescope.nvim` for lazy.nvim) and install again.
+- **Facts read from a class's own source came back empty when its file was not open**: the docstring (hovering a variable that holds a class), the `@dataclass` / TypedDict category, literal defaults, and whether a function is `async`. The checker had dropped that file's syntax tree; the oracle now re-reads the source when it has.
 
 ## [0.2.0] — 2026-09-23
 
