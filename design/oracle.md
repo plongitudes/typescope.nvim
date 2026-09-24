@@ -1,6 +1,6 @@
 # The type oracle: replacing the syntax-reading resolver
 
-Status: **accepted**, 2026-09-21 — Tony took every default, with decision 6 revised as written below. Written after the three spikes on `dev/oracle-spikes` (findings under `spikes/`). Each **DECISION** records the choice and the reasoning; the loop treats them as settled.
+Status: **accepted**, 2026-09-21 — Tony took every default, with decision 6 revised as written below. Written after the three spikes on `dev/oracle-spikes` (findings were under `spikes/`, removed after 4fd27be; read them with `git show 4fd27be:spikes/pyrefly-lib/FINDINGS.md` and its siblings). Each **DECISION** records the choice and the reasoning; the loop treats them as settled.
 
 ## 1. Why
 
