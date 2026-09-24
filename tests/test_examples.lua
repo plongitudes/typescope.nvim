@@ -534,4 +534,45 @@ do
   vim.system = real_system
 end
 
+-- group_for: the ledger's unit of generation. The panel's node first, then
+-- its nearest siblings outward, one batch at most, skipping what a model
+-- would not be asked about (a real default is already the example).
+do
+  examples._clear_llm_cache()
+  local roots = {}
+  for i = 1, 12 do
+    table.insert(
+      roots,
+      model.new({ name = "p" .. i, kind = "param", type = { display = "str", category = "builtin" } })
+    )
+  end
+  roots[6].default = '"set"'
+  local names = {}
+  for _, n in ipairs(examples.group_for(roots, roots[5])) do
+    table.insert(names, n.name)
+  end
+  check(
+    "group starts at the node and fans out nearest first",
+    table.concat(names, ",") == "p5,p4,p7,p3,p8,p2,p9,p1",
+    table.concat(names, ",")
+  )
+  check("...skipping a sibling with a real default", not vim.tbl_contains(names, "p6"))
+  -- nested: siblings are the parent's children, not the roots
+  local parent = model.new({
+    name = "cfg",
+    kind = "param",
+    type = { display = "Cfg", category = "class" },
+    expanded = true,
+    children = {
+      { name = "host", type = { display = "str", category = "builtin" } },
+      { name = "port", type = { display = "int", category = "builtin" } },
+    },
+  })
+  local group = examples.group_for({ parent, roots[1] }, parent.children[2])
+  check(
+    "a nested node's group is its own siblings",
+    #group == 2 and group[1].name == "port" and group[2].name == "host"
+  )
+end
+
 print(failures == 0 and "EXAMPLES ALL PASS" or ("EXAMPLES " .. failures .. " FAILURES"))

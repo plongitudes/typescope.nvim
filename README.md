@@ -109,7 +109,7 @@ Bind these rather than writing Lua callbacks:
 | --- | --- |
 | `<CR>` | Expand / collapse the node under the cursor |
 | `l` / `h` | Open one more level under the node / collapse node (or jump to the parent and collapse it) |
-| `L` / `H` | Open the node's whole subtree / collapse all |
+| `H` | Collapse all |
 | `j` / `k` | Move by node, not by line |
 | `e` | Toggle examples |
 | `E` | Generate LLM examples for the visible tree (needs ollama) |
@@ -171,7 +171,6 @@ require("typescope").setup({
     expand = "<CR>",
     expand_node = "l",
     collapse_node = "h",
-    expand_all = "L",
     collapse_all = "H",
     toggle_examples = "e",
     docstring = "d",

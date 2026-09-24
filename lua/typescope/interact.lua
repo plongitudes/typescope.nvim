@@ -40,6 +40,9 @@ end
 ---@field on_close fun()
 ---@field on_recurse? fun(node: typescope.Node, done: fun()) lazily resolve a beyond-depth node
 ---@field on_llm? fun(roots: typescope.Node[], done: fun(ok: boolean, err: string?)) generate LLM examples for the visible tree
+---@field on_llm_nodes? fun(nodes: typescope.Node[], done: fun(ok: boolean, err: string?)) generate LLM examples for these leaves
+---@field auto_examples? boolean ledger: generate the panel node's sibling group as the cursor reaches it
+---@field on_llm_error? fun(err: string) an automatic generation failed
 ---@field extra_help? { [1]: string, [2]: string }[] host rows for the ? overlay
 
 ---@param width integer
@@ -49,7 +52,6 @@ local function help_lines(width, extra)
   local rows = {
     { km.expand, "expand / collapse" },
     { km.collapse_node .. " / " .. km.expand_node, "collapse node / open one more level" },
-    { km.expand_all, "open this subtree" },
     { km.collapse_all, "collapse all" },
     { km.toggle_examples, "toggle examples" },
     { km.llm_generate, "llm examples (ollama)" },
@@ -99,7 +101,7 @@ function M.attach(args)
   -- refresh(), which is defined further down. Without this, that reference
   -- binds to a global (nil) instead of the local, and the wave dies on its
   -- first tick with nothing to show for it.
-  local refresh ---@type fun(focus_id?: string)
+  local refresh ---@type fun(focus_id?: string, frame?: boolean)
 
   -- ONE frame clock for every animation (jit). Measured cost of a full frame
   -- — render + float.update + treesitter injections + forced redraw, on a
@@ -207,7 +209,7 @@ function M.attach(args)
         end
         -- paint first, THEN decide: the frame that retires the last animation
         -- is the one that shows the settled values
-        if not pcall(refresh) or not animating() then
+        if not pcall(refresh, nil, true) or not animating() then
           stop_clock()
         end
       end)
@@ -344,7 +346,13 @@ function M.attach(args)
     return { lines = lines, highlights = highlights, ts_injections = injections, height = st.panel_h }, r.width
   end
 
-  function refresh(focus_id)
+  -- the rows as last rendered, and the float width they were laid out for:
+  -- reused by frames that change nothing but the panel (see refresh)
+  local rows = nil ---@type { result: typescope.RenderResult, width: integer }?
+
+  ---@param focus_id? string park the cursor on this node's row
+  ---@param frame? boolean nothing but the clock or the cursor moved
+  function refresh(focus_id, frame)
     -- help (?) replaces the view entirely: content routinely exceeds
     -- max_height, so an appended panel lands below the fold and is never seen
     if st.show_help then
@@ -361,6 +369,7 @@ function M.attach(args)
         footer = footer_for(st.width),
       })
       vim.api.nvim_win_set_cursor(st.handle.win, { 1, 0 })
+      rows = nil
       return
     end
     -- the doc view (d) is the same trade: the whole docstring where the rows
@@ -373,6 +382,7 @@ function M.attach(args)
         error(r)
       end
       st.result = r
+      rows = nil
       st.width = math.max(st.width, math.min(st.opts.max_width, r.width))
       float.update(st.handle, {
         lines = r.lines,
@@ -398,9 +408,18 @@ function M.attach(args)
     -- what keeps it from chasing its own tail — the bar reaching the edge is
     -- what makes the edge stay put.
     st.opts.window_width = st.width
-    st.result = render.render(st.roots, st.opts)
+    -- The ledger's rows carry no examples — no bars, no reveals — so an
+    -- animation frame, or the cursor moving, changes the panel and nothing
+    -- else. Re-rendering every row 60 times a second anyway was most of what
+    -- a big tree cost while a batch was out. Only the rules depend on the
+    -- float's width, so a reuse is keyed on that.
+    local reuse = frame and st.panel and rows ~= nil and rows.width == st.width
+    if not reuse then
+      rows = { result = render.render(st.roots, st.opts), width = st.width }
+    end
+    st.result = rows.result
     sync_clock()
-    local lines = vim.list_extend({}, st.result.lines)
+    local lines = not reuse and vim.list_extend({}, st.result.lines) or nil
     local highlights = st.result.highlights
     local panel, panel_width = nil, 0
     if st.panel then
@@ -429,7 +448,7 @@ function M.attach(args)
       ts_injections = st.result.ts_injections,
       lang = st.opts.lang,
       width = grown_width(),
-      height = math.min(st.max_height - (panel and panel.height or 0), #lines),
+      height = math.min(st.max_height - (panel and panel.height or 0), #st.result.lines),
       panel = panel,
       footer = footer_for(grown_width()),
     })
@@ -548,35 +567,6 @@ function M.attach(args)
         refresh(parent.id)
       end
     end
-  end)
-  -- L chases lazy nodes this many resolve rounds deep. Each round is one
-  -- level of structure that wasn't fetched up front; the bound is what stops
-  -- a self-referencing type from resolving forever.
-  local LAZY_ROUNDS = 4
-  map(km.expand_all, function()
-    local node = node_under_cursor()
-    if not node then
-      return
-    end
-    -- Everything already loaded opens in the first round; each lazy node
-    -- that lands brings children the next round picks up. `tried` keeps a
-    -- resolve that failed (the node goes back to lazy) from being retried.
-    local tried = {}
-    local function round(left)
-      local targets = {}
-      model.walk_subtree(node, function(n)
-        if model.is_expandable(n) and not n.state.expanded and not tried[n] then
-          tried[n] = true
-          table.insert(targets, n)
-        end
-      end)
-      if #targets > 0 then
-        open_nodes(targets, left > 1 and function()
-          round(left - 1)
-        end or nil)
-      end
-    end
-    round(LAZY_ROUNDS)
   end)
   map(km.collapse_all, function()
     local node = node_under_cursor()
@@ -834,6 +824,45 @@ function M.attach(args)
     jump(-1)
   end)
 
+  -- ledger, example_mode = "llm": examples come a sibling group at a time,
+  -- for the node the panel is on. One batch in flight and never a queue:
+  -- when it lands, whatever node the cursor is on THEN is what gets asked
+  -- about, so groups the cursor only passed through are never generated,
+  -- and the node you are looking at never waits behind stale ones.
+  local function follow_examples()
+    if not st.auto_examples or st.following or not args.on_llm_nodes then
+      return
+    end
+    local node = st.panel_id and model.find(st.roots, st.panel_id)
+    if not node then
+      return
+    end
+    local group = examples.group_for(st.roots, node)
+    if #group == 0 then
+      return
+    end
+    st.following = true
+    args.on_llm_nodes(group, function(ok, err)
+      st.following = false
+      if not vim.api.nvim_win_is_valid(st.handle.win) then
+        return
+      end
+      refresh(nil, true)
+      if not ok and err then
+        -- a failure leaves no MISS behind (the transport may recover), so
+        -- asking again straight away would ask forever; stop following
+        st.auto_examples = false
+        if args.on_llm_error then
+          args.on_llm_error(err)
+        end
+        return
+      end
+      follow_examples()
+    end)
+    refresh(nil, true) -- the panel's bar starts now
+  end
+  st.auto_examples = args.auto_examples
+
   -- ledger (U6): the panel follows the cursor. The rows never change with
   -- it, so a move repaints only the panel (float.update skips unchanged
   -- lines). A line that maps to no node — the header — leaves the panel on
@@ -849,7 +878,8 @@ function M.attach(args)
         local id = st.result.line_to_node[vim.api.nvim_win_get_cursor(st.handle.win)[1]]
         if id and id ~= st.panel_id then
           st.panel_id = id
-          refresh()
+          refresh(nil, true)
+          follow_examples()
         end
       end,
     })
@@ -867,6 +897,7 @@ function M.attach(args)
       st.panel_id = st.result.line_to_node[i]
     end
     refresh()
+    follow_examples()
   end
 
   return { opts = st.opts, refresh = refresh, generate = generate }

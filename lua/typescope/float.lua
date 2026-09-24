@@ -472,9 +472,11 @@ end
 --- Swap content and resize in one synchronous block — no scheduling between
 --- buffer and window updates, so expand/collapse never shows a partial frame.
 ---@param handle typescope.FloatHandle
----@param opts { lines: string[], highlights: typescope.Highlight[], ts_injections?: typescope.Injection[], lang?: string, width?: integer, height?: integer, title?: string, panel?: typescope.PanelUpdate, footer?: { [1]: string, [2]: string }[] }
+---@param opts { lines?: string[], highlights: typescope.Highlight[], ts_injections?: typescope.Injection[], lang?: string, width?: integer, height?: integer, title?: string, panel?: typescope.PanelUpdate, footer?: { [1]: string, [2]: string }[] } lines = nil: the main window's content is unchanged (only the panel or the frame moved)
 function M.update(handle, opts)
-  set_content(handle.buf, opts.lines, opts.highlights, opts.ts_injections, opts.lang)
+  if opts.lines then
+    set_content(handle.buf, opts.lines, opts.highlights, opts.ts_injections, opts.lang)
+  end
   if handle.frame then
     layout(handle, opts.width, opts.height, opts.panel, opts.footer, opts.lang)
     return

@@ -321,6 +321,19 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
         require("typescope.examples").llm(tree_roots, session.token, done, on_progress)
       end
     end,
+    on_llm_nodes = function(nodes, done)
+      if session then
+        require("typescope.examples").llm_nodes(nodes, session.token, done)
+      end
+    end,
+    -- ledger: the panel's sibling group, generated as the cursor gets there
+    auto_examples = panel ~= nil and cfg.ollama.enabled and cfg.example_mode == "llm",
+    on_llm_error = function(err)
+      if not llm_auto_warned then
+        llm_auto_warned = true
+        vim.notify("typescope: auto LLM examples unavailable — " .. err, vim.log.levels.WARN)
+      end
+    end,
   })
 
   local augroup = vim.api.nvim_create_augroup("TypeScopeSession", { clear = true })
@@ -357,7 +370,9 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
   -- example_mode = "llm": generate automatically on open. The float is fully
   -- usable meanwhile (heuristics show immediately); LLM values swap in when
   -- the background request lands. E stays useful for newly expanded leaves.
-  if cfg.ollama.enabled and cfg.example_mode == "llm" then
+  -- The ledger generates a sibling group at a time as the cursor moves
+  -- (interact's auto_examples) instead.
+  if cfg.ollama.enabled and cfg.example_mode == "llm" and not panel then
     -- same single-flight machinery as the E keymap (spinner, progress,
     -- refresh); only the error policy differs: warn once per nvim session
     ctrl.generate(function(err)

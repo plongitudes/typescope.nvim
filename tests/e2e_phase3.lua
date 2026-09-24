@@ -122,9 +122,9 @@ end
 require("typescope").close()
 check("closed cleanly", float_lines() == nil)
 
--- L must RESOLVE lazy nodes, not just flip `expanded`: `returns` is
--- cross-file lazy, and before this it came out marked open with nothing
--- underneath while <CR> on the same node resolved it fine.
+-- l must RESOLVE lazy nodes, not just flip `expanded`: `returns` is
+-- cross-file lazy (the same bug once had L marking it open with nothing
+-- underneath while <CR> on the same node resolved it fine).
 -- the reopen must start cold: the resolve cache still holds the tree the
 -- <CR> above already expanded, which would make this test vacuous
 require("typescope.resolve").clear_cache()
@@ -137,28 +137,32 @@ do
   local before, lw = float_lines()
   check("reopened collapsed (status not yet resolved)", not table.concat(before, "\n"):find("status"))
   vim.api.nvim_set_current_win(lw)
-  -- L opens the cursor's subtree, so park on `returns` first
-  for i, l in ipairs(before) do
-    if l:find("returns") then
-      vim.api.nvim_win_set_cursor(lw, { i, 0 })
-      break
+  local function on_returns()
+    for i, l in ipairs(float_lines()) do
+      if l:find("returns") and not l:find("->") then
+        vim.api.nvim_win_set_cursor(lw, { i, 0 })
+        return
+      end
     end
   end
-  vim.api.nvim_feedkeys("L", "x", false)
+  on_returns()
+  vim.api.nvim_feedkeys("l", "x", false)
   vim.wait(2000, function()
     return table.concat(float_lines() or {}, "\n"):find("status") ~= nil
   end)
   check(
-    "L resolves lazy nodes (returns expands to Response fields)",
+    "l resolves lazy nodes (returns expands to Response fields)",
     table.concat(float_lines(), "\n"):find("status") ~= nil
   )
-  -- L keeps going past the first lazy level, and stays inside its subtree
+  -- a second press goes a level further, and stays inside the subtree
+  on_returns()
+  vim.api.nvim_feedkeys("l", "x", false)
   vim.wait(2000, function()
     return table.concat(float_lines() or {}, "\n"):find("content_type") ~= nil
   end)
   local after = table.concat(float_lines(), "\n")
-  check("L opens the subtree all the way down (returns.headers fields)", after:find("content_type") ~= nil)
-  check("L leaves a sibling param's subtree alone (config.retry still collapsed)", after:find("▸ retry") ~= nil)
+  check("l again opens the next level (returns.headers fields)", after:find("content_type") ~= nil)
+  check("l leaves a sibling param's subtree alone (config.retry still collapsed)", after:find("▸ retry") ~= nil)
   -- l on an already-open node opens its next level: config is open, so the
   -- next press reveals retry's fields
   for i, l in ipairs(float_lines()) do

@@ -123,6 +123,12 @@ local function is_unbound_notation(display)
   return stripped:find("[%w_]+@[%w_]+") ~= nil
 end
 
+-- Leaves per request: a batch's ~8×15 output tokens finishes in a few
+-- seconds even on small machines. One monolithic request for a 48-leaf
+-- uvicorn.run takes 30s+ of generation — no timeout survives that, and a
+-- timed-out request caches nothing (ollama cancels on disconnect).
+local LLM_BATCH = 8
+
 local function eligible(node)
   -- "…" is the normalised stub placeholder (extract/python.lua's default_text)
   -- and "..." is the raw form, still reachable from a source file rather than a
@@ -181,11 +187,43 @@ local function visible_leaves(roots)
   return leaves
 end
 
--- Leaves per request: a batch's ~8×15 output tokens finishes in a few
--- seconds even on small machines. One monolithic request for a 48-leaf
--- uvicorn.run takes 30s+ of generation — no timeout survives that, and a
--- timed-out request caches nothing (ollama cancels on disconnect).
-local LLM_BATCH = 8
+--- The ledger's unit of generation: the leaves beside `node` that still need
+--- asking, nearest first and `node` itself ahead of them, at most one batch.
+--- The panel shows one node at a time, so generating the whole visible tree
+--- asks a slow model about rows nobody may ever look at; the neighbours are
+--- where the cursor goes next. Values already cached are copied on here.
+---@param roots typescope.Node[]
+---@param node typescope.Node
+---@return typescope.Node[]
+function M.group_for(roots, node)
+  local parent = model.parent(roots, node.id)
+  local siblings = parent and parent.children or roots
+  local at = 1
+  for i, sib in ipairs(siblings) do
+    if sib == node then
+      at = i
+    end
+  end
+  local group = {}
+  local function consider(sib)
+    if #group >= LLM_BATCH or not sib or not eligible(sib) then
+      return
+    end
+    local key = cache_key(sib)
+    local cached = llm_cache[key]
+    if cached then
+      sib.example.llm = cached
+    elseif cached == nil and not in_flight[key] then
+      table.insert(group, sib)
+    end
+  end
+  consider(siblings[at])
+  for d = 1, #siblings do
+    consider(siblings[at + d])
+    consider(siblings[at - d])
+  end
+  return group
+end
 
 --- Generate LLM examples for the VISIBLE eligible leaves, in batches, filling
 --- progressively: on_progress fires after each batch lands (callers
@@ -198,13 +236,21 @@ local LLM_BATCH = 8
 ---@param done fun(ok: boolean, err: string?)
 ---@param on_progress? fun(batches_done: integer, batches_total: integer) a batch of values just landed
 function M.llm(roots, token, done, on_progress)
+  return M.llm_nodes(visible_leaves(roots), token, done, on_progress)
+end
+
+--- M.llm for an explicit list of leaves (the ledger's sibling group).
+---@param leaves typescope.Node[]
+---@param token typescope.CancelToken
+---@param done fun(ok: boolean, err: string?)
+---@param on_progress? fun(batches_done: integer, batches_total: integer)
+function M.llm_nodes(leaves, token, done, on_progress)
   local _ = token
   local cfg = require("typescope.config").get()
   if not cfg.ollama.enabled then
     return done(false, "ollama is disabled — setup({ ollama = { enabled = true } })")
   end
 
-  local leaves = visible_leaves(roots)
   local pending = {}
   for _, node in ipairs(leaves) do
     local key = cache_key(node)

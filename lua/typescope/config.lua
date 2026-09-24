@@ -29,7 +29,6 @@
 ---@field expand string toggle node under cursor
 ---@field expand_node string open one more level under the cursor's node (no-op when fully open)
 ---@field collapse_node string collapse node, or jump to + collapse parent
----@field expand_all string open the cursor's whole subtree
 ---@field collapse_all string collapse the whole tree
 ---@field toggle_examples string
 ---@field llm_generate string
@@ -141,7 +140,6 @@ local defaults = {
     expand = "<CR>",
     expand_node = "l",
     collapse_node = "h",
-    expand_all = "L",
     collapse_all = "H",
     toggle_examples = "e",
     docstring = "d",
@@ -246,7 +244,6 @@ local function validate(cfg)
     "expand",
     "expand_node",
     "collapse_node",
-    "expand_all",
     "collapse_all",
     "toggle_examples",
     "docstring",
@@ -262,6 +259,16 @@ end
 ---@param opts? table
 ---@return typescope.Config
 function M.setup(opts)
+  -- removed in 0.3.0: in the ledger, l opens a subtree a level at a time and
+  -- the panel shows one node, so "open everything under here" mostly cost a
+  -- slow local model and a pinned oracle. Carried keys are harmless; say so
+  -- once rather than failing the whole setup over it.
+  if opts and type(opts.keymaps) == "table" and opts.keymaps.expand_all ~= nil then
+    vim.notify(
+      "typescope: keymaps.expand_all (L) was removed in 0.3.0; press l repeatedly instead",
+      vim.log.levels.WARN
+    )
+  end
   local merged = vim.tbl_deep_extend("force", vim.deepcopy(defaults), opts or {})
   validate(merged)
   options = merged
