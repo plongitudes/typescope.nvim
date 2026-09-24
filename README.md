@@ -111,8 +111,7 @@ Bind these rather than writing Lua callbacks:
 | `l` / `h` | Open one more level under the node / collapse node (or jump to the parent and collapse it) |
 | `H` | Collapse all |
 | `j` / `k` | Move by node, not by line |
-| `e` | Toggle examples |
-| `E` | Generate LLM examples for the visible tree (needs ollama) |
+| `e` | Ask the model for this row's example, and its neighbours' (needs ollama) |
 | `d` | Docstring: show all of it (the ledger swaps it in for the rows; `tree` jumps into its section), or go back |
 | `q` / `<Esc>` | Close |
 | `?` | Toggle the help overlay |
@@ -172,9 +171,8 @@ require("typescope").setup({
     expand_node = "l",
     collapse_node = "h",
     collapse_all = "H",
-    toggle_examples = "e",
     docstring = "d",
-    llm_generate = "E",
+    llm_generate = "e",
     close = "q",
     help = "?",
   },
@@ -238,13 +236,13 @@ Off by default while it bakes.
 
 The `example` column shows a plausible value for each leaf.
 
-- `example_mode = "heuristic"` (default) — pattern-table values, matched on name and type. No network, no model, instant. Press `E` in the float to generate LLM values on demand for what is visible.
-- `example_mode = "llm"` — generate through ollama automatically when the float opens. Heuristics show until the real values land, then swap in place.
+- `example_mode = "heuristic"` (default) — pattern-table values, matched on name and type. No network, no model, instant. Press `e` on a row to ask the model for its example (and its nearest neighbours') on demand.
+- `example_mode = "llm"` — generate through ollama automatically. In the ledger that happens as you move: the row the panel is on and its nearest neighbours, one batch at a time. Heuristics show until the real values land, then swap in place. `e` on a row asks again, including rows the model had no answer for.
 - `example_mode = "none"` — no example column at all.
 
 ### The RAM cost of ollama
 
-`ollama.enabled` defaults to `false` for a reason worth stating plainly: a loaded model is **resident RAM**, roughly 2GB for the default `qwen2.5-coder:3b`. `keep_alive` controls how long it stays after a request — the default `"5m"` matches ollama's own, and on a small-RAM machine it is the *only* thing that gives the memory back on a server TypeScope borrowed rather than spawned. Raise it if you have the headroom and want warm `E` presses all session.
+`ollama.enabled` defaults to `false` for a reason worth stating plainly: a loaded model is **resident RAM**, roughly 2GB for the default `qwen2.5-coder:3b`. `keep_alive` controls how long it stays after a request — the default `"5m"` matches ollama's own, and on a small-RAM machine it is the *only* thing that gives the memory back on a server TypeScope borrowed rather than spawned. Raise it if you have the headroom and want warm `e` presses all session.
 
 `autostart = true` spawns `ollama serve` as a child process when the port refuses connections, and that child dies with Neovim, so the RAM comes back on quit. A server that is already running is never touched, and never shut down.
 

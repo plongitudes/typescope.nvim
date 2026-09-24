@@ -53,8 +53,7 @@ local function help_lines(width, extra)
     { km.expand, "expand / collapse" },
     { km.collapse_node .. " / " .. km.expand_node, "collapse node / open one more level" },
     { km.collapse_all, "collapse all" },
-    { km.toggle_examples, "toggle examples" },
-    { km.llm_generate, "llm examples (ollama)" },
+    { km.llm_generate, "example for this row, from the model" },
     { km.docstring, "docstring: open / back" },
     { km.close .. " / <Esc>", "close" },
     { km.help, "toggle this help" },
@@ -576,10 +575,6 @@ function M.attach(args)
     -- the cursor's node likely vanished; land on its root ancestor
     refresh(node and node.id:match("^[^.]+"))
   end)
-  map(km.toggle_examples, function()
-    st.opts.show_examples = not st.opts.show_examples
-    refresh()
-  end)
   map(km.help, function()
     local node = node_under_cursor()
     if st.show_doc then
@@ -696,7 +691,7 @@ function M.attach(args)
       vim.api.nvim_win_set_cursor(st.handle.win, { target, 0 })
     end
   end)
-  -- Single-flight LLM generation, shared by the E keymap and the auto-open
+  -- Single-flight whole-tree LLM generation, for the tree layout's auto-open
   -- path: concurrent runs double requests AND nest title spinners (the inner
   -- one captures "generating…" as the original title and restores it
   -- forever — Tony's frozen-title screenshot).
@@ -739,7 +734,7 @@ function M.attach(args)
       -- leaf's pending flag, and the placeholder bars it painted at the start
       -- sit there until something repaints them. Not an edge case: a retry
       -- re-asks only the leaves that whiffed last time, so "filled nothing"
-      -- is the ordinary outcome of pressing E again on a leaf the model has
+      -- is the ordinary outcome of asking again about a leaf the model has
       -- no idea about (Tony's **kwargs).
       refresh()
       if not ok and err then
@@ -759,17 +754,6 @@ function M.attach(args)
     end)
   end
 
-  map(km.llm_generate, function()
-    if not args.on_llm then
-      vim.notify("typescope: LLM examples need a live LSP session (not available in the spike)", vim.log.levels.INFO)
-      return
-    end
-    -- an explicit press is permission to re-ask leaves the model whiffed on;
-    -- the auto-run on open skips them (MISS sentinels) to avoid regenerating
-    -- on every reopen
-    require("typescope.examples").retry_misses(st.roots)
-    generate()
-  end)
   local function close()
     stop_clock()
     args.on_close()
@@ -824,43 +808,91 @@ function M.attach(args)
     jump(-1)
   end)
 
-  -- ledger, example_mode = "llm": examples come a sibling group at a time,
-  -- for the node the panel is on. One batch in flight and never a queue:
-  -- when it lands, whatever node the cursor is on THEN is what gets asked
-  -- about, so groups the cursor only passed through are never generated,
-  -- and the node you are looking at never waits behind stale ones.
-  local function follow_examples()
-    if not st.auto_examples or st.following or not args.on_llm_nodes then
-      return
+  -- Examples come a sibling group at a time (examples.group_for): the
+  -- panel's node as the cursor reaches it (ledger, example_mode = "llm"),
+  -- or the cursor's node on e. One batch in flight and never a queue — a
+  -- slow local model answers one request at a time anyway, and a backlog
+  -- only puts the node you are looking at behind ones you have left. What
+  -- arrives meanwhile takes the single `st.ask_next` slot, latest wins, and
+  -- runs when the batch lands; with nothing there, the panel's node then is
+  -- what the auto-follow asks about.
+  local ask, follow_examples
+  ---@param node typescope.Node
+  ---@param force? boolean an explicit e: re-ask the node, and misses beside it
+  ---@return boolean asked
+  function ask(node, force)
+    if not args.on_llm_nodes then
+      return false
     end
-    local node = st.panel_id and model.find(st.roots, st.panel_id)
-    if not node then
-      return
+    if st.asking then
+      st.ask_next = { id = node.id, force = force }
+      return true
     end
-    local group = examples.group_for(st.roots, node)
+    local group = examples.group_for(st.roots, node, force)
     if #group == 0 then
-      return
+      return false
     end
-    st.following = true
+    st.asking = true
     args.on_llm_nodes(group, function(ok, err)
-      st.following = false
+      st.asking = false
       if not vim.api.nvim_win_is_valid(st.handle.win) then
         return
       end
       refresh(nil, true)
       if not ok and err then
         -- a failure leaves no MISS behind (the transport may recover), so
-        -- asking again straight away would ask forever; stop following
+        -- following on would ask again straight away, forever
         st.auto_examples = false
-        if args.on_llm_error then
+        st.ask_next = nil
+        if force then
+          vim.notify("typescope: " .. err, vim.log.levels.WARN)
+        elseif args.on_llm_error then
           args.on_llm_error(err)
         end
         return
       end
-      follow_examples()
+      local nxt = st.ask_next
+      st.ask_next = nil
+      local target = nxt and model.find(st.roots, nxt.id)
+      if target then
+        ask(target, nxt.force)
+      else
+        follow_examples()
+      end
     end)
-    refresh(nil, true) -- the panel's bar starts now
+    refresh(nil, true) -- the bars start now
+    return true
   end
+
+  function follow_examples()
+    if not st.auto_examples then
+      return
+    end
+    local node = st.panel_id and model.find(st.roots, st.panel_id)
+    if node then
+      ask(node)
+    end
+  end
+
+  map(km.llm_generate, function()
+    if not args.on_llm_nodes then
+      return
+    end
+    if not config.get().ollama.enabled then
+      vim.notify("typescope: LLM examples need ollama — setup({ ollama = { enabled = true } })", vim.log.levels.INFO)
+      return
+    end
+    -- asking is also choosing to see the answers: with example_mode =
+    -- "heuristic" the float shows pattern-table values until told otherwise,
+    -- and heuristics stand wherever the model has nothing
+    st.opts.example_kind = "llm"
+    st.opts.show_examples = true
+    local node = node_under_cursor() or (st.panel_id and model.find(st.roots, st.panel_id))
+    if not node or not ask(node, true) then
+      vim.notify("typescope: nothing here the model can give an example for", vim.log.levels.INFO)
+    end
+  end)
+
   st.auto_examples = args.auto_examples
 
   -- ledger (U6): the panel follows the cursor. The rows never change with

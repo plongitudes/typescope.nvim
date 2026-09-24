@@ -30,8 +30,7 @@
 ---@field expand_node string open one more level under the cursor's node (no-op when fully open)
 ---@field collapse_node string collapse node, or jump to + collapse parent
 ---@field collapse_all string collapse the whole tree
----@field toggle_examples string
----@field llm_generate string
+---@field llm_generate string ask the model for the cursor node's example (and its neighbours')
 ---@field close string
 ---@field help string
 
@@ -73,7 +72,7 @@ local defaults = {
   insert_mode = { enabled = false, max_width = nil, max_detail_lines = 3 },
   depth = 2,
   show_examples = true,
-  -- "heuristic": pattern-table examples, E generates LLM values on demand
+  -- "heuristic": pattern-table examples, e asks the model on demand
   -- "llm": auto-generate via ollama on open (heuristics show until they land)
   -- "none": no examples at all
   example_mode = "heuristic",
@@ -95,7 +94,7 @@ local defaults = {
     -- and one retry follows, so a wedged server is reported at roughly
     -- 2*(timeout_ms + 2s).
     timeout_ms = 8000,
-    -- model residency after a request: longer = warm E presses all session,
+    -- model residency after a request: longer = warm e presses all session,
     -- shorter = the ~2GB comes back sooner on small-RAM machines. Matches
     -- ollama's own OLLAMA_KEEP_ALIVE default. This is also the ONLY thing
     -- that reclaims the model on a server we borrowed rather than spawned —
@@ -141,9 +140,8 @@ local defaults = {
     expand_node = "l",
     collapse_node = "h",
     collapse_all = "H",
-    toggle_examples = "e",
     docstring = "d",
-    llm_generate = "E",
+    llm_generate = "e",
     close = "q",
     help = "?",
   },
@@ -245,7 +243,6 @@ local function validate(cfg)
     "expand_node",
     "collapse_node",
     "collapse_all",
-    "toggle_examples",
     "docstring",
     "llm_generate",
     "close",
@@ -263,11 +260,21 @@ function M.setup(opts)
   -- the panel shows one node, so "open everything under here" mostly cost a
   -- slow local model and a pinned oracle. Carried keys are harmless; say so
   -- once rather than failing the whole setup over it.
-  if opts and type(opts.keymaps) == "table" and opts.keymaps.expand_all ~= nil then
-    vim.notify(
-      "typescope: keymaps.expand_all (L) was removed in 0.3.0; press l repeatedly instead",
-      vim.log.levels.WARN
-    )
+  if opts and type(opts.keymaps) == "table" then
+    if opts.keymaps.expand_all ~= nil then
+      vim.notify(
+        "typescope: keymaps.expand_all (L) was removed in 0.3.0; press l repeatedly instead",
+        vim.log.levels.WARN
+      )
+    end
+    -- e used to toggle the example column; it now asks the model for the
+    -- cursor's example, which is what E did for the whole tree
+    if opts.keymaps.toggle_examples ~= nil then
+      vim.notify(
+        "typescope: keymaps.toggle_examples was removed in 0.3.0; set show_examples instead",
+        vim.log.levels.WARN
+      )
+    end
   end
   local merged = vim.tbl_deep_extend("force", vim.deepcopy(defaults), opts or {})
   validate(merged)

@@ -362,18 +362,18 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
   -- quiet marker on the call line: TypeScope has data here
   require("typescope.hint").place(srcbuf, srccursor[1] - 1)
 
-  -- pre-load the model in the background so the first E press is warm
+  -- pre-load the model in the background so the first e press is warm
   if cfg.ollama.enabled then
     require("typescope.examples.ollama").warmup(cfg.ollama)
   end
 
   -- example_mode = "llm": generate automatically on open. The float is fully
   -- usable meanwhile (heuristics show immediately); LLM values swap in when
-  -- the background request lands. E stays useful for newly expanded leaves.
+  -- the background request lands. e asks about a row on demand.
   -- The ledger generates a sibling group at a time as the cursor moves
   -- (interact's auto_examples) instead.
   if cfg.ollama.enabled and cfg.example_mode == "llm" and not panel then
-    -- same single-flight machinery as the E keymap (spinner, progress,
+    -- the single-flight whole-tree generation (spinner, progress,
     -- refresh); only the error policy differs: warn once per nvim session
     ctrl.generate(function(err)
       if not llm_auto_warned then

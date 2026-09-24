@@ -82,18 +82,6 @@ function M.apply_cache(roots)
   return filled
 end
 
---- Forget MISS sentinels for this forest — an explicit E press is permission
---- to re-ask leaves the model whiffed on (the auto-run on open never does).
----@param roots typescope.Node[]
-function M.retry_misses(roots)
-  model.walk(roots, function(node)
-    local key = cache_key(node)
-    if llm_cache[key] == false then
-      llm_cache[key] = nil
-    end
-  end)
-end
-
 --- Annotate every leaf in the forest with a heuristic example. Structs,
 --- methods, and unresolved types get none — examples belong on concrete
 --- fields. Fields with a real default are also skipped: the default is
@@ -192,10 +180,13 @@ end
 --- The panel shows one node at a time, so generating the whole visible tree
 --- asks a slow model about rows nobody may ever look at; the neighbours are
 --- where the cursor goes next. Values already cached are copied on here.
+--- `force` is an explicit ask (the e key): `node` is asked again even if it
+--- has an answer, and siblings the model missed on before are asked again.
 ---@param roots typescope.Node[]
 ---@param node typescope.Node
+---@param force? boolean
 ---@return typescope.Node[]
-function M.group_for(roots, node)
+function M.group_for(roots, node, force)
   local parent = model.parent(roots, node.id)
   local siblings = parent and parent.children or roots
   local at = 1
@@ -210,6 +201,9 @@ function M.group_for(roots, node)
       return
     end
     local key = cache_key(sib)
+    if force and (sib == node or llm_cache[key] == false) and not in_flight[key] then
+      llm_cache[key] = nil
+    end
     local cached = llm_cache[key]
     if cached then
       sib.example.llm = cached

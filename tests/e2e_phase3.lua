@@ -1045,7 +1045,14 @@ local _, llm_win = float_lines()
 check("float for LLM test opened", llm_win ~= nil)
 if llm_win then
   vim.api.nvim_set_current_win(llm_win)
-  vim.api.nvim_feedkeys("E", "x", false)
+  -- e asks about the cursor's row and its siblings: park on config.host
+  for i, l in ipairs(float_lines()) do
+    if l:find("host") then
+      vim.api.nvim_win_set_cursor(0, { i, 0 })
+      break
+    end
+  end
+  vim.api.nvim_feedkeys("e", "x", false)
   -- wait for BOTH: values uncover progressively as the reveal's blocks fall
   -- (38c), so the first one on screen doesn't mean the row has settled
   -- the float opens into its new width rather than snapping there, so sample
@@ -1066,7 +1073,7 @@ if llm_win then
     return false
   end, 20)
   local all9 = table.concat(float_lines() or {}, "\n")
-  check("LLM values rendered after E", all9:find("llm%-host") ~= nil and all9:find("8443") ~= nil)
+  check("LLM values rendered after e", all9:find("llm%-host") ~= nil and all9:find("8443") ~= nil)
   -- >2 distinct widths means it eased; exactly 2 (old width, new width) is the
   -- single-frame snap this replaced
   local lo, hi = math.huge, 0
@@ -1123,7 +1130,14 @@ if slow_win then
     return orig_notify(msg, ...)
   end
   vim.api.nvim_set_current_win(slow_win)
-  vim.api.nvim_feedkeys("E", "x", false)
+  -- e asks about the cursor's row and its siblings: park on config.host
+  for i, l in ipairs(float_lines()) do
+    if l:find("host") then
+      vim.api.nvim_win_set_cursor(0, { i, 0 })
+      break
+    end
+  end
+  vim.api.nvim_feedkeys("e", "x", false)
   -- Generous on purpose: ~1s warmup probe, then 4.1s + 4.1s across the retry,
   -- and the whole thing shifts under load. A tight window here fails by
   -- arriving late, not by being wrong, which is the worst kind of red.
@@ -1139,8 +1153,11 @@ if slow_win then
 end
 require("typescope").close()
 
--- unreachable ollama: E falls back gracefully, heuristics stay
+-- unreachable ollama: e falls back gracefully, heuristics stay. A fresh
+-- tree: the resolve cache would hand back the one the first LLM test filled,
+-- whose leaves still carry its values
 require("typescope.examples")._clear_llm_cache()
+require("typescope.resolve").clear_cache()
 require("typescope").setup({ ui = { layout = "tree" }, ollama = { enabled = true, port = 1, timeout_ms = 1000 } })
 require("typescope").open()
 vim.wait(2000, function()
@@ -1150,17 +1167,24 @@ local _, dead_win = float_lines()
 check("float for fallback test opened", dead_win ~= nil)
 if dead_win then
   vim.api.nvim_set_current_win(dead_win)
-  vim.api.nvim_feedkeys("E", "x", false)
-  vim.wait(3000, function()
-    local c = vim.api.nvim_win_get_config(dead_win)
-    return c.title and c.title[1] and c.title[1][1]:find("typescope") ~= nil
+  -- e asks about the cursor's row and its siblings: park on config.host
+  for i, l in ipairs(float_lines()) do
+    if l:find("host") then
+      vim.api.nvim_win_set_cursor(0, { i, 0 })
+      break
+    end
+  end
+  vim.api.nvim_feedkeys("e", "x", false)
+  -- the rows are bars while the ask is out; the failure takes them down
+  vim.wait(5000, function()
+    return table.concat(float_lines() or {}, "\n"):find("localhost") ~= nil
   end)
   local all10 = table.concat(float_lines() or {}, "\n")
   check("heuristics survive unreachable ollama", all10:find("localhost") ~= nil)
 end
 require("typescope").close()
 
--- example_mode = "llm": generation fires automatically on open, no E needed
+-- example_mode = "llm": generation fires automatically on open, no e needed
 require("typescope").setup({
   ui = { layout = "tree" },
   example_mode = "llm",

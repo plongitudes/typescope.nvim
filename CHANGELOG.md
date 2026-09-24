@@ -7,6 +7,7 @@ Notable changes to TypeScope, newest first. The format follows [Keep a Changelog
 ### Removed
 
 - **`L` (open everything).** With the type checker filling in real structure, opening everything under a node could mean hundreds of rows, a request to the checker for each, and an example generation for each leaf. On a SQLAlchemy `Mapper` that pinned the editor for minutes. `l` opens one more level per press, which covers the same ground at a pace you choose. `H` stays. A `keymaps.expand_all` left in your setup is ignored with a warning.
+- **`E` (examples for the whole visible tree) and the `e` examples toggle.** `e` now asks the model for the row under the cursor, and its nearest neighbours: the same single batch the ledger's automatic generation uses, forced, so it re-asks a row the model already answered or had nothing for. It works with `example_mode = "heuristic"` too, where it is the way to ask at all. Examples are on or off through `show_examples`. A `keymaps.toggle_examples` left in your setup is ignored with a warning; `keymaps.llm_generate` now defaults to `e`.
 
 ### Changed
 
