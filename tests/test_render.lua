@@ -1478,6 +1478,74 @@ do
   check("no detail, no examples", example_lines({}) == 0)
 end
 
+-- L scopes its peek to the cursor's subtree: detail_subtree opens the node's
+-- own block and every descendant's, and nothing outside it — including a
+-- sibling whose id merely STARTS with the same text ("cfg" vs "cfg2").
+do
+  local function leaf(name)
+    return { name = name, kind = "field", type = { display = "str", category = "builtin" } }
+  end
+  local roots = {
+    model.new({
+      name = "cfg",
+      kind = "param",
+      type = { display = "Cfg", category = "class" },
+      expanded = true,
+      children = { leaf("host"), leaf("user") },
+    }),
+    model.new({
+      name = "cfg2",
+      kind = "param",
+      type = { display = "Cfg", category = "class" },
+      expanded = true,
+      children = { leaf("path") },
+    }),
+  }
+  require("typescope.examples").annotate(roots)
+  local r = render.render(roots, opts({ layout = "ledger", detail_subtree = "cfg" }))
+  local owners = {}
+  for lnum, line in ipairs(r.lines) do
+    if line:find("e%.g%.") then
+      owners[r.line_to_node[lnum]] = true
+    end
+  end
+  check("detail_subtree opens the subtree's leaves", owners["cfg.host"] and owners["cfg.user"])
+  check("...and not a sibling sharing the id prefix", not owners["cfg2.path"])
+end
+
+-- model.frontier: the next level l opens. Shallowest collapsed expandable
+-- nodes under open ancestors; empty once the subtree is fully open.
+do
+  local function leaf(name)
+    return { name = name, type = { display = "int", category = "builtin" } }
+  end
+  local root = model.new({
+    name = "a",
+    kind = "param",
+    children = {
+      { name = "b", children = { { name = "d", children = { leaf("f") } } } },
+      { name = "c", children = { leaf("e") } },
+    },
+  })
+  local function names(nodes)
+    local out = {}
+    for _, n in ipairs(nodes) do
+      table.insert(out, n.name)
+    end
+    return table.concat(out, ",")
+  end
+  check("collapsed root: frontier is the root itself", names(model.frontier(root)) == "a")
+  root.state.expanded = true
+  check("open root: frontier is its collapsed children", names(model.frontier(root)) == "b,c")
+  root.children[1].state.expanded = true
+  check("uneven depths: the shallowest level wins", names(model.frontier(root)) == "c")
+  root.children[2].state.expanded = true
+  check("then the next level down", names(model.frontier(root)) == "d")
+  root.children[1].children[1].state.expanded = true
+  check("fully open: empty", #model.frontier(root) == 0)
+  check("a leaf: empty", #model.frontier(root.children[2].children[1]) == 0)
+end
+
 -- 13. find_break_point: the wrap decision every layout goes through
 --
 -- Five call sites depend on it — tree flow, docstring prose, header elision,

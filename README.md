@@ -108,8 +108,8 @@ Bind these rather than writing Lua callbacks:
 | Key | Action |
 | --- | --- |
 | `<CR>` | Expand / collapse the node under the cursor |
-| `l` / `h` | Expand node / collapse node (or jump to the parent and collapse it) |
-| `L` / `H` | Expand all + details / collapse all |
+| `l` / `h` | Open one more level under the node / collapse node (or jump to the parent and collapse it) |
+| `L` / `H` | Open the node's whole subtree + details / collapse all |
 | `j` / `k` | Move by node, not by line |
 | `e` | Toggle examples |
 | `E` | Generate LLM examples for the visible tree (needs ollama) |
@@ -205,7 +205,7 @@ Same data, different shapes. Set `ui.layout`.
 · timeout      float  = 30.0
 ```
 
-Press `L` for a transient peek that opens *every* row's detail block at once; the next cursor move drops back to following it.
+Press `L` for a transient peek that opens the detail block of every row in the cursor's subtree at once; the next cursor move drops back to following it.
 
 **`tree`** — flowing segments, with type, default and example trailing the name and wrapping under a hanging indent when they run out of room:
 

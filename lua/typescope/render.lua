@@ -28,7 +28,8 @@
 ---@field layout? "tree"|"ledger" flowing segments vs one-line rows with a cursor-follow detail block (default)
 ---@field align? "left"|"right" name column alignment (default left, tree layout)
 ---@field detail_id? string ledger layout: node whose row expands into a detail block
----@field detail_all? boolean ledger layout: open EVERY row's detail block (L's transient peek, d1x)
+---@field detail_all? boolean ledger layout: open EVERY row's detail block
+---@field detail_subtree? string ledger layout: open the detail block of this node and every descendant (L's transient peek, d1x)
 ---@field show_examples boolean
 ---@field example_kind "heuristic"|"llm"
 ---@field example_pending? fun(node: typescope.Node): boolean leaves whose LLM value is still coming (38c); injected so render stays pure
@@ -1081,7 +1082,10 @@ function M.render(roots, opts)
 
     for _, r in ipairs(rows) do
       local node = r.node
-      local detail = opts.detail_all or node.id == opts.detail_id
+      local sub = opts.detail_subtree
+      local detail = opts.detail_all
+        or node.id == opts.detail_id
+        or (sub ~= nil and (node.id == sub or node.id:sub(1, #sub + 1) == sub .. "."))
       local line = new_line()
       if r.depth > 0 then
         line:add(r.branch, "TypeScopeChrome")

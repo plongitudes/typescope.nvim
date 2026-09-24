@@ -179,9 +179,10 @@ These are active once the float has focus. All of them are configurable
 through `keymaps` (|typescope-config|); the defaults are shown.
 
     <CR>        Expand or collapse the node under the cursor
-    l           Expand the node under the cursor (no-op on a leaf)
+    l           Open one more level under the node (a collapsed node opens;
+                an open one reveals its next level down)
     h           Collapse the node, or jump to its parent and collapse that
-    L           Expand everything, including details
+    L           Open the node's whole subtree, including its details
     H           Collapse everything
     j           Move to the next node (not the next line)
     k           Move to the previous node
@@ -300,8 +301,9 @@ Set `ui.layout`. Same data, different shapes.
 ledger ~
     The default. One compact line per parameter (name, type, short default).
     The row under the cursor expands into a detail block — evaluated shape,
-    example, origin — which follows as the cursor moves. L opens every row's
-    detail block as a transient peek; the next cursor move ends it.
+    example, origin — which follows as the cursor moves. L opens the detail
+    blocks of the cursor's whole subtree as a transient peek; the next
+    cursor move ends it.
 
 tree ~
     Flowing segments; type, default and example trail the name and wrap with

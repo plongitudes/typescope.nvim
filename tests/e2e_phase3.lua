@@ -137,6 +137,13 @@ do
   local before, lw = float_lines()
   check("reopened collapsed (status not yet resolved)", not table.concat(before, "\n"):find("status"))
   vim.api.nvim_set_current_win(lw)
+  -- L opens the cursor's subtree, so park on `returns` first
+  for i, l in ipairs(before) do
+    if l:find("returns") then
+      vim.api.nvim_win_set_cursor(lw, { i, 0 })
+      break
+    end
+  end
   vim.api.nvim_feedkeys("L", "x", false)
   vim.wait(2000, function()
     return table.concat(float_lines() or {}, "\n"):find("status") ~= nil
@@ -144,6 +151,29 @@ do
   check(
     "L resolves lazy nodes (returns expands to Response fields)",
     table.concat(float_lines(), "\n"):find("status") ~= nil
+  )
+  -- L keeps going past the first lazy level, and stays inside its subtree
+  vim.wait(2000, function()
+    return table.concat(float_lines() or {}, "\n"):find("content_type") ~= nil
+  end)
+  local after = table.concat(float_lines(), "\n")
+  check("L opens the subtree all the way down (returns.headers fields)", after:find("content_type") ~= nil)
+  check("L leaves a sibling param's subtree alone (config.retry still collapsed)", after:find("▸ retry") ~= nil)
+  -- l on an already-open node opens its next level: config is open, so the
+  -- next press reveals retry's fields
+  for i, l in ipairs(float_lines()) do
+    if l:find("▾ config") then
+      vim.api.nvim_win_set_cursor(lw, { i, 0 })
+      break
+    end
+  end
+  vim.api.nvim_feedkeys("l", "x", false)
+  vim.wait(2000, function()
+    return table.concat(float_lines() or {}, "\n"):find("▾ retry") ~= nil
+  end)
+  check(
+    "l on an open node opens its next level (config.retry)",
+    table.concat(float_lines(), "\n"):find("▾ retry") ~= nil
   )
 end
 require("typescope").close()

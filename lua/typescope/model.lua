@@ -120,19 +120,52 @@ function M.is_expandable(node)
   return #node.children > 0 or (not node.state.loaded and node.source ~= nil)
 end
 
+--- Depth-first visit over one node and its descendants.
+---@param node typescope.Node
+---@param fn fun(node: typescope.Node, depth: integer) depth is relative to `node`
+function M.walk_subtree(node, fn)
+  local function visit(n, depth)
+    fn(n, depth)
+    for _, child in ipairs(n.children) do
+      visit(child, depth + 1)
+    end
+  end
+  visit(node, 0)
+end
+
 --- Depth-first visit over a list of root nodes.
 ---@param roots typescope.Node[]
 ---@param fn fun(node: typescope.Node, depth: integer)
 function M.walk(roots, fn)
-  local function visit(node, depth)
-    fn(node, depth)
-    for _, child in ipairs(node.children) do
+  for _, root in ipairs(roots) do
+    M.walk_subtree(root, fn)
+  end
+end
+
+--- The next level to open under `node`: the collapsed expandable nodes
+--- reachable through open ancestors, at the shallowest depth any exist.
+--- Empty when the subtree is fully open (or `node` is a leaf).
+---@param node typescope.Node
+---@return typescope.Node[]
+function M.frontier(node)
+  local found, best = {}, math.huge
+  local function visit(n, depth)
+    if depth > best then
+      return
+    end
+    if M.is_expandable(n) and not n.state.expanded then
+      if depth < best then
+        found, best = {}, depth
+      end
+      table.insert(found, n)
+      return
+    end
+    for _, child in ipairs(n.children) do
       visit(child, depth + 1)
     end
   end
-  for _, root in ipairs(roots) do
-    visit(root, 0)
-  end
+  visit(node, 0)
+  return found
 end
 
 --- Parent of a node, resolved through its dotted path id (Python identifiers

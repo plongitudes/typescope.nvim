@@ -48,8 +48,9 @@ local function help_lines(width, extra)
   local km = config.get().keymaps
   local rows = {
     { km.expand, "expand / collapse" },
-    { km.collapse_node .. " / " .. km.expand_node, "collapse / expand node" },
-    { km.collapse_all .. " / " .. km.expand_all, "collapse all / expand all + details" },
+    { km.collapse_node .. " / " .. km.expand_node, "collapse node / open one more level" },
+    { km.expand_all, "open this subtree + details" },
+    { km.collapse_all, "collapse all" },
     { km.toggle_examples, "toggle examples" },
     { km.llm_generate, "llm examples (ollama)" },
     { km.docstring, "docstring: jump in / collapse back" },
@@ -368,17 +369,50 @@ function M.attach(args)
       refresh(node.id)
     end
   end)
+  -- Open `targets`, resolving the lazy ones, and repaint once they've ALL
+  -- landed rather than once per node (N cursor parks would fight each
+  -- other). The repaint follows whatever node the cursor is on by then, so
+  -- moving away while a resolve is in flight doesn't get yanked back.
+  ---@param targets typescope.Node[]
+  ---@param done? fun() runs after the final repaint
+  local function open_nodes(targets, done)
+    local pending = 1 -- held by this call until every resolve has been fired
+    local function settle()
+      pending = pending - 1
+      if pending == 0 and vim.api.nvim_win_is_valid(st.handle.win) then
+        local cur = node_under_cursor()
+        refresh(cur and cur.id)
+        if done then
+          done()
+        end
+      end
+    end
+    for _, n in ipairs(targets) do
+      if not n.state.loaded and n._lazy and args.on_recurse and not n.state.loading then
+        pending = pending + 1
+        args.on_recurse(n, settle)
+      elseif #n.children > 0 then
+        n.state.expanded = true
+      end
+    end
+    -- show what opened synchronously now; the lazy ones follow in settle()
+    if pending > 1 then
+      local cur = node_under_cursor()
+      refresh(cur and cur.id)
+    end
+    settle()
+  end
+
+  -- l: one level more under the cursor's node per press. On a collapsed
+  -- node that's just opening it; on an open one it's the next level down.
   map(km.expand_node, function()
     local node = node_under_cursor()
     if not node then
       return
     end
-    if not node.state.loaded and recurse_into(node) then
-      return
-    end
-    if model.is_expandable(node) and not node.state.expanded then
-      node.state.expanded = true
-      refresh(node.id)
+    local targets = model.frontier(node)
+    if #targets > 0 then
+      open_nodes(targets)
     end
   end)
   map(km.collapse_node, function()
@@ -399,46 +433,44 @@ function M.attach(args)
       end
     end
   end)
+  -- L chases lazy nodes this many resolve rounds deep. Each round is one
+  -- level of structure that wasn't fetched up front; the bound is what stops
+  -- a self-referencing type from resolving forever.
+  local LAZY_ROUNDS = 4
   map(km.expand_all, function()
     local node = node_under_cursor()
-    model.walk(st.roots, function(n)
-      if model.is_expandable(n) then
-        n.state.expanded = true
-      end
-    end)
-    -- L means "show me everything", and in the ledger that has to include the
-    -- detail blocks: only the cursor's row carries one, so an expanded tree
-    -- still shows exactly one example at a time (d1x). Transient — the next
-    -- move to a different node drops back to following the cursor. Parking
-    -- detail_id on the current node is what makes that work: refresh() below
-    -- moves the cursor, and the CursorMoved handler's id-equality guard turns
-    -- that move into a no-op instead of cancelling the peek immediately.
-    st.opts.detail_all = true
-    st.opts.detail_id = node and node.id
-    -- Flipping `expanded` isn't enough for a lazy node: its children don't
-    -- exist yet, so L would mark `returns` open with nothing underneath.
-    -- Resolve the lazy nodes in the tree we currently hold, then repaint once
-    -- they've all landed rather than once per node (N cursor parks would
-    -- fight each other). Naturally ONE level per press: nodes revealed by
-    -- this pass aren't in the tree we just walked, so chasing them would take
-    -- another L — which is the bound we want. Resolving a whole subtree
-    -- speculatively is the churn eligible() warns about.
-    local waiting = 0
-    model.walk(st.roots, function(n)
-      if not n.state.loaded and n._lazy then
-        local fired = recurse_into(n, function()
-          n.state.expanded = true
-          waiting = waiting - 1
-          if waiting == 0 and vim.api.nvim_win_is_valid(st.handle.win) then
-            refresh(node and node.id)
-          end
-        end)
-        if fired then
-          waiting = waiting + 1
+    if not node then
+      return
+    end
+    -- L means "show me all of this", and in the ledger that includes the
+    -- subtree's detail blocks: only the cursor's row normally carries one
+    -- (d1x). Transient — the next move to a different node drops back to
+    -- following the cursor. Parking detail_id on the current node is what
+    -- makes that work: refresh() moves the cursor, and the CursorMoved
+    -- handler's id-equality guard turns that move into a no-op instead of
+    -- cancelling the peek immediately.
+    st.opts.detail_subtree = node.id
+    st.opts.detail_id = node.id
+    refresh(node.id)
+    -- Everything already loaded opens in the first round; each lazy node
+    -- that lands brings children the next round picks up. `tried` keeps a
+    -- resolve that failed (the node goes back to lazy) from being retried.
+    local tried = {}
+    local function round(left)
+      local targets = {}
+      model.walk_subtree(node, function(n)
+        if model.is_expandable(n) and not n.state.expanded and not tried[n] then
+          tried[n] = true
+          table.insert(targets, n)
         end
+      end)
+      if #targets > 0 then
+        open_nodes(targets, left > 1 and function()
+          round(left - 1)
+        end or nil)
       end
-    end)
-    refresh(node and node.id)
+    end
+    round(LAZY_ROUNDS)
   end)
   map(km.collapse_all, function()
     local node = node_under_cursor()
@@ -525,6 +557,7 @@ function M.attach(args)
     -- ledger: fold the detail block before measuring, or the CursorMoved
     -- that our jump fires re-renders without it and shifts every doc line
     st.opts.detail_id = nil
+    st.opts.detail_subtree = nil
     refresh()
     -- hovering a param jumps to where the docstring defines it; sub-items
     -- resolve upward since the docstring documents top-level params. That
@@ -692,7 +725,7 @@ function M.attach(args)
         local id = st.result.line_to_node[lnum]
         if id ~= st.opts.detail_id then
           st.opts.detail_id = id
-          st.opts.detail_all = nil -- the peek ends the moment you move off
+          st.opts.detail_subtree = nil -- the peek ends the moment you move off
           refresh(id)
         end
       end,

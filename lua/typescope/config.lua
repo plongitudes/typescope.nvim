@@ -27,10 +27,10 @@
 ---@class typescope.KeymapConfig
 ---@field docstring string toggle full docstring section
 ---@field expand string toggle node under cursor
----@field expand_node string expand node under cursor (no-op on leaves)
+---@field expand_node string open one more level under the cursor's node (no-op when fully open)
 ---@field collapse_node string collapse node, or jump to + collapse parent
----@field expand_all string
----@field collapse_all string
+---@field expand_all string open the cursor's whole subtree, with its detail blocks
+---@field collapse_all string collapse the whole tree
 ---@field toggle_examples string
 ---@field llm_generate string
 ---@field close string

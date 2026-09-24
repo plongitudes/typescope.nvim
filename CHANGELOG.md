@@ -2,6 +2,13 @@
 
 Notable changes to TypeScope, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [Semantic Versioning](https://semver.org/), with the usual 0.x caveat that a minor bump may break something. Each release is an annotated git tag carrying the same notes.
 
+## [Unreleased]
+
+### Changed
+
+- **`L` opens the subtree under the cursor instead of the whole tree.** With the type checker filling in real structure, opening everything was a wall of rows. `L` now opens every level of the hovered node's subtree, resolving what wasn't fetched up front, and its detail-block peek covers just that subtree. `H` still collapses everything.
+- **`l` opens one more level per press.** On a collapsed node it opens it, as before; on an open one it reveals the next level down, so repeated presses walk a subtree open one depth at a time.
+
 ## [0.2.1] — 2026-09-23
 
 ### Fixed
