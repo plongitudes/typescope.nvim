@@ -25,11 +25,10 @@
 ---@field style typescope.Charset
 ---@field max_width integer resolved columns (callers use config.resolved_max_width)
 ---@field window_width? integer inner width the float ALREADY has; content is laid out to at least it (rules stretch to it, pending bars reach it)
----@field layout? "tree"|"ledger" flowing segments vs one-line rows with a cursor-follow detail block (default)
+---@field layout? "tree"|"ledger" flowing segments vs one-line rows whose details live in the docked panel (default)
 ---@field align? "left"|"right" name column alignment (default left, tree layout)
----@field detail_id? string ledger layout: node whose row expands into a detail block
----@field detail_all? boolean ledger layout: open EVERY row's detail block
----@field detail_subtree? string ledger layout: open the detail block of this node and every descendant (L's transient peek, d1x)
+---@field view? "panel"|"doc" ledger's other two surfaces: the docked panel for `panel_node`, or the full docstring alone
+---@field panel_node? typescope.Node view = "panel": the node whose details the panel shows
 ---@field show_examples boolean
 ---@field example_kind "heuristic"|"llm"
 ---@field example_pending? fun(node: typescope.Node): boolean leaves whose LLM value is still coming (38c); injected so render stays pure
@@ -285,7 +284,7 @@ local DEFAULT_RAMP = { "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█" }
 local CLIP = { clip = true }
 
 -- extract/python.lua normalises a stub's `= ...` to this. Not a value: it means
--- "has a default, unspecified", which is why it never moves into a detail block.
+-- "has a default, unspecified", which is why the panel never repeats it.
 local STUB_DEFAULT = "…"
 
 ---@param opts typescope.RenderOpts|typescope.TypingOpts
@@ -924,8 +923,8 @@ function M.render(roots, opts)
     end
   end
   local function emit_docstring()
-    local text = opts.docstring
-    if not opts.docstring_expanded then
+    local text = opts.docstring or ""
+    if not opts.docstring_expanded and opts.view ~= "doc" then
       text = text:match("^(.-)\n%s*\n") or text -- first paragraph
     end
     result.doc_start = #result.lines + 1
@@ -939,10 +938,107 @@ function M.render(roots, opts)
     result.doc_end = #result.lines
   end
 
+  -- The type a row shows, and whether it is really the evaluation standing
+  -- in for it: an unannotated param's declared type is only implicit Any, so
+  -- the inferred view is shown as the type itself (and the panel's ≈ line
+  -- then has nothing to add).
+  ---@return string text, boolean is_evaluation
+  local function row_type(node)
+    local type_text = node.type.display or node.type.raw or "?"
+    local evaluated_visible = node.evaluated and not (node.evaluated_on_expand and not node.state.expanded)
+    if evaluated_visible and type_text == "Any" then
+      return node.evaluated, true
+    end
+    return type_text, false
+  end
+
+  -- The facts read one node at a time — ≈ evaluation, full default, example,
+  -- origin — under a line prefix (the panel's is empty). Nothing emitted
+  -- when there is nothing to say.
+  ---@param node typescope.Node
+  ---@param dprefix string chrome carried at the start of every line
+  local function emit_detail(node, dprefix)
+    local _, type_is_evaluation = row_type(node)
+    local evaluated_visible = node.evaluated and not (node.evaluated_on_expand and not node.state.expanded)
+    local placeholder = node.default == STUB_DEFAULT
+    local function detail_line(segments)
+      local dline = new_line()
+      dline:add(dprefix, "TypeScopeChrome")
+      flow(dline, dprefix, 2, segments, node.id)
+    end
+    if evaluated_visible and not type_is_evaluation then
+      local segs = { { style.evaluated, "TypeScopeEvaluated" } }
+      local owner = node.evaluated_owner
+      -- name the annotation piece the evaluation belongs to when it
+      -- isn't the whole annotation (multi-ref unions)
+      if owner and owner ~= (node.type.display or node.type.raw) then
+        table.insert(segs, { owner .. " = ", "TypeScopeEvaluated" })
+      end
+      -- overlay: real syntax colors over the dim ≈ base, kept even if the
+      -- value wraps (flow slices the injection with it)
+      table.insert(segs, { node.evaluated, "TypeScopeEvaluated", "overlay" })
+      detail_line(segs)
+    end
+    local info = {}
+    -- a stub placeholder already sits on the row and is not a value this
+    -- can expand: `…` is one cell and always fit inline
+    if node.default and not placeholder then
+      table.insert(info, { "= ", "TypeScopeChrome" })
+      table.insert(info, { node.default, "TypeScopeDefault", "replace" })
+    end
+    local example_segs = example_segments(node, opts, true)
+    if #example_segs > 0 then
+      table.insert(info, { (#info > 0 and "   " or "") .. "e.g. ", "TypeScopeHint" })
+      vim.list_extend(info, example_segs)
+    end
+    if node.origin then
+      table.insert(info, { (#info > 0 and "   " or "") .. style.inherit .. node.origin, "TypeScopeHint", nil, true })
+    end
+    if #info > 0 then
+      detail_line(info)
+    end
+  end
+
+  -- The ledger's other two surfaces. Each is drawn into its own window (the
+  -- panel) or in place of the rows (the doc view), so neither carries the
+  -- header, the rows, or the other.
+  if opts.view == "panel" then
+    local node = opts.panel_node
+    if node then
+      -- the node's name and its WHOLE type, which the row may have cut short
+      local line = new_line()
+      line:add(node.name, name_group_of(node))
+      line:add("  ")
+      local type_text, type_is_evaluation = row_type(node)
+      local segs = {
+        {
+          type_text,
+          type_is_evaluation and "TypeScopeEvaluated" or "TypeScopeType",
+          not type_is_evaluation and type_injectable(node) and "replace" or nil,
+        },
+      }
+      if node.type.category == "unresolved" then
+        table.insert(segs, { " " .. style.unresolved, "TypeScopeUnresolved", nil, true })
+      end
+      if node.badge then
+        table.insert(segs, { " " .. node.badge, "TypeScopeBadge", nil, true })
+      end
+      flow(line, "", 2, segs, node.id)
+      emit_detail(node, "")
+    end
+    return result
+  elseif opts.view == "doc" then
+    emit_docstring()
+    return result
+  end
+
+  -- the ledger's docstring is a line in the float's footer and a view of its
+  -- own (opts.view = "doc"), never a section under the rows
   local has_doc = opts.docstring ~= nil
     and opts.docstring ~= ""
     and opts.docstring_pos ~= nil
     and opts.docstring_pos ~= false
+    and opts.layout ~= "ledger"
   if opts.header then
     -- the header is a one-liner by contract: a 48-param call shape must not
     -- eat the float, so the param list elides at width with the return type
@@ -1023,10 +1119,10 @@ function M.render(roots, opts)
   -- every annotation to column 30 and force wraps; outliers sit ragged.
   -- Right mode is uncapped: padding lands before the name, so long names
   -- cost nothing extra (Tony's full-width request).
-  -- ── ledger layout (U6): one line per node, cursor-follow detail block ──
+  -- ── ledger layout (U6): one line per node, details in the docked panel ──
   -- Rows carry identity + discriminators only (name, pass mode, type, short
-  -- default); everything read one-at-a-time (≈ evaluation, example, origin,
-  -- long defaults) lives in the detail block under opts.detail_id's row.
+  -- default); everything read one-at-a-time (full type, ≈ evaluation,
+  -- example, origin, long defaults) lives in the panel (opts.view = "panel").
   -- Rows NEVER wrap — the single-line invariant is what keeps the float
   -- narrow and scanning cheap.
   local function render_ledger()
@@ -1082,10 +1178,6 @@ function M.render(roots, opts)
 
     for _, r in ipairs(rows) do
       local node = r.node
-      local sub = opts.detail_subtree
-      local detail = opts.detail_all
-        or node.id == opts.detail_id
-        or (sub ~= nil and (node.id == sub or node.id:sub(1, #sub + 1) == sub .. "."))
       local line = new_line()
       if r.depth > 0 then
         line:add(r.branch, "TypeScopeChrome")
@@ -1103,14 +1195,7 @@ function M.render(roots, opts)
       line:add(capped_name(node.name), name_group)
       line:add(string.rep(" ", math.max(0, name_col - line.width)) .. "  ")
 
-      local type_text = node.type.display or node.type.raw or "?"
-      local evaluated_visible = node.evaluated and not (node.evaluated_on_expand and not node.state.expanded)
-      -- an unannotated param's declared type is only implicit Any — show the
-      -- inferred view as the type itself (the detail block then skips it)
-      local type_is_evaluation = evaluated_visible and type_text == "Any"
-      if type_is_evaluation then
-        type_text = node.evaluated
-      end
+      local type_text, type_is_evaluation = row_type(node)
       local injectable = not type_is_evaluation and type_injectable(node) and "replace" or nil
       local type_group = type_is_evaluation and "TypeScopeEvaluated" or "TypeScopeType"
 
@@ -1127,18 +1212,10 @@ function M.render(roots, opts)
         tail_w = tail_w + strwidth(s[1])
       end
 
-      -- Inline default only on non-detail rows: the block carries the full
-      -- value, and long defaults elide to `=…` inline rather than widening
-      -- every row.
-      --
-      -- A stub placeholder is the exception, and stays on the row even when
-      -- focused. The block's whole justification is holding a value too long to
-      -- sit inline; `…` is one cell and would always have fit, so moving it
-      -- there repeats a marker instead of expanding one — and makes it hop off
-      -- the row and into the block as the cursor passes. Left inline it does not
-      -- move, and a block with nothing else to say does not open at all.
-      local placeholder = node.default == STUB_DEFAULT
-      local default_inline = node.default ~= nil and (not detail or placeholder)
+      -- Every row carries its default: long ones elide to `= …` rather than
+      -- widening every row, and the panel holds the full value. The rows
+      -- never change as the cursor moves — that is what the panel is for.
+      local default_inline = node.default ~= nil
       local default_text = nil
       if default_inline then
         default_text = strwidth(node.default) <= 12 and node.default or nil
@@ -1168,50 +1245,6 @@ function M.render(roots, opts)
         end
       end
       emit(line, node.id)
-
-      -- ── detail block: the focused row's read-one-at-a-time facts ─────────
-      if detail then
-        local dprefix = r.bars .. style.vert
-        local function detail_line(segments)
-          local dline = new_line()
-          dline:add(dprefix, "TypeScopeChrome")
-          flow(dline, dprefix, 2, segments, node.id)
-        end
-        if evaluated_visible and not type_is_evaluation then
-          local segs = { { style.evaluated, "TypeScopeEvaluated" } }
-          local owner = node.evaluated_owner
-          -- name the annotation piece the evaluation belongs to when it
-          -- isn't the whole annotation (multi-ref unions)
-          if owner and owner ~= (node.type.display or node.type.raw) then
-            table.insert(segs, { owner .. " = ", "TypeScopeEvaluated" })
-          end
-          -- overlay: real syntax colors over the dim ≈ base, kept even if the
-          -- value wraps (flow slices the injection with it)
-          table.insert(segs, { node.evaluated, "TypeScopeEvaluated", "overlay" })
-          detail_line(segs)
-        end
-        local info = {}
-        -- the placeholder already sits on the row above and is not a value the
-        -- block can expand; repeating it here is the line that says nothing
-        if node.default and not placeholder then
-          table.insert(info, { "= ", "TypeScopeChrome" })
-          table.insert(info, { node.default, "TypeScopeDefault", "replace" })
-        end
-        local example_segs = example_segments(node, opts, true)
-        if #example_segs > 0 then
-          table.insert(info, { (#info > 0 and "   " or "") .. "e.g. ", "TypeScopeHint" })
-          vim.list_extend(info, example_segs)
-        end
-        if node.origin then
-          table.insert(
-            info,
-            { (#info > 0 and "   " or "") .. style.inherit .. node.origin, "TypeScopeHint", nil, true }
-          )
-        end
-        if #info > 0 then
-          detail_line(info)
-        end
-      end
     end
   end
 

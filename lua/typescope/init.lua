@@ -215,7 +215,7 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
   -- trees carry the previous open's flag, so clear before setting.
   local active_name = lsp.active_param(sig_result)
   local header = meta and meta.header or nil
-  local active_id = nil -- ledger: the detail block opens on the active param
+  local active_id = nil -- the cursor (and the ledger's panel) opens on the active param
   if meta and meta.overloads then
     -- overloads (U4): stacked groups — expand the one that matches the
     -- arguments so far, collapse the rest; the active-param flag lives on
@@ -263,14 +263,18 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
     docstring = meta and meta.docstring or nil,
     docstring_expanded = false,
     docstring_pos = cfg.ui.docstring,
-    -- ledger: open with the active param's detail showing; interact's
-    -- CursorMoved wiring takes over once the float is focused
-    detail_id = cfg.ui.layout == "ledger" and active_id or nil,
   }
   local result = render.render(roots, render_opts)
   local width = math.min(max_width, math.max(result.width, 30))
   local height = math.min(cfg.ui.max_height, #result.lines)
 
+  -- ledger: the rows and a docked panel under them, hung from the cursor's
+  -- screen position (float.lua places both windows itself)
+  local panel = nil
+  if cfg.ui.layout == "ledger" then
+    local pos = vim.fn.screenpos(0, srccursor[1], srccursor[2] + 1)
+    panel = { row = math.max(0, pos.row - 1), col = math.max(0, pos.col - 1), max_height = cfg.ui.max_height }
+  end
   local handle = float.open({
     lines = result.lines,
     highlights = result.highlights,
@@ -285,16 +289,18 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
     height = height,
     border = cfg.ui.border,
     enter = focus,
+    panel = panel,
   })
 
   -- land on the active param's primary row: with ui.focus the tree keys are
-  -- live immediately, so the cursor should start where the user is typing
-  if active_id then
-    for lnum = 1, #result.lines do
-      if result.line_to_node[lnum] == active_id then
-        vim.api.nvim_win_set_cursor(handle.win, { lnum, 0 })
-        break
-      end
+  -- live immediately, so the cursor should start where the user is typing.
+  -- The ledger's panel shows the cursor's row, so with no active param it
+  -- starts on the first one rather than the header.
+  for lnum = 1, #result.lines do
+    local id = result.line_to_node[lnum]
+    if id and (id == active_id or (not active_id and panel)) then
+      vim.api.nvim_win_set_cursor(handle.win, { lnum, 0 })
+      break
     end
   end
 

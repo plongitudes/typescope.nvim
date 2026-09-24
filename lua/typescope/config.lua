@@ -14,13 +14,13 @@
 
 ---@class typescope.UiConfig
 ---@field style "unicode"|"ascii"|"minimal"|"rounded"
----@field layout "ledger"|"tree" one-line rows with a cursor-follow detail block (default) vs flowing segments vs column grid (deprecated)
+---@field layout "ledger"|"tree" one-line rows over a docked detail panel (default) vs flowing segments
 ---@field animations boolean
 ---@field align "left"|"right" name column alignment (tree layout)
 ---@field max_width number >1: absolute columns; <=1: fraction of editor width
 ---@field max_height integer
 ---@field border string|string[] any nvim float border value
----@field docstring "bottom"|"top"|false docstring section placement in the float
+---@field docstring "bottom"|"top"|false tree: docstring section placement; ledger: any value but false puts its first sentence in the footer
 ---@field hint boolean virtual-text "▸ typescope" marker on resolved call lines
 ---@field focus boolean explicit opens enter the float; false = momentary hover convention (second K focuses)
 
@@ -29,7 +29,7 @@
 ---@field expand string toggle node under cursor
 ---@field expand_node string open one more level under the cursor's node (no-op when fully open)
 ---@field collapse_node string collapse node, or jump to + collapse parent
----@field expand_all string open the cursor's whole subtree, with its detail blocks
+---@field expand_all string open the cursor's whole subtree
 ---@field collapse_all string collapse the whole tree
 ---@field toggle_examples string
 ---@field llm_generate string
@@ -115,8 +115,8 @@ local defaults = {
   ui = {
     style = "rounded", -- "unicode" | "ascii" | "minimal" | "rounded"
     -- "ledger" (U6, the default): one line per param (name + type + short
-    -- default); the row under the cursor expands into a detail block (≈
-    -- evaluation, example, origin) that follows as the cursor moves.
+    -- default) over a docked panel with the cursor row's details (whole
+    -- type, ≈ evaluation, full default, example, origin).
     -- "tree": flowing segments, type/default/example trailing the name.
     -- ("table", the column grid, was removed in 0.2.0.)
     layout = "ledger",
@@ -125,7 +125,9 @@ local defaults = {
     max_width = 0.5, -- fraction of editor width; values > 1 are absolute columns
     max_height = 20,
     border = "rounded",
-    docstring = "bottom", -- "bottom" | "top" | false (structure first, prose last)
+    -- tree: where the docstring section sits. ledger: the footer carries
+    -- its first sentence and d swaps it in for the rows; false turns both off
+    docstring = "bottom", -- "bottom" | "top" | false
     hint = true,
     -- true: an explicit open (K / :TypeScope) enters the float — cursor
     -- inside, tree keys live immediately. false: momentary hover convention —

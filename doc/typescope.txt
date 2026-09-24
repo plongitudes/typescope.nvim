@@ -182,13 +182,14 @@ through `keymaps` (|typescope-config|); the defaults are shown.
     l           Open one more level under the node (a collapsed node opens;
                 an open one reveals its next level down)
     h           Collapse the node, or jump to its parent and collapse that
-    L           Open the node's whole subtree, including its details
+    L           Open the node's whole subtree
     H           Collapse everything
     j           Move to the next node (not the next line)
     k           Move to the previous node
     e           Toggle the example column
     E           Generate LLM examples for the visible tree (needs ollama)
-    d           Docstring: jump into the full section, or collapse back
+    d           Docstring: show all of it (ledger: in place of the rows), or
+                go back
     q           Close
     <Esc>       Close
     ?           Toggle the help overlay
@@ -299,11 +300,14 @@ ui.hint ~
 Set `ui.layout`. Same data, different shapes.
 
 ledger ~
-    The default. One compact line per parameter (name, type, short default).
-    The row under the cursor expands into a detail block — evaluated shape,
-    example, origin — which follows as the cursor moves. L opens the detail
-    blocks of the cursor's whole subtree as a transient peek; the next
-    cursor move ends it.
+    The default. One compact line per parameter (name, type, short default),
+    and a panel docked under the rows showing everything about the row the
+    cursor is on: its whole type, evaluated shape, full default, example,
+    origin. The rows never move with the cursor; only the panel changes. The
+    panel grows to the tallest node it has shown (up to five lines) and does
+    not shrink back. The frame's bottom edge carries the docstring's first
+    sentence, and d shows the whole docstring in place of the rows. The
+    frame opens below the cursor, or above it when there is more room.
 
 tree ~
     Flowing segments; type, default and example trail the name and wrap with

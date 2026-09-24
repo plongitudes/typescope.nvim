@@ -6,7 +6,9 @@ Notable changes to TypeScope, newest first. The format follows [Keep a Changelog
 
 ### Changed
 
-- **`L` opens the subtree under the cursor instead of the whole tree.** With the type checker filling in real structure, opening everything was a wall of rows. `L` now opens every level of the hovered node's subtree, resolving what wasn't fetched up front, and its detail-block peek covers just that subtree. `H` still collapses everything.
+- **`L` opens the subtree under the cursor instead of the whole tree.** With the type checker filling in real structure, opening everything was a wall of rows. `L` now opens every level of the hovered node's subtree, resolving what wasn't fetched up front. `H` still collapses everything.
+- **The ledger's details moved into a panel docked under the rows.** The detail block used to open under the cursor's row and push every row below it down, on every `j` and `k`. The rows now never move; a panel inside the same frame shows the cursor row's details, and it adds the whole type, which the row cuts short. It grows to the tallest node it has shown (up to five lines) and doesn't shrink back. The frame opens above the cursor when there is more room there. `L` no longer opens every detail block, since there are none to open.
+- **The ledger's docstring moved to the frame's bottom edge.** Its first sentence sits in the footer; `d` shows the whole docstring in place of the rows, and `d` again goes back to the row you left. The `tree` layout keeps its docstring section.
 - **`l` opens one more level per press.** On a collapsed node it opens it, as before; on an open one it reveals the next level down, so repeated presses walk a subtree open one depth at a time.
 
 ## [0.2.1] — 2026-09-23

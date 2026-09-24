@@ -2,6 +2,9 @@
 ---@field buf integer
 ---@field win integer
 ---@field ns integer
+---@field panel? { buf: integer, win: integer } the ledger's docked detail panel, below the main window inside one frame
+---@field budget? integer content rows main + panel may share (panel floats only); fixed at open so the frame never outgrows its side of the cursor
+---@field frame? typescope.Frame
 
 local M = {}
 
@@ -222,13 +225,98 @@ local function set_content(buf, lines, highlights, injections, lang)
   end
 end
 
+---@param footer? string|{ [1]: string, [2]: string }[]
+---@return { [1]: string, [2]: string }[]?
+local function footer_chunks(footer)
+  if type(footer) == "string" then
+    return { { footer, "TypeScopeHint" } }
+  end
+  return footer
+end
+
+-- ── the docked panel ─────────────────────────────────────────────────────
+--
+-- The ledger's details live in a second window under the rows, drawn as one
+-- frame: the main window keeps the top of the border and loses the bottom,
+-- the panel's top edge is the separator (├───┤) and it carries the bottom
+-- and the footer. Floats cannot share a border, so the frame is two partial
+-- ones that meet.
+--
+-- Both windows are placed relative to the EDITOR at positions computed here.
+-- relative = "cursor" would re-anchor to whatever window has focus on every
+-- set_config (the float itself, once entered), and nvim nudges a float that
+-- does not fit back on screen one window at a time, which would tear the
+-- frame. So the side of the cursor is chosen once, at open, and the content
+-- budget is capped to what fits there.
+
+-- corners, edges and the tees a separator needs, per named border
+local FRAMES = {
+  single = { "┌", "─", "┐", "│", "┘", "─", "└", "│", "├", "┤" },
+  rounded = { "╭", "─", "╮", "│", "╯", "─", "╰", "│", "├", "┤" },
+  double = { "╔", "═", "╗", "║", "╝", "═", "╚", "║", "╠", "╣" },
+  bold = { "┏", "━", "┓", "┃", "┛", "━", "┗", "┃", "┣", "┫" },
+  solid = { " ", " ", " ", " ", " ", " ", " ", " ", " ", " " },
+}
+
+---@class typescope.Frame
+---@field main_open any border for the main window while the panel shows
+---@field main_closed any border for the main window alone
+---@field panel any border for the panel
+---@field top integer rows the main window's border adds above its content
+---@field between integer rows between the main window's content and the panel's
+---@field bottom integer rows under the panel's content
+---@field below boolean the frame hangs under the cursor (else sits above it)
+---@field row integer source cursor's screen row, 0-indexed
+---@field col integer source cursor's screen column, 0-indexed
+
+---@param border any a float border value
+---@return typescope.Frame
+local function frame_for(border)
+  local f = type(border) == "string" and FRAMES[border] or nil
+  if f then
+    return {
+      main_open = { f[1], f[2], f[3], f[4], "", "", "", f[8] },
+      main_closed = { f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8] },
+      panel = { f[9], f[2], f[10], f[4], f[5], f[6], f[7], f[8] },
+      top = 1,
+      between = 1,
+      bottom = 1,
+    }
+  end
+  -- "none", "shadow", a custom array: two boxes stacked, each its own border
+  local edge = (border == nil or border == "none") and 0 or 1
+  return {
+    main_open = border,
+    main_closed = border,
+    panel = border,
+    top = edge,
+    between = 2 * edge,
+    bottom = edge,
+  }
+end
+
+--- Content rows the panel float can hold on its side of the cursor.
+---@param frame typescope.Frame
+---@param max_height integer
+---@return integer budget
+local function place_frame(frame, max_height)
+  local chrome = frame.top + frame.between + frame.bottom
+  local screen = vim.o.lines - vim.o.cmdheight
+  local below = screen - frame.row - 1
+  local above = frame.row
+  frame.below = below >= max_height + chrome or below >= above
+  local room = (frame.below and below or above) - chrome
+  return math.max(2, math.min(max_height, room))
+end
+
 ---@class typescope.FloatOpts
 ---@field lines string[]
 ---@field highlights typescope.Highlight[]
 ---@field ts_injections? typescope.Injection[]
 ---@field lang? string treesitter language for injected snippet highlighting
 ---@field title? string
----@field footer? string
+---@field footer? string|{ [1]: string, [2]: string }[] text, or chunks with highlight groups
+---@field panel? { row: integer, col: integer, max_height: integer } open with a docked panel; row/col are the source cursor's 0-indexed SCREEN position the frame hangs from, max_height the content rows rows + panel may use (ui.max_height)
 ---@field row integer
 ---@field col integer
 ---@field relative "editor"|"cursor"|"win"
@@ -269,22 +357,128 @@ function M.open(opts)
     style = "minimal",
     border = opts.border,
     title = opts.title and { { opts.title, "TypeScopeTitle" } } or nil,
-    footer = opts.footer and { { opts.footer, "TypeScopeHint" } } or nil,
+    footer = footer_chunks(opts.footer),
     focusable = opts.focusable ~= false,
     zindex = 50,
   })
   vim.wo[win].wrap = false -- render.lua wraps manually to keep highlights exact
   vim.wo[win].cursorline = opts.enter or false
 
-  return { buf = buf, win = win, ns = ns }
+  local handle = { buf = buf, win = win, ns = ns } ---@type typescope.FloatHandle
+  if opts.panel then
+    local frame = frame_for(opts.border)
+    frame.row, frame.col = opts.panel.row, opts.panel.col
+    handle.frame = frame
+    handle.budget = place_frame(frame, opts.panel.max_height)
+    local pbuf = vim.api.nvim_create_buf(false, true)
+    vim.bo[pbuf].bufhidden = "wipe"
+    vim.bo[pbuf].undolevels = -1 -- repainted every animation frame; see above
+    painted[pbuf] = nil
+    -- not "typescope": what finds the float by filetype means the rows
+    vim.bo[pbuf].filetype = "typescope_panel"
+    local pwin = vim.api.nvim_open_win(pbuf, false, {
+      relative = "editor",
+      row = 0,
+      col = 0,
+      width = math.max(1, opts.width),
+      height = 1,
+      style = "minimal",
+      border = frame.panel,
+      focusable = false,
+      hide = true, -- laid out by the first update
+      zindex = 50,
+    })
+    vim.wo[pwin].wrap = false
+    handle.panel = { buf = pbuf, win = pwin }
+  end
+  return handle
+end
+
+local applied = {} ---@type table<integer, string> win -> key of the config it last got
+
+--- Compare-then-set: set_config makes nvim redo window layout, and refresh()
+--- runs 60 times a second while anything animates. `key` is whatever
+--- describes the config (tables compare by identity, so callers pass a
+--- string); an unchanged key is a no-op.
+---@param win integer
+---@param cfg table
+---@param key string
+local function configure(win, cfg, key)
+  if applied[win] == key or not vim.api.nvim_win_is_valid(win) then
+    return
+  end
+  applied[win] = key
+  vim.api.nvim_win_set_config(win, cfg)
+end
+
+---@class typescope.PanelUpdate
+---@field lines string[]
+---@field highlights typescope.Highlight[]
+---@field ts_injections? typescope.Injection[]
+---@field height integer
+
+--- Lay out a panel float: the main window and, when `panel` is given, the
+--- docked panel under it, as one frame on the side of the cursor chosen at
+--- open. `panel = nil` hides it (help, doc view) and closes the frame on the
+--- main window instead.
+---@param handle typescope.FloatHandle
+---@param width integer
+---@param main_h integer
+---@param panel? typescope.PanelUpdate
+---@param footer? { [1]: string, [2]: string }[]
+---@param lang? string
+local function layout(handle, width, main_h, panel, footer, lang)
+  local frame = handle.frame
+  local p = handle.panel
+  local open = panel ~= nil and p ~= nil and vim.api.nvim_win_is_valid(p.win)
+  local panel_h = open and panel.height or 0
+  local total = frame.top + main_h + frame.bottom + (open and (frame.between + panel_h) or 0)
+  -- the frame's outer width: content plus a column of border each side
+  local side = frame.top > 0 and 1 or 0
+  local col = math.max(0, math.min(frame.col, vim.o.columns - width - 2 * side))
+  local top = frame.below and (frame.row + 1) or (frame.row - total)
+  local fkey = vim.inspect(footer)
+  configure(handle.win, {
+    relative = "editor",
+    row = top,
+    col = col,
+    width = math.max(1, width),
+    height = math.max(1, main_h),
+    border = open and frame.main_open or frame.main_closed,
+    -- the footer belongs to whichever window draws the frame's bottom; ""
+    -- takes it back off the main window when the panel opens under it
+    footer = (not open and footer) or "",
+  }, table.concat({ top, col, width, main_h, tostring(open), open and "" or fkey }, ":"))
+  if not p or not vim.api.nvim_win_is_valid(p.win) then
+    return
+  end
+  if not open then
+    configure(p.win, { hide = true }, "hidden")
+    return
+  end
+  set_content(p.buf, panel.lines, panel.highlights, panel.ts_injections, lang)
+  configure(p.win, {
+    relative = "editor",
+    row = top + frame.top + main_h + frame.between - (frame.between > 0 and 1 or 0),
+    col = col,
+    width = math.max(1, width),
+    height = math.max(1, panel_h),
+    border = frame.panel,
+    footer = footer,
+    hide = false,
+  }, table.concat({ top, col, width, main_h, panel_h, fkey }, ":"))
 end
 
 --- Swap content and resize in one synchronous block — no scheduling between
 --- buffer and window updates, so expand/collapse never shows a partial frame.
 ---@param handle typescope.FloatHandle
----@param opts { lines: string[], highlights: typescope.Highlight[], ts_injections?: typescope.Injection[], lang?: string, width?: integer, height?: integer, title?: string }
+---@param opts { lines: string[], highlights: typescope.Highlight[], ts_injections?: typescope.Injection[], lang?: string, width?: integer, height?: integer, title?: string, panel?: typescope.PanelUpdate, footer?: { [1]: string, [2]: string }[] }
 function M.update(handle, opts)
   set_content(handle.buf, opts.lines, opts.highlights, opts.ts_injections, opts.lang)
+  if handle.frame then
+    layout(handle, opts.width, opts.height, opts.panel, opts.footer, opts.lang)
+    return
+  end
   local cfg = {}
   if opts.width then
     cfg.width = math.max(1, opts.width)
@@ -325,8 +519,16 @@ function M.close(handle)
   -- still have to be dropped. The buffer is bufhidden=wipe, so by now it may
   -- be gone too — forgetting a buffer that no longer exists is the point.
   M._forget(handle.buf)
+  applied[handle.win] = nil
   if vim.api.nvim_win_is_valid(handle.win) then
     vim.api.nvim_win_close(handle.win, true)
+  end
+  if handle.panel then
+    M._forget(handle.panel.buf)
+    applied[handle.panel.win] = nil
+    if vim.api.nvim_win_is_valid(handle.panel.win) then
+      vim.api.nvim_win_close(handle.panel.win, true)
+    end
   end
 end
 

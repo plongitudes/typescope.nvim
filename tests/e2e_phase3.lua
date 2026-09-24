@@ -671,9 +671,23 @@ do
 end
 
 -- K ledger layout (U6): one-line rows — name | type | short default — with a
--- detail block that follows the cursor once the float is focused
+-- docked panel under them that follows the cursor once the float is focused
 do
   require("typescope").setup({ ui = { layout = "ledger" } })
+  local function panel()
+    for _, w in ipairs(vim.api.nvim_list_wins()) do
+      if vim.bo[vim.api.nvim_win_get_buf(w)].filetype == "typescope_panel" then
+        return vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(w), 0, -1, false), w
+      end
+    end
+  end
+  local function panel_text()
+    local lines, w = panel()
+    if not lines or vim.api.nvim_win_get_config(w).hide then
+      return ""
+    end
+    return table.concat(lines, "\n")
+  end
   vim.api.nvim_win_set_cursor(0, { call_line, 12 })
   require("typescope").open()
   vim.wait(3000, function()
@@ -683,13 +697,10 @@ do
   check("ledger float opened", llines ~= nil)
   if llines then
     local all = table.concat(llines, "\n")
-    local timeout_row, config_row
+    local timeout_row
     for i, l in ipairs(llines) do
       if l:find("timeout") then
-        timeout_row = i
-      end
-      if l:find("config") and not l:find("create_server") then
-        config_row = config_row or i
+        timeout_row = i -- last match: the header line also says "timeout"
       end
     end
     check(
@@ -697,65 +708,57 @@ do
       timeout_row ~= nil and llines[timeout_row]:find("float") ~= nil and llines[timeout_row]:find("= 30%.0") ~= nil
     )
     check("ledger rows carry no expand hints or examples", not all:find("<CR>") and not all:find("localhost"))
+    check("the panel opens with the float", panel() ~= nil)
+    check("...on the first row when no param is active", panel_text():find("^config") ~= nil)
+    check("the ledger carries no docstring section", not all:find("Spin up"))
+    local _, pw = panel()
+    local footer = vim.api.nvim_win_get_config(pw).footer
+    local footer_text = ""
+    for _, chunk in ipairs(type(footer) == "table" and footer or {}) do
+      footer_text = footer_text .. chunk[1]
+    end
+    check("the footer carries the docstring's first sentence", footer_text:find("Spin up") ~= nil)
 
-    -- focus, rest on the timeout row: the detail block appears under it
+    -- focus, rest on the timeout row: the panel shows it, the rows stay put
     vim.api.nvim_set_current_win(lw)
     vim.api.nvim_win_set_cursor(lw, { timeout_row, 0 })
     vim.cmd("doautocmd CursorMoved")
-    local detailed = vim.wait(1000, function()
-      local cur = table.concat(float_lines() or {}, "\n")
-      return cur:find("│ = 30%.0") ~= nil
+    local followed = vim.wait(1000, function()
+      return panel_text():find("^timeout") ~= nil and panel_text():find("= 30%.0") ~= nil
     end, 50)
-    check("ledger detail block follows the cursor (timeout default)", detailed)
-    if detailed then
-      -- the detail row itself drops its inline default (the block carries it)
-      local cur = float_lines()
-      for _, l in ipairs(cur) do
-        if l:find("timeout") then
-          check("detail row hands its default to the block", not l:find("=30%.0"))
-        end
-      end
-      -- moving to another row swaps the block
-      for i, l in ipairs(cur) do
-        if l:find("config") and not l:find("create_server") then
-          vim.api.nvim_win_set_cursor(lw, { i, 0 })
-          break
-        end
-      end
-      vim.cmd("doautocmd CursorMoved")
-      local swapped = vim.wait(1000, function()
-        return not table.concat(float_lines() or {}, "\n"):find("│ = 30%.0")
-      end, 50)
-      check("ledger detail block leaves the abandoned row", swapped)
+    check("the panel follows the cursor (timeout default)", followed)
+    check("moving the cursor leaves the rows alone", table.concat(float_lines(), "\n") == all)
 
-      -- j/k are node motions: from timeout (detail block open under it) j
-      -- skips the block's info lines straight to returns; k jumps back to
-      -- timeout's primary row
-      -- last match: the header line also says "timeout"; the param row wins
-      local t2
-      for i, l in ipairs(float_lines()) do
-        if l:find("timeout") then
-          t2 = i
-        end
-      end
-      vim.api.nvim_win_set_cursor(lw, { t2, 0 })
-      vim.cmd("doautocmd CursorMoved")
-      vim.wait(500, function()
-        return table.concat(float_lines() or {}, "\n"):find("│ = 30%.0") ~= nil
-      end, 50)
-      local function cursor_line()
-        return vim.api.nvim_buf_get_lines(
-          vim.api.nvim_win_get_buf(lw),
-          vim.api.nvim_win_get_cursor(lw)[1] - 1,
-          vim.api.nvim_win_get_cursor(lw)[1],
-          false
-        )[1] or ""
-      end
-      vim.api.nvim_feedkeys("j", "x", false)
-      check("j skips info lines to the next node", cursor_line():find("returns") ~= nil)
-      vim.api.nvim_feedkeys("k", "x", false)
-      check("k jumps back to the previous node's primary row", cursor_line():find("timeout") ~= nil)
+    local function cursor_line()
+      return vim.api.nvim_buf_get_lines(
+        vim.api.nvim_win_get_buf(lw),
+        vim.api.nvim_win_get_cursor(lw)[1] - 1,
+        vim.api.nvim_win_get_cursor(lw)[1],
+        false
+      )[1] or ""
     end
+    vim.api.nvim_feedkeys("j", "x", false)
+    check("j moves to the next node", cursor_line():find("returns") ~= nil)
+    vim.api.nvim_feedkeys("k", "x", false)
+    check("k moves back", cursor_line():find("timeout") ~= nil)
+
+    -- d: the whole docstring where the rows were, the panel folded away; d
+    -- again brings the rows back with the cursor where it was
+    vim.api.nvim_feedkeys("d", "x", false)
+    local doc = table.concat(float_lines(), "\n")
+    check("d shows the docstring in place of the rows", doc:find("Spin up") ~= nil and not doc:find("= 30%.0"))
+    check("...with the panel hidden", panel_text() == "")
+    vim.api.nvim_feedkeys("d", "x", false)
+    -- the rules may have stretched: the doc view grew the float, and it
+    -- never shrinks back
+    local function rows(lines)
+      return vim.tbl_filter(function(l)
+        return not vim.startswith(l, "─")
+      end, lines)
+    end
+    check("d again brings the rows back", vim.deep_equal(rows(float_lines()), rows(llines)))
+    check("...on the row it left", cursor_line():find("timeout") ~= nil)
+    check("...with the panel back", panel_text():find("^timeout") ~= nil)
     require("typescope").close()
   end
   require("typescope").setup({})
