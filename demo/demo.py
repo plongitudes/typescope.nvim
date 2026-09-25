@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import overload
+from typing import NamedTuple, TypedDict, overload
 
 
 class LogLevel(Enum):
@@ -9,12 +9,24 @@ class LogLevel(Enum):
     WARNING = "warning"
 
 
+class Backoff(NamedTuple):
+    initial: float
+    factor: float
+    cap: float
+
+
 @dataclass
 class Retry:
     """How a failed request is retried before the caller sees the error."""
 
     attempts: int = 3
-    backoff: float = 0.5
+    backoff: Backoff = Backoff(0.5, 2.0, 30.0)
+
+
+class Route(TypedDict):
+    path: str
+    methods: list[str]
+    auth: bool
 
 
 @dataclass
@@ -27,7 +39,7 @@ class ServerConfig:
 
     host: str
     port: int = 8080
-    debug: bool = False
+    level: LogLevel = LogLevel.INFO
     retry: Retry = field(default_factory=Retry)
 
 
@@ -38,7 +50,7 @@ class User:
     admin: bool = False
 
 
-def serve(host: str, port: int = 8080, workers: int = 4, level: LogLevel = LogLevel.INFO) -> None:
+def serve(config: ServerConfig, routes: list[Route], workers: int = 4, level: LogLevel = LogLevel.INFO) -> None:
     """Start the service and block until it is stopped."""
 
 
@@ -54,6 +66,9 @@ def lookup(key: int | str, *, active: bool = True) -> User:
 def start(config: ServerConfig, owner: User) -> None:
     """Bring the service up with an owner on record."""
 
+
+cfg = ServerConfig("0.0.0.0")
+routes = [Route(path="/health", methods=["GET"], auth=False)]
 
 serve()
 lookup()

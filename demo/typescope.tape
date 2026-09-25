@@ -7,16 +7,20 @@
 # `ollama serve` running with qwen2.5-coder:3b pulled. The `e` beat's output
 # comes from the model, so it differs run to run.
 
-Output demo/typescope.gif
+# lossless frames; demo/encode.sh makes the gif and the mp4 from them
+Output demo/frames/
 
 Set Shell zsh
 Set FontFamily "FantasqueSansM Nerd Font"
-Set FontSize 14
-Set Width 1200
-Set Height 640
-Set Padding 16
+Set FontSize 28
+Set Width 2400
+Set Height 1280
+Set Padding 32
 Set TypingSpeed 70ms
 Set CursorBlink false
+# 50 (the default) is more than VHS can capture at 2x here; frames it misses
+# shorten the video instead of stretching it, so pick a rate it keeps up with
+Set Framerate 30
 # Ghostty's Gruvbox Dark: nvim runs transparent, so this bg is what shows
 Set Theme { "name": "Gruvbox Dark", "background": "#282828", "foreground": "#ebdbb2", "cursor": "#ebdbb2", "selection": "#665c54", "black": "#282828", "red": "#cc241d", "green": "#98971a", "yellow": "#d79921", "blue": "#458588", "magenta": "#b16286", "cyan": "#689d6a", "white": "#a89984", "brightBlack": "#928374", "brightRed": "#fb4934", "brightGreen": "#b8bb26", "brightYellow": "#fabd2f", "brightBlue": "#83a598", "brightMagenta": "#d3869b", "brightCyan": "#8ec07c", "brightWhite": "#ebdbb2" }
 
@@ -44,11 +48,11 @@ Type "G2k"
 Sleep 500ms
 Type "f(a"
 Sleep 1500ms
-Type `"0.0.0.0", `
+Type "cfg, "
 Sleep 1200ms
-Type "8000, "
+Type "routes, "
 Sleep 1200ms
-Type "workers=2"
+Type "level=LogLevel.DEBUG"
 Sleep 2s
 Escape
 Sleep 800ms
@@ -72,7 +76,7 @@ Sleep 2500ms
 Type "q"
 Sleep 800ms
 
-# --- K on ServerConfig: expand, docstring, example, back out ----------------
+# --- K on ServerConfig: three levels down, docstring, example, back out -----
 Type "0fS"
 Sleep 500ms
 Type "K"
@@ -83,20 +87,26 @@ Sleep 6s
 Type "j"
 Sleep 400ms
 Type "j"
-Sleep 400ms
-Type "j"
-Sleep 800ms
+Sleep 700ms
 Type "l"
 Sleep 1500ms
-Type "j"
+Type "h"
 Sleep 800ms
+Type "j"
+Sleep 700ms
+Type "l"
+Sleep 1200ms
+Type "j"
+Sleep 400ms
+Type "j"
+Sleep 700ms
+Type "l"
+Sleep 1500ms
 Type "d"
 Sleep 3s
 Type "d"
 Sleep 1s
-Type "h"
-Sleep 800ms
-Type "h"
+Type "H"
 Sleep 1500ms
 Type "q"
 Sleep 800ms
