@@ -526,6 +526,17 @@ fn a_nested_third_party_class_waits_to_be_asked_for() {
     assert_eq!(data_rows(&direct.roots[0]), ["size", "label"]);
 }
 
+#[test]
+fn a_nested_third_party_class_with_nothing_public_is_a_leaf() {
+    // opaque: Opaque — only __init__ and __call__, both hidden names. Marked
+    // expandable it opened to nothing, the walk dropped the row, and the
+    // plugin kept asking for a node that never came back.
+    let s = probe("oracle/oracle.py", "class UsesOpaque", 6, false);
+    let opaque = find(&s.roots[0], "opaque");
+    assert!(!opaque.expandable && opaque.path.is_none(), "nothing behind the marker");
+    assert!(find(&s.roots[0], "widget").expandable, "a sibling with public members still waits to be asked for");
+}
+
 /// Open `widget` wherever it sits by sending back the `path` the oracle put on
 /// it — every scope kind, including those whose walk starts at a node that
 /// never becomes a row (`function`, `__init__`) and a declaration row named

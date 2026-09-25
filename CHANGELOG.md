@@ -2,6 +2,12 @@
 
 Notable changes to TypeScope, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [Semantic Versioning](https://semver.org/), with the usual 0.x caveat that a minor bump may break something. Each release is an annotated git tag carrying the same notes.
 
+## [Unreleased]
+
+### Fixed
+
+- **An installed class with nothing public showed `▸` but never opened.** A class whose members are all private or dunder names (an ASGI app protocol, which is just `__call__`) was marked expandable when nested inside another type; opening it drew nothing, so `l` silently did nothing on every press. It now draws as a plain leaf. Press `gD` on it to read the source.
+
 ## [0.2.1] — 2026-09-23
 
 ### Fixed

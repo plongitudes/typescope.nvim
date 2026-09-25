@@ -152,3 +152,13 @@ class Keeper:
 
     def use(self) -> None:
         kept = self.held
+
+
+from thirdparty import Opaque
+
+
+class UsesOpaque:
+    """A field typed as an installed class with nothing public on it."""
+
+    opaque: Opaque
+    widget: Widget
