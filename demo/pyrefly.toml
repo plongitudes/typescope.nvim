@@ -1,0 +1,2 @@
+# Roots the oracle (and basedpyright) at demo/ instead of the whole repo.
+python-version = "3.12"

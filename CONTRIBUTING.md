@@ -39,6 +39,10 @@ Some things this suite learned the hard way:
 - **Headless float geometry is not real geometry.** With no UI attached there is no anchor to measure against, so assert on `nvim_win_get_config` rather than on positions a headless probe reports.
 - **`tests/fixtures/shapes.py` is the capability sheet.** It records every class shape the oracle draws, as `typescope:` marker comments that `cargo test` in `oracle/` asserts against. A marker is a statement of policy (`design/oracle.md` §4), not a test expectation to be edited into passing: change one only with the rule that justifies it in the commit message. Add a marker whenever you teach the oracle a new shape.
 
+## The README demo
+
+`demo/typescope.gif` is recorded with [VHS](https://github.com/charmbracelet/vhs) from `demo/typescope.tape`, so re-record it (`vhs demo/typescope.tape` from the repo root) after a change that shows up in it. The tape's header lists what it needs. It runs nvim under `--clean` with `demo/init.lua`, so your own config stays out of the frame. The `e` beat's value comes from the model and changes from run to run; look over the new gif before committing it.
+
 ## Style
 
 Beyond what stylua and luacheck enforce:
