@@ -25,7 +25,7 @@ M.STRUCTURE = "typescope/structure"
 
 --- The release whose binary this plugin version downloads. Bumped with the
 --- plugin; the oracle and the plugin are released together.
-M.RELEASE = "v0.2.1"
+M.RELEASE = "v0.3.0"
 --- Where releases live. Overridable for tests (a local server) through
 --- `oracle.release_url`; users never set it.
 M.RELEASE_URL = "https://github.com/plongitudes/typescope.nvim/releases/download"
