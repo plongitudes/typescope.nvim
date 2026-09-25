@@ -23,8 +23,28 @@ permissions:
   contents: write
 
 jobs:
+  on-main:
+    name: tag is on main
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: The tagged commit must already be merged to main
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          # a tag pushed before its release PR merges would publish a release
+          # main does not contain yet, or never will if the PR is squashed
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "${GITHUB_REF_NAME} points at $(git rev-parse --short HEAD), which is not on main." >&2
+            echo "Merge the release PR, then move the tag onto main and push it again." >&2
+            exit 1
+          fi
+
   build:
     name: build (${{ matrix.target }})
+    needs: on-main
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
