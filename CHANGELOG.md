@@ -20,6 +20,7 @@ Notable changes to TypeScope, newest first. The format follows [Keep a Changelog
 ### Fixed
 
 - **The oracle re-parsed a module's whole source for every row that asked about it** when the checker had dropped that module's syntax tree, which it does for files it reached only through imports. A third-party class like SQLAlchemy's `Mapper` is a few hundred such rows over files thousands of lines long. Parsed modules are now kept, and parsed again only when their text changes.
+- **An installed class with nothing public showed `▸` but never opened.** A class whose members are all private or dunder names (an ASGI app protocol, which is just `__call__`) was marked expandable when nested inside another type; opening it drew nothing, so `l` silently did nothing on every press. It now draws as a plain leaf. Press `gD` on it to read the source.
 
 ## [0.2.1] — 2026-09-23
 

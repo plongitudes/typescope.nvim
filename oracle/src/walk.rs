@@ -445,8 +445,15 @@ impl<'a> Walker<'a> {
             let category = policy::classify(&cls, &policy_attrs);
             let mut node = Node::leaf(name, kind, display(ty), category.as_str());
             node.location = class_location(&cls);
-            node.expandable = true;
-            node.path = Some(self.path.borrow().clone());
+            // only when opening it would draw something: a class that is all
+            // private and dunder names (an ASGI app protocol is just
+            // `__call__`) walks to nothing, a union then drops the empty
+            // variant, and the plugin is left asking for a row that never
+            // comes back
+            if attrs.iter().any(|a| !policy::is_hidden_name(a.name.as_str())) {
+                node.expandable = true;
+                node.path = Some(self.path.borrow().clone());
+            }
             return node;
         }
         if policy::is_terminal_class(&cls) {
