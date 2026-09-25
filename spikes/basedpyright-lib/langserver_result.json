@@ -1,1 +1,0 @@
-{"tree":[25757,25758],"pid":25757,"side":"langserver","metric":"phys_footprint via footprint(1), launcher + node summed","footprint_mb":{"after_10s_idle":535,"after_first_hover":510,"attach":67,"peak":535,"after_10_hovers":533},"footprint_peak_mb":535,"first_hover_ms":1489,"hover_ms":[1489,147,0,0,0,0,0,0,0,0]}

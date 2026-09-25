@@ -1,5 +1,5 @@
 -- The shipped oracle's cost beside basedpyright on a real project, for the
--- changelog (design/oracle.md §7). Opens spikes/basedpyright-lib/targets.json's
+-- changelog (design/oracle.md §7). Opens scripts/footprint-targets.json's
 -- file, attaches both servers, opens the float on each target through the
 -- plugin, and reads physical footprint with footprint(1) — never ps rss, which
 -- undercounts an idle process on a busy Mac by 10x.
@@ -8,7 +8,7 @@
 --   nvim --headless --clean --cmd "set rtp+=. rtp+=~/.local/share/nvim/site rtp+=~/.local/share/nvim/lazy/nvim-treesitter" \
 --        -c "luafile scripts/footprint.lua" -c "qa!"
 local root = vim.fn.getcwd()
-local spec = vim.json.decode(table.concat(vim.fn.readfile(root .. "/spikes/basedpyright-lib/targets.json"), "\n"))
+local spec = vim.json.decode(table.concat(vim.fn.readfile(root .. "/scripts/footprint-targets.json"), "\n"))
 local bin = vim.env.TYPESCOPE_ORACLE or (root .. "/oracle/target/release/typescope-oracle")
 local based = vim.fn.exepath("basedpyright-langserver")
 if based == "" then
