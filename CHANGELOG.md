@@ -2,7 +2,13 @@
 
 Notable changes to TypeScope, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [Semantic Versioning](https://semver.org/), with the usual 0.x caveat that a minor bump may break something. Each release is an annotated git tag carrying the same notes.
 
-## [Unreleased]
+## [0.3.0] — 2026-09-24
+
+The ledger stops moving. Its details moved out of the rows into a panel docked underneath, so `j` and `k` no longer shove everything below the cursor around, and examples are asked for one row at a time as you reach them instead of for the whole tree up front. On a large third-party type that was the difference between a float that answers in under half a second and an editor pinned for minutes.
+
+### Upgrading
+
+Three keys changed. `L` is gone (press `l` again to go a level deeper). `E` is gone, and `e` now asks the model for the row under the cursor instead of toggling examples (`show_examples` still turns them off). If your setup maps `keymaps.expand_all` or `keymaps.toggle_examples`, those keys are ignored and you'll see a one-time warning; `keymaps.llm_generate` now defaults to `e`.
 
 ### Removed
 
@@ -11,7 +17,7 @@ Notable changes to TypeScope, newest first. The format follows [Keep a Changelog
 
 ### Changed
 
-- **The ledger's details moved into a panel docked under the rows.** The detail block used to open under the cursor's row and push every row below it down, on every `j` and `k`. The rows now never move; a panel inside the same frame shows the cursor row's details, and it adds the whole type, which the row cuts short. It grows to the tallest node it has shown (up to five lines) and doesn't shrink back. The frame opens above the cursor when there is more room there.
+- **The ledger's details moved into a panel docked under the rows.** The detail block used to open under the cursor's row and push every row below it down, on every `j` and `k`. The rows now never move; a panel inside the same frame shows the cursor row's details, and it adds the whole type, which the row cuts short. It grows to the tallest node it has shown (up to five lines) and doesn't shrink back. The frame opens above the cursor when there is more room there, and the cursor starts on the first row rather than the header, so the panel always has something to show.
 - **The ledger's docstring moved to the frame's bottom edge.** Its first sentence sits in the footer; `d` shows the whole docstring in place of the rows, and `d` again goes back to the row you left. The `tree` layout keeps its docstring section.
 - **In the ledger, `example_mode = "llm"` generates as you go.** Only the panel shows examples, so generating one for every visible leaf on open asked a slow local model about rows you might never look at. It now generates for the panel's node and its nearest siblings (one batch) when the cursor reaches them. One batch is in flight at a time, never a queue: when it lands, whatever node the cursor is on then is what gets asked about next, so groups you only passed through are skipped.
 - **Animation frames in the ledger repaint only the panel.** The rows don't change while an example is on its way, but they were re-rendered 60 times a second anyway, which on a big tree was most of the editor's work.
@@ -21,6 +27,14 @@ Notable changes to TypeScope, newest first. The format follows [Keep a Changelog
 
 - **The oracle re-parsed a module's whole source for every row that asked about it** when the checker had dropped that module's syntax tree, which it does for files it reached only through imports. A third-party class like SQLAlchemy's `Mapper` is a few hundred such rows over files thousands of lines long. Parsed modules are now kept, and parsed again only when their text changes.
 - **An installed class with nothing public showed `▸` but never opened.** A class whose members are all private or dunder names (an ASGI app protocol, which is just `__call__`) was marked expandable when nested inside another type; opening it drew nothing, so `l` silently did nothing on every press. It now draws as a plain leaf. Press `gD` on it to read the source.
+
+### Deprecated
+
+- **The `tree` layout.** The ledger is where the work goes now, and `tree` will be removed in a future release. `ui.layout = "ledger"` is already the default.
+
+### Development
+
+- **`spikes/` is gone.** The oracle spikes' findings and probes did their job for `design/oracle.md`; they are still in history (`git show 4fd27be:spikes/pyrefly-lib/FINDINGS.md`). `scripts/footprint.lua` reads its targets from `scripts/footprint-targets.json`.
 
 ## [0.2.1] — 2026-09-23
 
