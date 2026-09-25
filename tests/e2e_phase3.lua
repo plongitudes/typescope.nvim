@@ -1009,7 +1009,7 @@ do
         -- last. The literal newlines in the text are escaped by json.encode,
         -- so each object still occupies exactly one line of the framing.
         local body = vim.json.encode({
-          response = 'config.host = "llm-host.example.io/gateway/v2/ingest?region=us-west-2"\nconfig.port = 8443\nconfig.timeout_ms = 250\ntimeout = 12.5',
+          response = 'config.host = "llm-host.example.io/gateway/v2/ingest?region=us-west-2"\nconfig.port = 8443\nconfig.timeout_ms = 250\ntimeout = 12.5\nlabel = "fixture-label"',
           done = false,
         }) .. "\n" .. vim.json.encode({ response = "", done = true }) .. "\n"
         sock:write(
@@ -1213,6 +1213,43 @@ if not auto:find("llm%-host") then
   print("  DEBUG notifies: " .. vim.inspect(auto_msgs))
 end
 require("typescope").close()
+
+-- The ledger's first ask happens while the float is still being built: the
+-- panel opens on greet's `label`, a leaf with no answer yet, and asks for it
+-- from inside attach(). That ask once went through a session that did not
+-- exist yet, was dropped without a word, and left every later ask (e
+-- included) parked behind a batch that was never sent.
+require("typescope.examples")._clear_llm_cache()
+require("typescope").setup({
+  example_mode = "llm",
+  ollama = { enabled = true, port = fake_port, timeout_ms = 3000 },
+})
+do
+  local function panel_text()
+    for _, w in ipairs(vim.api.nvim_list_wins()) do
+      if vim.bo[vim.api.nvim_win_get_buf(w)].filetype == "typescope_panel" then
+        return table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(w), 0, -1, false), "\n")
+      end
+    end
+    return ""
+  end
+  for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+    if l:find("greeted = greet") then
+      vim.api.nvim_win_set_cursor(0, { i, 10 })
+    end
+  end
+  require("typescope").open()
+  vim.wait(2000, function()
+    return float_lines() ~= nil
+  end)
+  check("the ledger opens on greet's first row", panel_text():find("^label") ~= nil)
+  local landed = vim.wait(5000, function()
+    return panel_text():find("fixture%-label") ~= nil
+  end, 20)
+  check("the ask made while the float opens is sent, and lands in the panel", landed)
+  require("typescope").close()
+end
+require("typescope").setup({})
 
 -- A cancelled lazy expand must leave the node retryable.
 --
