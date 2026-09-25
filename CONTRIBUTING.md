@@ -9,7 +9,7 @@ brew install stylua luacheck   # or your platform's equivalent
 scripts/build-oracle.sh        # fetches pyrefly at oracle/pyrefly.rev, applies oracle/patches, builds a debug binary (~4 min cold)
 ```
 
-The Lua suites find `oracle/target/debug/typescope-oracle` on their own; without it, the suites that need it skip and say so. `(cd oracle && cargo test)` runs the oracle's own tests. [basedpyright](https://github.com/DetachHead/basedpyright) is not needed for the tests (a stand-in serves its `signatureHelp`), but it is what you want attached while you develop.
+The Lua suites find `oracle/target/debug/typescope-oracle` on their own; without it, the suites that need it skip and say so. `(cd oracle && cargo test)` runs the oracle's own tests. Build output piles up fast (`oracle/target` reaches several GB); `make clean` clears it but keeps the release binary a local `oracle.path` may point at, and `make distclean` removes that and the fetched pyrefly too. [basedpyright](https://github.com/DetachHead/basedpyright) is not needed for the tests (a stand-in serves its `signatureHelp`), but it is what you want attached while you develop.
 
 ## The three gates
 
