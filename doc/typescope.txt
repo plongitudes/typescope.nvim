@@ -179,15 +179,16 @@ These are active once the float has focus. All of them are configurable
 through `keymaps` (|typescope-config|); the defaults are shown.
 
     <CR>        Expand or collapse the node under the cursor
-    l           Expand the node under the cursor (no-op on a leaf)
+    l           Open one more level under the node (a collapsed node opens;
+                an open one reveals its next level down)
     h           Collapse the node, or jump to its parent and collapse that
-    L           Expand everything, including details
     H           Collapse everything
     j           Move to the next node (not the next line)
     k           Move to the previous node
-    e           Toggle the example column
-    E           Generate LLM examples for the visible tree (needs ollama)
-    d           Docstring: jump into the full section, or collapse back
+    e           Ask the model for this row's example, and its neighbours'
+                (needs ollama)
+    d           Docstring: show all of it (ledger: in place of the rows), or
+                go back
     q           Close
     <Esc>       Close
     ?           Toggle the help overlay
@@ -247,11 +248,9 @@ Defaults in full: >lua
         expand = "<CR>",
         expand_node = "l",
         collapse_node = "h",
-        expand_all = "L",
         collapse_all = "H",
-        toggle_examples = "e",
         docstring = "d",
-        llm_generate = "E",
+        llm_generate = "e",
         close = "q",
         help = "?",
       },
@@ -298,10 +297,14 @@ ui.hint ~
 Set `ui.layout`. Same data, different shapes.
 
 ledger ~
-    The default. One compact line per parameter (name, type, short default).
-    The row under the cursor expands into a detail block — evaluated shape,
-    example, origin — which follows as the cursor moves. L opens every row's
-    detail block as a transient peek; the next cursor move ends it.
+    The default. One compact line per parameter (name, type, short default),
+    and a panel docked under the rows showing everything about the row the
+    cursor is on: its whole type, evaluated shape, full default, example,
+    origin. The rows never move with the cursor; only the panel changes. The
+    panel grows to the tallest node it has shown (up to five lines) and does
+    not shrink back. The frame's bottom edge carries the docstring's first
+    sentence, and d shows the whole docstring in place of the rows. The
+    frame opens below the cursor, or above it when there is more room.
 
 tree ~
     Flowing segments; type, default and example trail the name and wrap with
@@ -346,10 +349,12 @@ The example column shows a plausible value for each leaf.
                                                      *typescope-example-mode*
 example_mode ~
     "heuristic"   Pattern-table values matched on name and type. No network,
-                  no model, instant. Press E in the float to generate LLM
-                  values on demand for what is visible. The default.
-    "llm"         Generate through ollama when the float opens. Heuristics
-                  show until the real values land, then swap in place.
+                  no model, instant. Press e on a row to ask the model
+                  for its example on demand. The default.
+    "llm"         Generate through ollama automatically: in the ledger, for
+                  the panel's row and its nearest neighbours as the cursor
+                  reaches them, one batch at a time. Heuristics show until
+                  the real values land, then swap in place.
     "none"        No example column.
 
                                                        *typescope-ollama-ram*
@@ -361,7 +366,7 @@ loaded model is RESIDENT RAM, roughly 2GB for the default qwen2.5-coder:3b.
 `keep_alive` controls how long the model stays resident after a request. The
 default "5m" matches ollama's own, and on a small-RAM machine it is the ONLY
 thing that reclaims the memory on a server TypeScope borrowed rather than
-spawned. Raise it if you have the headroom and want warm E presses all
+spawned. Raise it if you have the headroom and want warm e presses all
 session.
 
 `autostart = true` spawns `ollama serve` as a child process when the port

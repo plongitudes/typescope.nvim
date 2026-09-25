@@ -4,8 +4,22 @@ Notable changes to TypeScope, newest first. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
+### Removed
+
+- **`L` (open everything).** With the type checker filling in real structure, opening everything under a node could mean hundreds of rows, a request to the checker for each, and an example generation for each leaf. On a SQLAlchemy `Mapper` that pinned the editor for minutes. `l` opens one more level per press, which covers the same ground at a pace you choose. `H` stays. A `keymaps.expand_all` left in your setup is ignored with a warning.
+- **`E` (examples for the whole visible tree) and the `e` examples toggle.** `e` now asks the model for the row under the cursor, and its nearest neighbours: the same single batch the ledger's automatic generation uses, forced, so it re-asks a row the model already answered or had nothing for. It works with `example_mode = "heuristic"` too, where it is the way to ask at all. Examples are on or off through `show_examples`. A `keymaps.toggle_examples` left in your setup is ignored with a warning; `keymaps.llm_generate` now defaults to `e`.
+
+### Changed
+
+- **The ledger's details moved into a panel docked under the rows.** The detail block used to open under the cursor's row and push every row below it down, on every `j` and `k`. The rows now never move; a panel inside the same frame shows the cursor row's details, and it adds the whole type, which the row cuts short. It grows to the tallest node it has shown (up to five lines) and doesn't shrink back. The frame opens above the cursor when there is more room there.
+- **The ledger's docstring moved to the frame's bottom edge.** Its first sentence sits in the footer; `d` shows the whole docstring in place of the rows, and `d` again goes back to the row you left. The `tree` layout keeps its docstring section.
+- **In the ledger, `example_mode = "llm"` generates as you go.** Only the panel shows examples, so generating one for every visible leaf on open asked a slow local model about rows you might never look at. It now generates for the panel's node and its nearest siblings (one batch) when the cursor reaches them. One batch is in flight at a time, never a queue: when it lands, whatever node the cursor is on then is what gets asked about next, so groups you only passed through are skipped.
+- **Animation frames in the ledger repaint only the panel.** The rows don't change while an example is on its way, but they were re-rendered 60 times a second anyway, which on a big tree was most of the editor's work.
+- **`l` opens one more level per press.** On a collapsed node it opens it, as before; on an open one it reveals the next level down, so repeated presses walk a subtree open one depth at a time.
+
 ### Fixed
 
+- **The oracle re-parsed a module's whole source for every row that asked about it** when the checker had dropped that module's syntax tree, which it does for files it reached only through imports. A third-party class like SQLAlchemy's `Mapper` is a few hundred such rows over files thousands of lines long. Parsed modules are now kept, and parsed again only when their text changes.
 - **An installed class with nothing public showed `▸` but never opened.** A class whose members are all private or dunder names (an ASGI app protocol, which is just `__call__`) was marked expandable when nested inside another type; opening it drew nothing, so `l` silently did nothing on every press. It now draws as a plain leaf. Press `gD` on it to read the source.
 
 ## [0.2.1] — 2026-09-23

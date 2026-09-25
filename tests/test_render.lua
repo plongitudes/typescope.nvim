@@ -486,7 +486,8 @@ end
 -- (section 10, the table layout golden, went with the layout in 0.2.0)
 
 -- 11. ledger layout (U6): one line per node — name | type | short default —
--- with a detail block (≈ owner, full default, example, origin) on detail_id
+-- with the details (full type, ≈ owner, full default, example, origin) in
+-- the docked panel, rendered as view = "panel" for one node
 do
   local function ledger_tree()
     local t = {
@@ -559,33 +560,33 @@ do
     not all:find("localhost") and not all:find("BaseConfig") and not all:find("≈") and not all:find("<CR>")
   )
 
-  -- detail on ws: inline default moves into the block; the ≈ line names the
-  -- union member that answered (evaluated_owner), not the whole annotation
-  local dr = render.render(
-    ledger_tree(),
-    opts({ style = styles.get("rounded"), max_width = 60, layout = "ledger", detail_id = "ws" })
-  )
-  eq_lines("ledger detail block golden", dr.lines, {
-    "▾   config     ServerConfig",
-    "  ├─ ·   host  str",
-    "  ├─ ·   port  int  = 8000",
-    "  ╰─ ·   env   str",
-    '· * host       str  = "127.0.0.1"',
-    "· * ws         type[Protocol] | WSProtocolType",
-    '  │ ≈ WSProtocolType = Literal["auto", "none"]',
-    '  │ = "auto"   e.g. "none"',
-    "·   returns    None",
-  })
-  check(
-    "ledger detail lines map to their owner",
-    dr.line_to_node[7] == "ws" and dr.line_to_node[8] == "ws" and dr.line_to_node[9] == "returns"
-  )
+  local function panel_for(roots, id, over)
+    return render.render(
+      roots,
+      opts(vim.tbl_extend("force", {
+        style = styles.get("rounded"),
+        max_width = 60,
+        layout = "ledger",
+        view = "panel",
+        panel_node = model.find(roots, id),
+      }, over or {}))
+    )
+  end
 
-  -- A stub placeholder default stays on the ROW, focused or not. The detail
-  -- block exists to hold a value too long to sit inline, and `…` is one cell:
-  -- moving it there repeats a marker rather than expanding one, and makes it hop
-  -- off the row as the cursor passes. A block left with nothing else to say does
-  -- not open at all.
+  -- the panel for ws: name and whole type, then the ≈ line naming the union
+  -- member that answered (evaluated_owner, not the whole annotation), then
+  -- the full default and the example
+  local dr = panel_for(ledger_tree(), "ws")
+  eq_lines("ledger panel golden", dr.lines, {
+    "ws  type[Protocol] | WSProtocolType",
+    '≈ WSProtocolType = Literal["auto", "none"]',
+    '= "auto"   e.g. "none"',
+  })
+  check("panel lines map to its node", dr.line_to_node[1] == "ws" and dr.line_to_node[3] == "ws")
+  check("the panel draws no rows and no header", not table.concat(dr.lines, "\n"):find("returns"))
+
+  -- A stub placeholder default stays on the ROW, and the panel does not repeat
+  -- it: `…` is one cell and always fit inline, so echoing it says nothing.
   do
     local ph = {
       model.new({
@@ -608,39 +609,36 @@ do
         type = { display = "str", category = "builtin" },
       }),
     }
-    local function lines_for(focus)
-      local r = render.render(ph, opts({ layout = "ledger", max_width = 62, detail_id = focus }))
-      return table.concat(r.lines, "\n")
+    local rows = table.concat(render.render(ph, opts({ layout = "ledger", max_width = 62 })).lines, "\n")
+    check("a placeholder default shows inline", rows:find("level.*= …") ~= nil)
+    local function panel_text(id)
+      return table.concat(panel_for(ph, id, { max_width = 62 }).lines, "\n")
     end
-    local unfocused = lines_for(nil)
-    check("a placeholder default shows inline when unfocused", unfocused:find("level.*= …") ~= nil)
-
-    local on_level = lines_for("level")
-    check("...and stays on the row when focused", on_level:find("level.*= …") ~= nil)
-    check("...with the block carrying only the example", on_level:find("e%.g%.") ~= nil)
-    -- counted across the whole float, since the other two rows carry a marker
-    -- too: focusing must not ADD one by echoing it into the block
-    check(
-      "...not repeating the placeholder inside it",
-      select(2, on_level:gsub("= …", "")) == select(2, unfocused:gsub("= …", ""))
-    )
-
-    -- nothing to add, so no block at all: focused renders identically
-    check("a placeholder-only row opens no detail block", lines_for("exception") == unfocused)
-
-    -- a REAL default is what the block is for, and still expands into it
-    check(
-      "a real long default still expands in the block",
-      lines_for("fmt"):find('= "{time} {level} {message}"') ~= nil
-    )
+    check("...the panel carries the example", panel_text("level"):find("e%.g%.") ~= nil)
+    check("...and not the placeholder", not panel_text("level"):find("= …"))
+    check("a placeholder-only node's panel is just its name and type", #panel_for(ph, "exception").lines == 1)
+    check("a real long default is in the panel", panel_text("fmt"):find('= "{time} {level} {message}"') ~= nil)
   end
 
-  -- detail on an inherited field shows its origin
-  local er = render.render(
-    ledger_tree(),
-    opts({ style = styles.get("rounded"), max_width = 60, layout = "ledger", detail_id = "config.env" })
+  check(
+    "the panel shows an inherited field's origin",
+    table.concat(panel_for(ledger_tree(), "config.env").lines, "\n"):find("↑BaseConfig") ~= nil
   )
-  check("ledger detail shows origin", table.concat(er.lines, "\n"):find("↑BaseConfig") ~= nil)
+
+  -- the row cuts a long type short; the panel is where it is whole
+  do
+    local wide = {
+      model.new({
+        name = "app",
+        kind = "param",
+        type = { display = "ASGIApplication | Callable[..., Any] | str | type[ASGI2Protocol]", category = "generic" },
+      }),
+    }
+    local row = render.render(wide, opts({ layout = "ledger", max_width = 40 })).lines[1]
+    local whole = table.concat(panel_for(wide, "app", { max_width = 40 }).lines, " ")
+    check("a long type is cut on its row", row:find("…") ~= nil)
+    check("...and whole in the panel", whole:find("ASGI2Protocol]", 1, true) ~= nil)
+  end
 
   -- long identifiers middle-ellipsize at the 24-cell cap
   local long = render.render({
@@ -1148,7 +1146,8 @@ do
       { node },
       opts(vim.tbl_extend("force", {
         layout = "ledger",
-        detail_all = true,
+        view = "panel",
+        panel_node = node,
         max_width = 40,
         example_kind = "llm",
       }, over))
@@ -1273,7 +1272,8 @@ do
       { short },
       opts(vim.tbl_extend("force", {
         layout = "ledger",
-        detail_all = true,
+        view = "panel",
+        panel_node = short,
         max_width = 90,
         window_width = W,
         example_kind = "llm",
@@ -1341,7 +1341,8 @@ do
       { node },
       opts({
         layout = "ledger",
-        detail_all = true,
+        view = "panel",
+        panel_node = node,
         max_width = 90,
         window_width = window,
         example_kind = "llm",
@@ -1392,7 +1393,7 @@ do
   local wide = model.new({ name = "host", kind = "param", type = { display = "str", category = "builtin" } })
   wide.example.heuristic = '"llm-host.example.io/gateway/v2/ingest?region=us-west-2"'
   wide.origin = "typescope.transport.gateway.RegionalIngestClientConfiguration"
-  local narrow = render.render({ wide }, opts({ layout = "ledger", detail_all = true, max_width = 40 }))
+  local narrow = render.render({ wide }, opts({ layout = "ledger", view = "panel", panel_node = wide, max_width = 40 }))
   check("an example wider than the float wraps instead of hanging", #narrow.lines >= 2)
   local widest = 0
   for _, l in ipairs(narrow.lines) do
@@ -1400,11 +1401,12 @@ do
   end
   check("...and every wrapped line stays inside max_width", widest <= 40)
   -- deep chrome eats more of each continuation line; the guard has to be the
-  -- prefix's real width, not a constant
+  -- prefix's real width, not a constant. The tree layout still carries chrome
+  -- on its continuations, so that is where depth is exercised now.
   local parent = model.new({ name = "cfg", kind = "param", type = { display = "C", category = "struct" } })
   parent.state.expanded = true
   parent.children = { wide }
-  local nested = render.render({ parent }, opts({ layout = "ledger", detail_all = true, max_width = 40 }))
+  local nested = render.render({ parent }, opts({ max_width = 40 }))
   check("...at depth too", #nested.lines >= 3)
 end
 
@@ -1416,7 +1418,7 @@ end
 do
   local node = model.new({ name = "returns", kind = "return", type = { display = "R", category = "class" } })
   node.example.heuristic = "Response(status_code=200, content=b\"{'data': [{'id': 1, 'name': 'Item 1'}]}\")"
-  local r = render.render({ node }, opts({ layout = "ledger", detail_all = true, max_width = 64 }))
+  local r = render.render({ node }, opts({ layout = "ledger", view = "panel", panel_node = node, max_width = 64 }))
   local label
   for _, l in ipairs(r.lines) do
     if l:find("e.g.", 1, true) then
@@ -1453,29 +1455,75 @@ do
   check("a zero-length grow is not a divide-by-anything", ease(50, 50, 0.5) == 50)
 end
 
--- d1x: L's transient peek opens every ledger detail block at once. Without it
--- only the cursor's row carries one, so an expanded tree still shows exactly
--- one example — which made 38c's animation impossible to watch across rows.
+-- The ledger's rows carry no examples at all — they live in the panel, one
+-- node at a time — so the rows never change as the cursor moves.
 do
   local roots = {
     model.new({ name = "host", kind = "param", type = { display = "str", category = "builtin" } }),
     model.new({ name = "port", kind = "param", type = { display = "int", category = "builtin" } }),
-    model.new({ name = "timeout", kind = "param", type = { display = "float", category = "builtin" } }),
   }
   require("typescope.examples").annotate(roots)
-  local base = opts({ layout = "ledger" })
   local function example_lines(over)
     local n = 0
-    for _, line in ipairs(render.render(roots, vim.tbl_extend("force", base, over)).lines) do
+    for _, line in ipairs(render.render(roots, opts(vim.tbl_extend("force", { layout = "ledger" }, over))).lines) do
       if line:find("e%.g%.") then
         n = n + 1
       end
     end
     return n
   end
-  check("cursor-follow ledger shows one example", example_lines({ detail_id = roots[1].id }) == 1)
-  check("detail_all opens every one", example_lines({ detail_all = true }) == 3)
-  check("no detail, no examples", example_lines({}) == 0)
+  check("ledger rows show no examples", example_lines({}) == 0)
+  check("the panel shows its node's", example_lines({ view = "panel", panel_node = roots[2] }) == 1)
+end
+
+-- The doc view is the whole docstring and nothing else, and a ledger never
+-- draws a docstring section under its rows (the footer carries it).
+do
+  local roots = { model.new({ name = "x", kind = "param", type = { display = "int", category = "builtin" } }) }
+  local doc = "First line of prose.\n\nSecond paragraph here."
+  local base = { layout = "ledger", header = "f(x) -> str", docstring = doc, docstring_pos = "bottom" }
+  local rows = table.concat(render.render(roots, opts(base)).lines, "\n")
+  check("a ledger draws no docstring section", not rows:find("prose"))
+  local view = render.render(roots, opts(vim.tbl_extend("force", base, { view = "doc" })))
+  eq_lines("the doc view is the whole docstring", view.lines, {
+    "First line of prose.",
+    "",
+    "Second paragraph here.",
+  })
+  check("...and marks it as the docstring section", view.doc_start == 1 and view.doc_end == 3)
+end
+
+-- model.frontier: the next level l opens. Shallowest collapsed expandable
+-- nodes under open ancestors; empty once the subtree is fully open.
+do
+  local function leaf(name)
+    return { name = name, type = { display = "int", category = "builtin" } }
+  end
+  local root = model.new({
+    name = "a",
+    kind = "param",
+    children = {
+      { name = "b", children = { { name = "d", children = { leaf("f") } } } },
+      { name = "c", children = { leaf("e") } },
+    },
+  })
+  local function names(nodes)
+    local out = {}
+    for _, n in ipairs(nodes) do
+      table.insert(out, n.name)
+    end
+    return table.concat(out, ",")
+  end
+  check("collapsed root: frontier is the root itself", names(model.frontier(root)) == "a")
+  root.state.expanded = true
+  check("open root: frontier is its collapsed children", names(model.frontier(root)) == "b,c")
+  root.children[1].state.expanded = true
+  check("uneven depths: the shallowest level wins", names(model.frontier(root)) == "c")
+  root.children[2].state.expanded = true
+  check("then the next level down", names(model.frontier(root)) == "d")
+  root.children[1].children[1].state.expanded = true
+  check("fully open: empty", #model.frontier(root) == 0)
+  check("a leaf: empty", #model.frontier(root.children[2].children[1]) == 0)
 end
 
 -- 13. find_break_point: the wrap decision every layout goes through

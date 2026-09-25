@@ -14,25 +14,23 @@
 
 ---@class typescope.UiConfig
 ---@field style "unicode"|"ascii"|"minimal"|"rounded"
----@field layout "ledger"|"tree" one-line rows with a cursor-follow detail block (default) vs flowing segments vs column grid (deprecated)
+---@field layout "ledger"|"tree" one-line rows over a docked detail panel (default) vs flowing segments
 ---@field animations boolean
 ---@field align "left"|"right" name column alignment (tree layout)
 ---@field max_width number >1: absolute columns; <=1: fraction of editor width
 ---@field max_height integer
 ---@field border string|string[] any nvim float border value
----@field docstring "bottom"|"top"|false docstring section placement in the float
+---@field docstring "bottom"|"top"|false tree: docstring section placement; ledger: any value but false puts its first sentence in the footer
 ---@field hint boolean virtual-text "▸ typescope" marker on resolved call lines
 ---@field focus boolean explicit opens enter the float; false = momentary hover convention (second K focuses)
 
 ---@class typescope.KeymapConfig
 ---@field docstring string toggle full docstring section
 ---@field expand string toggle node under cursor
----@field expand_node string expand node under cursor (no-op on leaves)
+---@field expand_node string open one more level under the cursor's node (no-op when fully open)
 ---@field collapse_node string collapse node, or jump to + collapse parent
----@field expand_all string
----@field collapse_all string
----@field toggle_examples string
----@field llm_generate string
+---@field collapse_all string collapse the whole tree
+---@field llm_generate string ask the model for the cursor node's example (and its neighbours')
 ---@field close string
 ---@field help string
 
@@ -74,7 +72,7 @@ local defaults = {
   insert_mode = { enabled = false, max_width = nil, max_detail_lines = 3 },
   depth = 2,
   show_examples = true,
-  -- "heuristic": pattern-table examples, E generates LLM values on demand
+  -- "heuristic": pattern-table examples, e asks the model on demand
   -- "llm": auto-generate via ollama on open (heuristics show until they land)
   -- "none": no examples at all
   example_mode = "heuristic",
@@ -96,7 +94,7 @@ local defaults = {
     -- and one retry follows, so a wedged server is reported at roughly
     -- 2*(timeout_ms + 2s).
     timeout_ms = 8000,
-    -- model residency after a request: longer = warm E presses all session,
+    -- model residency after a request: longer = warm e presses all session,
     -- shorter = the ~2GB comes back sooner on small-RAM machines. Matches
     -- ollama's own OLLAMA_KEEP_ALIVE default. This is also the ONLY thing
     -- that reclaims the model on a server we borrowed rather than spawned —
@@ -115,8 +113,8 @@ local defaults = {
   ui = {
     style = "rounded", -- "unicode" | "ascii" | "minimal" | "rounded"
     -- "ledger" (U6, the default): one line per param (name + type + short
-    -- default); the row under the cursor expands into a detail block (≈
-    -- evaluation, example, origin) that follows as the cursor moves.
+    -- default) over a docked panel with the cursor row's details (whole
+    -- type, ≈ evaluation, full default, example, origin).
     -- "tree": flowing segments, type/default/example trailing the name.
     -- ("table", the column grid, was removed in 0.2.0.)
     layout = "ledger",
@@ -125,7 +123,9 @@ local defaults = {
     max_width = 0.5, -- fraction of editor width; values > 1 are absolute columns
     max_height = 20,
     border = "rounded",
-    docstring = "bottom", -- "bottom" | "top" | false (structure first, prose last)
+    -- tree: where the docstring section sits. ledger: the footer carries
+    -- its first sentence and d swaps it in for the rows; false turns both off
+    docstring = "bottom", -- "bottom" | "top" | false
     hint = true,
     -- true: an explicit open (K / :TypeScope) enters the float — cursor
     -- inside, tree keys live immediately. false: momentary hover convention —
@@ -139,11 +139,9 @@ local defaults = {
     expand = "<CR>",
     expand_node = "l",
     collapse_node = "h",
-    expand_all = "L",
     collapse_all = "H",
-    toggle_examples = "e",
     docstring = "d",
-    llm_generate = "E",
+    llm_generate = "e",
     close = "q",
     help = "?",
   },
@@ -244,9 +242,7 @@ local function validate(cfg)
     "expand",
     "expand_node",
     "collapse_node",
-    "expand_all",
     "collapse_all",
-    "toggle_examples",
     "docstring",
     "llm_generate",
     "close",
@@ -260,6 +256,26 @@ end
 ---@param opts? table
 ---@return typescope.Config
 function M.setup(opts)
+  -- removed in 0.3.0: in the ledger, l opens a subtree a level at a time and
+  -- the panel shows one node, so "open everything under here" mostly cost a
+  -- slow local model and a pinned oracle. Carried keys are harmless; say so
+  -- once rather than failing the whole setup over it.
+  if opts and type(opts.keymaps) == "table" then
+    if opts.keymaps.expand_all ~= nil then
+      vim.notify(
+        "typescope: keymaps.expand_all (L) was removed in 0.3.0; press l repeatedly instead",
+        vim.log.levels.WARN
+      )
+    end
+    -- e used to toggle the example column; it now asks the model for the
+    -- cursor's example, which is what E did for the whole tree
+    if opts.keymaps.toggle_examples ~= nil then
+      vim.notify(
+        "typescope: keymaps.toggle_examples was removed in 0.3.0; set show_examples instead",
+        vim.log.levels.WARN
+      )
+    end
+  end
   local merged = vim.tbl_deep_extend("force", vim.deepcopy(defaults), opts or {})
   validate(merged)
   options = merged

@@ -175,7 +175,7 @@ do
 end
 
 -- LLM caching discipline: misses get a sentinel (auto-run never re-asks),
--- E's retry_misses lifts it, and in-flight batches are never duplicated by
+-- an e press on the row lifts it, and in-flight batches are never duplicated by
 -- a reopen. Ollama's transport is faked at the module boundary.
 do
   local examples = require("typescope.examples")
@@ -236,17 +236,24 @@ do
     #calls == 1 and done_ok == true and f2[1].example.llm == "42" and f2[2].example.llm == nil
   )
 
-  -- phase 3: retry_misses (the E press) lifts the sentinel — exactly the
-  -- missed leaf is re-asked
-  examples.retry_misses(f2)
+  -- phase 3: e on b (group_for forced) lifts its sentinel; a, already
+  -- answered and not the row pressed on, is not asked again
   respond = function()
     return 'b = "beta"'
   end
-  examples.llm(f2, token, function() end)
+  examples.llm_nodes(examples.group_for(f2, f2[2], true), token, function() end)
   check(
-    "retry run: only the miss is re-asked",
+    "e on a miss: only the miss is re-asked",
     #calls == 2 and #calls[2] == 1 and calls[2][1] == "b" and f2[2].example.llm == '"beta"'
   )
+  -- ...and e on an answered row asks for it afresh
+  respond = function()
+    return "a = 7"
+  end
+  examples.llm_nodes(examples.group_for(f2, f2[1], true), token, function() end)
+  check("e on an answered row re-asks it", #calls == 3 and calls[3][1] == "a" and f2[1].example.llm == "7")
+  -- the auto-follow (unforced) asks about neither
+  check("unforced, a settled group asks nothing", #examples.group_for(f2, f2[1]) == 0)
 
   -- phase 4: a reopen while a batch is in flight does not duplicate it
   examples._clear_llm_cache()
@@ -255,7 +262,7 @@ do
   examples.llm(f4, token, function() end)
   local f5 = forest()
   examples.llm(f5, token, function() end)
-  check("in-flight batch not duplicated by reopen", #calls == 3 and deferred ~= nil)
+  check("in-flight batch not duplicated by reopen", #calls == 4 and deferred ~= nil)
   -- 40u: the float open at landing time hears about the late batch through
   -- the landed subscription, and apply_cache copies the values onto its
   -- (fresh, unshared) tree — f5 was skipped by the dedup and got nothing
@@ -278,7 +285,7 @@ do
   examples.llm(f6, token, function() end)
   check(
     "late batch cached for the next open",
-    #calls == 3 and f6[1].example.llm == "7" and f6[2].example.llm == '"late"'
+    #calls == 4 and f6[1].example.llm == "7" and f6[2].example.llm == '"late"'
   )
 
   -- 38c: the pending set a run claims is the WHOLE queue, not just the eight
@@ -532,6 +539,67 @@ do
   check("...and answers only its own caller", #answers == 1, #answers)
 
   vim.system = real_system
+end
+
+-- group_for: the ledger's unit of generation. The panel's node first, then
+-- its nearest siblings outward, one batch at most, skipping what a model
+-- would not be asked about (a real default is already the example).
+do
+  examples._clear_llm_cache()
+  local roots = {}
+  for i = 1, 12 do
+    table.insert(
+      roots,
+      model.new({ name = "p" .. i, kind = "param", type = { display = "str", category = "builtin" } })
+    )
+  end
+  roots[6].default = '"set"'
+  local names = {}
+  for _, n in ipairs(examples.group_for(roots, roots[5])) do
+    table.insert(names, n.name)
+  end
+  check(
+    "group starts at the node and fans out nearest first",
+    table.concat(names, ",") == "p5,p4,p7,p3,p8,p2,p9,p1",
+    table.concat(names, ",")
+  )
+  check("...skipping a sibling with a real default", not vim.tbl_contains(names, "p6"))
+  -- nested: siblings are the parent's children, not the roots
+  local parent = model.new({
+    name = "cfg",
+    kind = "param",
+    type = { display = "Cfg", category = "class" },
+    expanded = true,
+    children = {
+      { name = "host", type = { display = "str", category = "builtin" } },
+      { name = "port", type = { display = "int", category = "builtin" } },
+    },
+  })
+  local group = examples.group_for({ parent, roots[1] }, parent.children[2])
+  check(
+    "a nested node's group is its own siblings",
+    #group == 2 and group[1].name == "port" and group[2].name == "host"
+  )
+end
+
+-- why_not: what e says instead of silently doing nothing
+do
+  local with_default = model.new({
+    name = "host",
+    kind = "param",
+    default = '"127.0.0.1"',
+    type = { display = "str", category = "builtin" },
+  })
+  local open_to = model.new({
+    name = "cfg",
+    kind = "param",
+    type = { display = "Cfg", category = "class" },
+    children = { { name = "x", type = { display = "int", category = "builtin" } } },
+  })
+  local plain = model.new({ name = "port", kind = "param", type = { display = "int", category = "builtin" } })
+  check("a real default is the example", (examples.why_not(with_default) or ""):find("has a default") ~= nil)
+  check("structure is opened, not asked about", (examples.why_not(open_to) or ""):find("open it") ~= nil)
+  check("a plain leaf can be asked about", examples.why_not(plain) == nil)
 end
 
 print(failures == 0 and "EXAMPLES ALL PASS" or ("EXAMPLES " .. failures .. " FAILURES"))

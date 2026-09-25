@@ -82,18 +82,6 @@ function M.apply_cache(roots)
   return filled
 end
 
---- Forget MISS sentinels for this forest — an explicit E press is permission
---- to re-ask leaves the model whiffed on (the auto-run on open never does).
----@param roots typescope.Node[]
-function M.retry_misses(roots)
-  model.walk(roots, function(node)
-    local key = cache_key(node)
-    if llm_cache[key] == false then
-      llm_cache[key] = nil
-    end
-  end)
-end
-
 --- Annotate every leaf in the forest with a heuristic example. Structs,
 --- methods, and unresolved types get none — examples belong on concrete
 --- fields. Fields with a real default are also skipped: the default is
@@ -123,6 +111,12 @@ local function is_unbound_notation(display)
   return stripped:find("[%w_]+@[%w_]+") ~= nil
 end
 
+-- Leaves per request: a batch's ~8×15 output tokens finishes in a few
+-- seconds even on small machines. One monolithic request for a 48-leaf
+-- uvicorn.run takes 30s+ of generation — no timeout survives that, and a
+-- timed-out request caches nothing (ollama cancels on disconnect).
+local LLM_BATCH = 8
+
 local function eligible(node)
   -- "…" is the normalised stub placeholder (extract/python.lua's default_text)
   -- and "..." is the raw form, still reachable from a source file rather than a
@@ -142,6 +136,23 @@ local function eligible(node)
     and node._lazy == nil
     and not has_real_default
     and not is_unbound_notation(node.type.display)
+end
+
+--- Why `node` gets no example, in words for the e key; nil when it can.
+---@param node typescope.Node
+---@return string?
+function M.why_not(node)
+  if eligible(node) then
+    return nil
+  end
+  if #node.children > 0 or node._lazy then
+    return ("%s has structure, not a value: open it (l) and ask on a field"):format(node.name)
+  end
+  local d = node.default
+  if d ~= nil and d ~= "None" and d ~= "..." and d ~= "…" then
+    return ("%s has a default, %s — that is its example"):format(node.name, d)
+  end
+  return ("no example for %s: its type is not one a value can be written for"):format(node.name)
 end
 
 function M.annotate(roots)
@@ -181,11 +192,49 @@ local function visible_leaves(roots)
   return leaves
 end
 
--- Leaves per request: a batch's ~8×15 output tokens finishes in a few
--- seconds even on small machines. One monolithic request for a 48-leaf
--- uvicorn.run takes 30s+ of generation — no timeout survives that, and a
--- timed-out request caches nothing (ollama cancels on disconnect).
-local LLM_BATCH = 8
+--- The ledger's unit of generation: the leaves beside `node` that still need
+--- asking, nearest first and `node` itself ahead of them, at most one batch.
+--- The panel shows one node at a time, so generating the whole visible tree
+--- asks a slow model about rows nobody may ever look at; the neighbours are
+--- where the cursor goes next. Values already cached are copied on here.
+--- `force` is an explicit ask (the e key): `node` is asked again even if it
+--- has an answer, and siblings the model missed on before are asked again.
+---@param roots typescope.Node[]
+---@param node typescope.Node
+---@param force? boolean
+---@return typescope.Node[]
+function M.group_for(roots, node, force)
+  local parent = model.parent(roots, node.id)
+  local siblings = parent and parent.children or roots
+  local at = 1
+  for i, sib in ipairs(siblings) do
+    if sib == node then
+      at = i
+    end
+  end
+  local group = {}
+  local function consider(sib)
+    if #group >= LLM_BATCH or not sib or not eligible(sib) then
+      return
+    end
+    local key = cache_key(sib)
+    if force and (sib == node or llm_cache[key] == false) and not in_flight[key] then
+      llm_cache[key] = nil
+    end
+    local cached = llm_cache[key]
+    if cached then
+      sib.example.llm = cached
+    elseif cached == nil and not in_flight[key] then
+      table.insert(group, sib)
+    end
+  end
+  consider(siblings[at])
+  for d = 1, #siblings do
+    consider(siblings[at + d])
+    consider(siblings[at - d])
+  end
+  return group
+end
 
 --- Generate LLM examples for the VISIBLE eligible leaves, in batches, filling
 --- progressively: on_progress fires after each batch lands (callers
@@ -198,13 +247,21 @@ local LLM_BATCH = 8
 ---@param done fun(ok: boolean, err: string?)
 ---@param on_progress? fun(batches_done: integer, batches_total: integer) a batch of values just landed
 function M.llm(roots, token, done, on_progress)
+  return M.llm_nodes(visible_leaves(roots), token, done, on_progress)
+end
+
+--- M.llm for an explicit list of leaves (the ledger's sibling group).
+---@param leaves typescope.Node[]
+---@param token typescope.CancelToken
+---@param done fun(ok: boolean, err: string?)
+---@param on_progress? fun(batches_done: integer, batches_total: integer)
+function M.llm_nodes(leaves, token, done, on_progress)
   local _ = token
   local cfg = require("typescope.config").get()
   if not cfg.ollama.enabled then
     return done(false, "ollama is disabled — setup({ ollama = { enabled = true } })")
   end
 
-  local leaves = visible_leaves(roots)
   local pending = {}
   for _, node in ipairs(leaves) do
     local key = cache_key(node)

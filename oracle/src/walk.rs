@@ -131,10 +131,37 @@ impl Node {
 pub fn module_source(tx: &Transaction<'_>, handle: &Handle) -> Option<(std::sync::Arc<ruff_python_ast::ModModule>, Module)> {
     let _ = tx.get_exports(handle); // loads the module if nothing has yet
     let module = tx.get_module_info(handle)?;
-    let ast = tx
-        .get_ast(handle)
-        .unwrap_or_else(|| pyrefly_python::ast::Ast::parse(module.contents(), module.source_type()).0.into());
+    let ast = tx.get_ast(handle).unwrap_or_else(|| reparsed(&module));
     Some((ast, module))
+}
+
+/// Modules re-parsed by `module_source`, by the identity of the source text
+/// they were parsed from. Every class, declaration and function a walk
+/// touches asks for its module, and a nested SQLAlchemy class is a few
+/// hundred such asks into files thousands of lines long: parsing each time is
+/// what pinned the oracle for minutes under the old `L` (typescope.nvim,
+/// meal_plan.py `relationship(`). The key is the `Arc` pyrefly holds the text
+/// in, kept alive here so its address cannot be reused; an edited file comes
+/// back as a new `Arc` and parses fresh. Capped because on a small machine a
+/// session's worth of syntax trees is real memory.
+type Parsed = (std::sync::Arc<String>, std::sync::Arc<ruff_python_ast::ModModule>);
+static REPARSED: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<usize, Parsed>>> =
+    std::sync::LazyLock::new(Default::default);
+const REPARSED_CAP: usize = 32;
+
+fn reparsed(module: &Module) -> std::sync::Arc<ruff_python_ast::ModModule> {
+    let text = module.contents();
+    let key = std::sync::Arc::as_ptr(text) as usize;
+    if let Some((_, ast)) = REPARSED.lock().unwrap().get(&key) {
+        return ast.dupe();
+    }
+    let ast: std::sync::Arc<ruff_python_ast::ModModule> = pyrefly_python::ast::Ast::parse(text, module.source_type()).0.into();
+    let mut cache = REPARSED.lock().unwrap();
+    if cache.len() >= REPARSED_CAP {
+        cache.clear(); // crude, like the plugin's resolve cache: a walk refills what it uses
+    }
+    cache.insert(key, (text.dupe(), ast.dupe()));
+    ast
 }
 
 // ------------------------------------------------------------------ walker
