@@ -138,6 +138,23 @@ local function eligible(node)
     and not is_unbound_notation(node.type.display)
 end
 
+--- Why `node` gets no example, in words for the e key; nil when it can.
+---@param node typescope.Node
+---@return string?
+function M.why_not(node)
+  if eligible(node) then
+    return nil
+  end
+  if #node.children > 0 or node._lazy then
+    return ("%s has structure, not a value: open it (l) and ask on a field"):format(node.name)
+  end
+  local d = node.default
+  if d ~= nil and d ~= "None" and d ~= "..." and d ~= "…" then
+    return ("%s has a default, %s — that is its example"):format(node.name, d)
+  end
+  return ("no example for %s: its type is not one a value can be written for"):format(node.name)
+end
+
 function M.annotate(roots)
   model.walk(roots, function(node)
     if eligible(node) then

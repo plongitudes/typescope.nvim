@@ -582,4 +582,24 @@ do
   )
 end
 
+-- why_not: what e says instead of silently doing nothing
+do
+  local with_default = model.new({
+    name = "host",
+    kind = "param",
+    default = '"127.0.0.1"',
+    type = { display = "str", category = "builtin" },
+  })
+  local open_to = model.new({
+    name = "cfg",
+    kind = "param",
+    type = { display = "Cfg", category = "class" },
+    children = { { name = "x", type = { display = "int", category = "builtin" } } },
+  })
+  local plain = model.new({ name = "port", kind = "param", type = { display = "int", category = "builtin" } })
+  check("a real default is the example", (examples.why_not(with_default) or ""):find("has a default") ~= nil)
+  check("structure is opened, not asked about", (examples.why_not(open_to) or ""):find("open it") ~= nil)
+  check("a plain leaf can be asked about", examples.why_not(plain) == nil)
+end
+
 print(failures == 0 and "EXAMPLES ALL PASS" or ("EXAMPLES " .. failures .. " FAILURES"))

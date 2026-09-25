@@ -321,10 +321,12 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
         require("typescope.examples").llm(tree_roots, session.token, done, on_progress)
       end
     end,
+    -- not through `session`: the ledger's first ask runs inside attach(),
+    -- before `session` exists, and a dropped call never calls `done` —
+    -- which left interact waiting on a batch that was never sent, and every
+    -- later ask (e included) parked behind it
     on_llm_nodes = function(nodes, done)
-      if session then
-        require("typescope.examples").llm_nodes(nodes, session.token, done)
-      end
+      require("typescope.examples").llm_nodes(nodes, token, done)
     end,
     -- ledger: the panel's sibling group, generated as the cursor gets there
     auto_examples = panel ~= nil and cfg.ollama.enabled and cfg.example_mode == "llm",

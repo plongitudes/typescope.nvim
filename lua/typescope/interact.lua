@@ -864,12 +864,15 @@ function M.attach(args)
     return true
   end
 
+  -- Only for a row that needs it: the one the cursor is on has no answer
+  -- yet. Asking whenever its GROUP did kept going after each landing, out
+  -- through every sibling, while the cursor sat still.
   function follow_examples()
     if not st.auto_examples then
       return
     end
     local node = st.panel_id and model.find(st.roots, st.panel_id)
-    if node then
+    if node and examples.why_not(node) == nil and not node.example.llm and not examples.awaiting(node) then
       ask(node)
     end
   end
@@ -888,8 +891,14 @@ function M.attach(args)
     st.opts.example_kind = "llm"
     st.opts.show_examples = true
     local node = node_under_cursor() or (st.panel_id and model.find(st.roots, st.panel_id))
-    if not node or not ask(node, true) then
-      vim.notify("typescope: nothing here the model can give an example for", vim.log.levels.INFO)
+    if not node then
+      return
+    end
+    local why = examples.why_not(node)
+    if why then
+      vim.notify("typescope: " .. why, vim.log.levels.INFO)
+    elseif not ask(node, true) then
+      vim.notify("typescope: " .. node.name .. "'s example is already on its way", vim.log.levels.INFO)
     end
   end)
 
