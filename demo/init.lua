@@ -41,6 +41,29 @@ if vim.uv.fs_stat(gruvbox) then
   vim.cmd.colorscheme("gruvbox-baby")
 end
 
+-- keypresses in a corner float, so viewers can follow along. Installed by the
+-- maintainer's lazy config; skipped when absent.
+local screenkey = data .. "/lazy/screenkey.nvim"
+if vim.uv.fs_stat(screenkey) then
+  vim.opt.rtp:prepend(screenkey)
+  require("screenkey").setup({
+    -- no border: an idle screenkey would otherwise leave an empty box
+    win_opts = { width = 30, height = 1, border = "none", title = "" },
+    group_mappings = true,
+    -- typed text is already on screen, and arrives letter by letter
+    disable = { modes = { "i" } },
+    clear_after = 2,
+  })
+  vim.api.nvim_create_autocmd("VimEnter", {
+    callback = function()
+      require("screenkey").toggle()
+    end,
+  })
+end
+
+-- the demo calls are unfinished on purpose; nothing should be underlined
+vim.diagnostic.enable(false)
+
 vim.treesitter.language.add("python")
 vim.api.nvim_create_autocmd("FileType", {
   pattern = "python",

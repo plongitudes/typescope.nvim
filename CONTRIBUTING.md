@@ -41,7 +41,7 @@ Some things this suite learned the hard way:
 
 ## The README demo
 
-`demo/typescope.gif` is recorded with [VHS](https://github.com/charmbracelet/vhs) from `demo/typescope.tape`, so re-record it (`vhs demo/typescope.tape` from the repo root) after a change that shows up in it. The tape's header lists what it needs. It runs nvim under `--clean` with `demo/init.lua`, so your own config stays out of the frame. The `e` beat's value comes from the model and changes from run to run; look over the new gif before committing it.
+The demo is recorded with [VHS](https://github.com/charmbracelet/vhs) from `demo/typescope.tape`, so re-record it after a change that shows up in it: `vhs demo/typescope.tape && demo/encode.sh` from the repo root. The tape writes lossless 2x frames, and `encode.sh` turns them into `demo/typescope.gif` (1x, committed) and `demo/typescope.mp4` (2x, not committed). GitHub only plays video it hosts itself, so upload the mp4 by dragging it into GitHub's README editor and put the resulting `user-attachments` URL under the gif. The tape's header lists what it needs. It runs nvim under `--clean` with `demo/init.lua`, so your own config stays out of the frame. The `e` beat's value comes from the model and changes from run to run; look over the new gif before committing it.
 
 ## Style
 
