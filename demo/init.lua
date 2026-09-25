@@ -61,6 +61,16 @@ if vim.uv.fs_stat(screenkey) then
   })
 end
 
+-- animated scrolling, as in the maintainer's config: the jump to the calls
+-- scrolls past the classes the floats will show instead of cutting to them
+local snacks = data .. "/lazy/snacks.nvim"
+if vim.uv.fs_stat(snacks) then
+  vim.opt.rtp:prepend(snacks)
+  require("snacks").setup({
+    scroll = { enabled = true, animate = { duration = { step = 10, total = 700 }, easing = "outQuad" } },
+  })
+end
+
 -- the demo calls are unfinished on purpose; nothing should be underlined
 vim.diagnostic.enable(false)
 

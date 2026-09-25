@@ -13,8 +13,8 @@ Output demo/frames/
 Set Shell zsh
 Set FontFamily "FantasqueSansM Nerd Font"
 Set FontSize 28
-Set Width 2400
-Set Height 1280
+Set Columns 100
+Set Rows 28
 Set Padding 32
 Set TypingSpeed 70ms
 Set CursorBlink false
@@ -44,7 +44,10 @@ Enter
 Sleep 3s
 
 # --- insert beat 1: the active parameter follows the typing -----------------
-Type "G2k"
+# G scrolls (snacks.scroll, 700ms); keys typed during the animation are lost
+Type "G"
+Sleep 1s
+Type "2k"
 Sleep 500ms
 Type "f(a"
 Sleep 1500ms

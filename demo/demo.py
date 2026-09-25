@@ -50,7 +50,12 @@ class User:
     admin: bool = False
 
 
-def serve(config: ServerConfig, routes: list[Route], workers: int = 4, level: LogLevel = LogLevel.INFO) -> None:
+def serve(
+    config: ServerConfig,
+    routes: list[Route],
+    workers: int = 4,
+    level: LogLevel = LogLevel.INFO,
+) -> None:
     """Start the service and block until it is stopped."""
 
 
