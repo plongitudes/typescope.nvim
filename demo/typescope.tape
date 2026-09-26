@@ -119,8 +119,13 @@ Type "j"
 Sleep 450ms
 Type "l"
 Sleep 1500ms
-Type "h"
-Sleep 500ms
+# level stays open; walk down through its members to retry
+Type "j"
+Sleep 250ms
+Type "j"
+Sleep 250ms
+Type "j"
+Sleep 250ms
 Type "j"
 Sleep 450ms
 Type "l"
