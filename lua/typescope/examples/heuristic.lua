@@ -25,7 +25,7 @@ local rules = {
   { tokens = { "port" }, value = "8080", by_type = { str = '"8080"' } },
   { tokens = { "timeout", "ttl", "interval", "delay" }, value = "30", by_type = { float = "30.0" } },
   { tokens = { "path", "dir", "file", "filename" }, value = '"/tmp/example"' },
-  { tokens = { "uuid", "id" }, value = '"a1b2c3d4"' },
+  { tokens = { "uuid", "id" }, value = '"a1b2c3d4"', by_type = { int = "42" } },
   { tokens = { "name" }, value = '"example"' },
 }
 
