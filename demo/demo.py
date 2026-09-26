@@ -74,7 +74,3 @@ def start(config: ServerConfig, owner: User) -> None:
 
 cfg = ServerConfig("0.0.0.0")
 routes = [Route(path="/health", methods=["GET"], auth=False)]
-
-serve()
-lookup()
-start(ServerConfig("0.0.0.0"), User("ada", "ada@example.com"))
