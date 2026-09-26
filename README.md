@@ -2,6 +2,10 @@
 
 See the *shape* of the types in a Python call, without leaving the call.
 
+![TypeScope demo: the insert surface following the active parameter and the overload, then K on two classes](demo/typescope.gif)
+
+<!-- full-resolution video: upload demo/typescope.mp4 through GitHub's editor and put its user-attachments URL here, on its own line -->
+
 TypeScope asks a type checker what the symbol under your cursor *is* — a function's parameters and return, a class's shape, a variable's type — and draws the answer as a tree in a float. Where a parameter is a dataclass, a Pydantic model, a TypedDict, a NamedTuple, an Enum, a Protocol or a plain class with annotated attributes, you get its fields — not just its name. Generics arrive specialized (`Box[ServerConfig]` shows `item ServerConfig`), an unannotated local shows the type the checker inferred (drawn `≈`), and a narrowed variable shows its narrowed type.
 
 The checker is [pyrefly](https://github.com/facebook/pyrefly), wrapped in a small binary TypeScope calls its **oracle**: it runs beside your Python language server as a second LSP server that answers exactly one request, and it is downloaded for your platform the first time you open a Python buffer (see [Requirements](#requirements)).
