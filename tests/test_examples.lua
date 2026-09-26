@@ -43,6 +43,8 @@ local cases = {
   { "timeout_ms", "int | None", "30" }, -- 'ms' head unknown → any-token fallback: timeout + int variant
   { "width", "int", "42" }, -- 'id' must NOT match inside 'width'
   { "user_id", "str", '"a1b2c3d4"' },
+  { "user_id", "int", "42" }, -- by_type variant: a numeric id is a number
+  { "id", "int | None", "42" },
   -- head-noun-first (Tony, 2026-07-29): the rightmost token wins
   { "server_name", "str", '"example"' }, -- ...it IS a name (of a server)
   { "name_server", "str", '"localhost"' }, -- ...and this IS a server
