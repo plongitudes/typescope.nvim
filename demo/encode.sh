@@ -6,7 +6,7 @@
 # (text, cursor) with no background or padding; this stacks them onto the
 # theme's background, the way VHS does before it encodes.
 #
-#   vhs demo/typescope.tape && demo/encode.sh
+#   vhs demo/typescope.tape && demo/encode.sh && demo/publish.sh
 set -euo pipefail
 cd "$(dirname "$0")"
 

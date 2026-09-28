@@ -2,7 +2,7 @@
 
 See the *shape* of the types in a Python call, without leaving the call.
 
-![TypeScope demo: the insert surface following the active parameter and the overload, then K on two classes](demo/typescope.gif)
+![TypeScope demo: the insert surface following the active parameter and the overload, then K on two classes](https://raw.githubusercontent.com/plongitudes/typescope.nvim/assets/typescope.gif)
 
 <!-- full-resolution video: upload demo/typescope.mp4 through GitHub's editor and put its user-attachments URL here, on its own line -->
 
