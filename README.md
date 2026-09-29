@@ -11,9 +11,9 @@ https://github.com/user-attachments/assets/b6391f46-8bc7-4573-b6ac-5e97d5044f92
 
 </details>
 
-TypeScope asks a type checker what the symbol under your cursor *is* — a function's parameters and return, a class's shape, a variable's type — and draws the answer as a tree in a float. Where a parameter is a dataclass, a Pydantic model, a TypedDict, a NamedTuple, an Enum, a Protocol or a plain class with annotated attributes, you get its fields — not just its name. Generics arrive specialized (`Box[ServerConfig]` shows `item ServerConfig`), an unannotated local shows the type the checker inferred (drawn `≈`), and a narrowed variable shows its narrowed type.
+TypeScope asks a type checker what the symbol under your cursor *is* — a function's parameters and return, the structure of a class, a variable's type and innards — and shows the result in a floating pane, structured heirarchically so that you can dive further in when needed. Where a parameter is a dataclass, a Pydantic model, a TypedDict, a NamedTuple, an Enum, a Protocol or a plain class with annotated attributes, you get its fields — not just its name. Generics arrive specialized (`Box[ServerConfig]` shows `item ServerConfig`), an unannotated local shows the type the checker inferred (drawn `≈`), and a narrowed variable shows its narrowed type.
 
-The checker is [pyrefly](https://github.com/facebook/pyrefly), wrapped in a small binary TypeScope calls its **oracle**: it runs beside your Python language server as a second LSP server that answers exactly one request, and it is downloaded for your platform the first time you open a Python buffer (see [Requirements](#requirements)).
+The checker is [pyrefly](https://github.com/facebook/pyrefly), wrapped in a small binary TypeScope calls the `oracle`: it runs beside your Python language server as a second LSP server that answers exactly one request, and it is downloaded for your platform the first time you open a Python buffer (see [Requirements](#requirements)).
 
 ```
 ▾ config       ServerConfig
