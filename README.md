@@ -4,7 +4,7 @@ See the *shape* of the types in a Python call, without leaving the call.
 
 ![TypeScope demo: the insert surface following the active parameter and the overload, then K on two classes](https://raw.githubusercontent.com/plongitudes/typescope.nvim/assets/typescope.gif)
 
-<!-- full-resolution video: upload demo/typescope.mp4 through GitHub's editor and put its user-attachments URL here, on its own line -->
+https://github.com/user-attachments/assets/b6391f46-8bc7-4573-b6ac-5e97d5044f92
 
 TypeScope asks a type checker what the symbol under your cursor *is* — a function's parameters and return, a class's shape, a variable's type — and draws the answer as a tree in a float. Where a parameter is a dataclass, a Pydantic model, a TypedDict, a NamedTuple, an Enum, a Protocol or a plain class with annotated attributes, you get its fields — not just its name. Generics arrive specialized (`Box[ServerConfig]` shows `item ServerConfig`), an unannotated local shows the type the checker inferred (drawn `≈`), and a narrowed variable shows its narrowed type.
 
