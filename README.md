@@ -11,9 +11,9 @@ https://github.com/user-attachments/assets/b6391f46-8bc7-4573-b6ac-5e97d5044f92
 
 </details>
 
-TypeScope asks a type checker what the symbol under your cursor *is* — a function's parameters and return, the structure of a class, a variable's type and innards — and shows the result in a floating pane, structured heirarchically so that you can dive further in when needed. Where a parameter is a dataclass, a Pydantic model, a TypedDict, a NamedTuple, an Enum, a Protocol or a plain class with annotated attributes, you get its fields — not just its name. Generics arrive specialized (`Box[ServerConfig]` shows `item ServerConfig`), an unannotated local shows the type the checker inferred (drawn `≈`), and a narrowed variable shows its narrowed type.
+TypeScope asks a type checker what the symbol under your cursor *is* — a function's parameters and return, the structure of a class, a variable's type and innards — and shows the result in a floating pane, structured hierarchically so that you can dive further in when needed. Where a parameter is a dataclass, a Pydantic model, a TypedDict, a NamedTuple, an Enum, a Protocol or a plain class with annotated attributes, you get its fields — not just its name. Generics arrive specialized (`Box[ServerConfig]` shows `item ServerConfig`), an unannotated local shows the type the checker inferred (drawn `≈`), and a narrowed variable shows its narrowed type.
 
-The checker is [pyrefly](https://github.com/facebook/pyrefly) wrapped in a small binary. TypeScope calls it the `oracle`, and it runs alongside your Python LSP. I use basedpyright, this repo assumes you're using that or vanilla pyright. If you're using another type checker in your nvim setup, the results from pyrefly _might_ be a bit different from your own typecheker, but I believe that most results should be satisfactory. The `oracle` is downloaded for your platform the first time you open a Python buffer (see [Requirements](#requirements)). The patch that makes Pyrefly into the `oracle` binary is a small change that <add mechanism here>. 
+The checker is [pyrefly](https://github.com/facebook/pyrefly) wrapped in a small binary. TypeScope calls it the `oracle`, and it runs alongside your Python LSP. I use basedpyright, this repo assumes you're using that or vanilla pyright. If you're using another type checker in your nvim setup, the results from pyrefly _might_ be a bit different from your own typechecker, but I believe that most results should be satisfactory. The `oracle` is downloaded for your platform the first time you open a Python buffer (see [Requirements](#requirements)). The patch to Pyrefly is a small change that takes a function pyrefly already uses internally for attribute completion and makes it public. With that patch in place, `oracle` can ask for every attribute of a type (its own and inherited ones), each with its type filled in. It adds no type-checking logic of its own, and if pyrefly eventually makes this a public feature, oracle could be dropped in favor of vanilla pyrefly.
 
 ```
 ▾ config       ServerConfig
@@ -35,7 +35,7 @@ One compact line per parameter, and a panel docked under the rows shows everythi
 
 These are hard requirements. TypeScope does nothing useful without them, and `:checkhealth typescope` will tell you which is missing.
 
-- **Neovim 0.11+**. The plugin refuses to load below this and says so once.
+- **Neovim 0.11+**. In order for this plugin to work nicely without a lot of fuss, I made the call to only support 0.11+. I doubt this plugin will ever reach a lot of folks, so I felt ok with drawing the line there.
 - **The oracle binary, `typescope-oracle`.** This is where every type comes from. With the default `oracle.download = true` the plugin fetches the release build for your platform (Apple Silicon macOS, or Linux on x86_64 or arm64) into `stdpath("data")/typescope/oracle/<release>/` the first time a Python buffer opens, verifies it against the release's `SHA256SUMS` before running it, and tells you once when it is in place. A plugin update that pins a new release fetches that one and removes the old. It needs `curl`, and `sha256sum` or `shasum` for the check (every Linux and macOS has one). Intel Macs have no release build: build it yourself and set `oracle.path`. To skip the download, build it yourself (see [Development](#development)) and set `oracle.path`, or set `oracle.download = false` and put the binary at that path. The oracle settles at about 150 MB of memory on a real project.
 - **The TreeSitter Python parser.** The float's own highlighting and the call-site questions (is the cursor on a call? what was written in it?) read the syntax tree. `:TSInstall python`.
 
@@ -45,7 +45,7 @@ Recommended:
 
 Optional:
 
-- **[ollama](https://ollama.com)** for LLM-generated example values. Off by default. See [Examples](#examples) for what turning it on costs you in RAM.
+- **[ollama](https://ollama.com)** if you would like moderately plausible examples in your signature and hover, you can run a small model in memory in order to receive LLM-generated example values. On an M1 Macbook Air (2020), a `qwen2.5-coder:3b` model runs pretty okay, but it's off by default. See [Examples](#examples) for what turning it on costs in RAM.
 
 ## Install
 
@@ -72,18 +72,19 @@ use({
 
 ### About `setup()`
 
-`setup()` is optional in the sense that the plugin loads and `:TypeScope` works without it. But **three features are wired only from `setup()`**, so skipping it silently turns them off:
+`setup()` is optional in the sense that the plugin loads and `:TypeScope` works without it. But three features are wired only from `setup()`, so if you don't have that set, you won't get them.
 
 - the oracle itself — `setup()` is what attaches it to Python buffers (and downloads it the first time)
-- `prefetch` — cache warming while the cursor rests, so the first open paints warm
+- `prefetch` — cache warming while the cursor rests, so the model is already warm by the time the plugin has to draw anything.
 - warmstart — kicking basedpyright's analysis when it attaches, instead of on your first request
 - the `trigger = "hover"` auto-open autocmd
 
-If you use `lazy.nvim`, `opts = {}` calls `setup()` for you. If you configure by hand, call `require("typescope").setup({})` even when you have no overrides. Calling it more than once is safe, and turning a feature back off in a later call really does take its autocmds down.
+If you use `lazy.nvim`, `opts = {}` calls `setup()` for you. If you configure by hand, call `require("typescope").setup({})` even when you have no overrides. Calling it more than once is safe, and turning a feature back off in a later call takes its autocmds down.
 
 ## Usage
 
-Put the cursor on (or inside the parens of) a call and open the float:
+Put the cursor on (or inside the parens of) a call and open the float. I use typescope in place of nvim's default
+hover (`K`). Feel free to set up the keys however suits you best :)
 
 ```lua
 vim.keymap.set("n", "<leader>ts", "<Plug>(TypeScopeToggle)")
@@ -98,7 +99,6 @@ vim.keymap.set("n", "K", "<Plug>(TypeScopeHover)")
 | `:TypeScope open` | Open it; if already open, focus it |
 | `:TypeScope close` | Close it |
 | `:TypeScope hover` | Structure for functions, Neovim's built-in hover for anything else — a drop-in `K` |
-| `:TypeScope spike` | Preview the charset styles against fixtures (see [Styles](#styles)) |
 
 ### `<Plug>` mappings
 
@@ -325,14 +325,6 @@ v returns      Response
 </table>
 
 `rounded` and `unicode` differ only in the last-child corner — `╰` against `└`. `ascii` is the one to reach for over SSH, in a terminal with a partial font, or anywhere box-drawing characters come out as replacement glyphs. `minimal` drops the tree chrome entirely and leans on indentation.
-
-To see them live rather than guess, run `:TypeScope spike`. It opens the real float, through the production render path, on built-in fixtures (a dataclass, a nested Pydantic model, a TypedDict, a Protocol with an unresolved member). No LSP is involved, so it works in any buffer.
-
-- `<Tab>` / `<S-Tab>` — cycle fixtures
-- `s` — cycle style
-- `?` — help, including the two keys above
-
-`:TypeScope spike ascii` opens straight onto a given style.
 
 ## Highlights
 
