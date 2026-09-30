@@ -15,17 +15,7 @@ TypeScope asks a type checker what the symbol under your cursor *is* — a funct
 
 The checker is [pyrefly](https://github.com/facebook/pyrefly) wrapped in a small binary. TypeScope calls it the `oracle`, and it runs alongside your Python LSP. I use basedpyright, this repo assumes you're using that or vanilla pyright. If you're using another type checker in your nvim setup, the results from pyrefly _might_ be a bit different from your own typechecker, but I believe that most results should be satisfactory. The `oracle` is downloaded for your platform the first time you open a Python buffer (see [Requirements](#requirements)). The patch to Pyrefly is a small change that takes a function pyrefly already uses internally for attribute completion and makes it public. With that patch in place, `oracle` can ask for every attribute of a type (its own and inherited ones), each with its type filled in. It adds no type-checking logic of its own, and if pyrefly eventually makes this a public feature, oracle could be dropped in favor of vanilla pyrefly.
 
-```
-▾ config       ServerConfig
-  ├─ · host    str
-  │ │ e.g. "localhost"
-  ├─ · port    int
-  ╰─ · debug   bool  = False
-· timeout      float  = 30.0
-▾ returns      Response
-  ├─ · status  int
-  ╰─ · body    bytes
-```
+<img src="https://raw.githubusercontent.com/plongitudes/typescope.nvim/assets/intro.png" width="470" alt="TypeScope on create_server(config, timeout=…) -> Response, in the ledger layout: config expanded to host, port and debug, then timeout and returns, over a panel for the config row">
 
 One compact line per parameter, and a panel docked under the rows shows everything about the row your cursor is on. That is the `ledger` layout, the default; `tree` puts everything inline instead. See [Layouts](#layouts).
 
@@ -202,32 +192,13 @@ Same data, different shapes. Set `ui.layout`.
 
 **`ledger`** — the default. One compact line per parameter, and a panel docked under the rows showing everything about the row the cursor is on: its whole type (the row cuts long ones short), the evaluated shape, the full default, an example, where it was inherited from. The rows never move as the cursor does; only the panel changes. The frame's bottom edge carries the docstring's first sentence, and `d` swaps the whole docstring in for the rows. Below, the cursor is on `host`:
 
-```
-╭ typescope ─────────────────────────────╮
-│create_server(config, …) -> Response    │
-│────────────────────────────────────────│
-│▾ config       ServerConfig             │
-│  ├─ · host    str                      │
-│  ├─ · port    int                      │
-│  ╰─ · debug   bool  = False            │
-│· timeout      float  = 30.0            │
-├────────────────────────────────────────┤
-│host  str                               │
-│e.g. "localhost"                        │
-╰ d Spin up the demo service.  ? help ───╯
-```
+<img src="https://raw.githubusercontent.com/plongitudes/typescope.nvim/assets/ledger.png" width="470" alt="TypeScope on create_server(config, timeout=…) -> Response, in the ledger layout with the cursor on host: the panel under the rows shows host str, e.g. "localhost"">
 
 The panel grows to fit the tallest node it has shown (up to five lines) and never shrinks back, so the rows above it stay put. The frame opens below the cursor, or above it when there is more room there.
 
 **`tree`** — flowing segments, with type, default and example trailing the name and wrapping under a hanging indent when they run out of room:
 
-```
-▾ config   ServerConfig
-  ├─ · host   str  "localhost"
-  ├─ · port   int  8080
-  ╰─ · debug  bool = False  True
-· timeout  float = 30.0  30.0
-```
+<img src="https://raw.githubusercontent.com/plongitudes/typescope.nvim/assets/tree.png" width="470" alt="TypeScope on create_server(config, timeout=…) -> Response, in the tree layout: each row trails its type, default and example, e.g. host str "localhost"">
 
 (The `table` layout, deprecated in 0.1.0, was removed in 0.2.0.)
 
@@ -265,61 +236,21 @@ The `example` column shows a plausible value for each leaf.
 <tr><th align="left"><code>rounded</code> (default)</th><th align="left"><code>unicode</code></th></tr>
 <tr><td>
 
-```
-▾ config       ServerConfig
-  ├─ · host    str
-  │ │ e.g. "localhost"
-  ├─ · port    int
-  ╰─ · debug   bool  = False
-· timeout      float  = 30.0
-▾ returns      Response
-  ├─ · status  int
-  ╰─ · body    bytes
-```
+<img src="https://raw.githubusercontent.com/plongitudes/typescope.nvim/assets/style-rounded.png" width="400" alt="TypeScope on create_server(config, timeout=…) -> Response, rounded style: the last child hangs off a rounded corner">
 
 </td><td>
 
-```
-▾ config       ServerConfig
-  ├─ · host    str
-  │ │ e.g. "localhost"
-  ├─ · port    int
-  └─ · debug   bool  = False
-· timeout      float  = 30.0
-▾ returns      Response
-  ├─ · status  int
-  └─ · body    bytes
-```
+<img src="https://raw.githubusercontent.com/plongitudes/typescope.nvim/assets/style-unicode.png" width="400" alt="TypeScope on create_server(config, timeout=…) -> Response, unicode style: the last child hangs off a square corner">
 
 </td></tr>
 <tr><th align="left"><code>ascii</code></th><th align="left"><code>minimal</code></th></tr>
 <tr><td>
 
-```
-v config       ServerConfig
-  +- - host    str
-  | | e.g. "localhost"
-  +- - port    int
-  \- - debug   bool  = False
-- timeout      float  = 30.0
-v returns      Response
-  +- - status  int
-  \- - body    bytes
-```
+<img src="https://raw.githubusercontent.com/plongitudes/typescope.nvim/assets/style-ascii.png" width="400" alt="TypeScope on create_server(config, timeout=…) -> Response, ascii style: tree lines drawn with +-, | and \-">
 
 </td><td>
 
-```
-- config      ServerConfig
-      host    str
-      e.g. "localhost"
-      port    int
-      debug   bool  = False
-  timeout     float  = 30.0
-- returns     Response
-      status  int
-      body    bytes
-```
+<img src="https://raw.githubusercontent.com/plongitudes/typescope.nvim/assets/style-minimal.png" width="400" alt="TypeScope on create_server(config, timeout=…) -> Response, minimal style: no tree lines, indentation only">
 
 </td></tr>
 </table>

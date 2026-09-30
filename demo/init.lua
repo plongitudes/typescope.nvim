@@ -9,6 +9,8 @@
 local demo = vim.fs.dirname(debug.getinfo(1, "S").source:sub(2))
 local repo = vim.fs.dirname(demo)
 local data = vim.fn.stdpath("data")
+-- demo/shots.tape sets these: stills for the README, one style/layout each
+local shot = vim.env.TYPESCOPE_SHOT ~= nil
 
 vim.opt.rtp:prepend(repo)
 -- the python treesitter parser; --clean drops the data dir's site/ from rtp
@@ -21,6 +23,9 @@ vim.o.laststatus = 0
 vim.o.ruler = false
 vim.o.showmode = false
 vim.o.swapfile = false
+if shot then
+  vim.opt.fillchars:append({ eob = " " }) -- no ~ column beside the float
+end
 vim.o.shortmess = vim.o.shortmess .. "IF"
 -- typed call arguments must land exactly as typed
 vim.o.autoindent = false
@@ -42,9 +47,9 @@ if vim.uv.fs_stat(gruvbox) then
 end
 
 -- keypresses in a corner float, so viewers can follow along. Installed by the
--- maintainer's lazy config; skipped when absent.
+-- maintainer's lazy config; skipped when absent, and in stills.
 local screenkey = data .. "/lazy/screenkey.nvim"
-if vim.uv.fs_stat(screenkey) then
+if not shot and vim.uv.fs_stat(screenkey) then
   vim.opt.rtp:prepend(screenkey)
   require("screenkey").setup({
     -- no border: an idle screenkey would otherwise leave an empty box
@@ -64,7 +69,7 @@ end
 -- animated scrolling, as in the maintainer's config: the jump to the calls
 -- scrolls past the classes the floats will show instead of cutting to them
 local snacks = data .. "/lazy/snacks.nvim"
-if vim.uv.fs_stat(snacks) then
+if not shot and vim.uv.fs_stat(snacks) then
   vim.opt.rtp:prepend(snacks)
   require("snacks").setup({
     scroll = { enabled = true, animate = { duration = { step = 10, total = 700 }, easing = "outQuad" } },
@@ -96,8 +101,12 @@ require("typescope").setup({
   depth = 1, -- so `l` has something to expand
   example_mode = "heuristic",
   insert_mode = { enabled = true },
-  ollama = { enabled = true },
-  ui = { max_width = 0.7 },
+  ollama = { enabled = not shot },
+  ui = {
+    max_width = shot and 0.9 or 0.7,
+    style = vim.env.TYPESCOPE_STYLE,
+    layout = vim.env.TYPESCOPE_LAYOUT,
+  },
 })
 
 vim.keymap.set("n", "K", function()
