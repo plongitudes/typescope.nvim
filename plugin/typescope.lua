@@ -8,20 +8,13 @@ if vim.fn.has("nvim-0.11") ~= 1 then
   return
 end
 
-local subcommands = { "open", "close", "toggle", "hover", "spike" }
+local subcommands = { "open", "close", "toggle", "hover" }
 
 vim.api.nvim_create_user_command("TypeScope", function(opts)
-  local sub = opts.fargs[1] or "toggle"
-  local args = { unpack(opts.fargs, 2) }
-  require("typescope").dispatch(sub, args)
+  require("typescope").dispatch(opts.fargs[1] or "toggle")
 end, {
-  nargs = "*",
-  complete = function(arglead, cmdline, _)
-    -- only complete the first argument; later args are subcommand-specific
-    local words = vim.split(cmdline, "%s+", { trimempty = true })
-    if #words > 2 or (#words == 2 and arglead == "") then
-      return {}
-    end
+  nargs = "?",
+  complete = function(arglead)
     return vim.tbl_filter(function(s)
       return vim.startswith(s, arglead)
     end, subcommands)

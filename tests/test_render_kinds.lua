@@ -79,7 +79,6 @@ local function opts(over)
   return vim.tbl_extend("force", {
     style = styles.get("unicode"),
     max_width = 70,
-    align = "left",
     show_examples = false,
     example_kind = "heuristic",
     lang = "python",
@@ -102,47 +101,36 @@ local function groups_of(result, text)
   return out
 end
 
-for _, layout in ipairs({ "ledger", "tree" }) do
-  local result = render.render(tree(), opts({ layout = layout }))
+do
+  local result = render.render(tree(), opts())
   local text = table.concat(result.lines, "\n")
-  print("---- " .. layout .. " ----")
+  print("---- rows ----")
   print(text)
-  check(layout .. ": property row present", text:find("ok", 1, true) ~= nil and text:find("bool", 1, true) ~= nil)
-  -- the ledger keeps ≈ for its cursor-follow detail block and shows the
-  -- evaluation as the row's type; the tree draws ≈ inline. Neither says Any.
-  if layout == "tree" then
-    check(layout .. ": inferred row draws ≈ dict[str, int] inline", text:find("≈ dict[str, int]", 1, true) ~= nil)
-  else
-    check(
-      layout .. ": inferred row shows the evaluation as its type",
-      text:find("parsed   dict[str, int]", 1, true) ~= nil
-    )
-  end
-  check(layout .. ": no row says Any", not text:find("Any", 1, true))
+  check("property row present", text:find("ok", 1, true) ~= nil and text:find("bool", 1, true) ~= nil)
+  -- ≈ is the panel's: the row shows the evaluation as its type, never Any
+  check("inferred row shows the evaluation as its type", text:find("parsed   dict[str, int]", 1, true) ~= nil)
+  check("no row says Any", not text:find("Any", 1, true))
   check(
-    layout .. ": methods group row collapsed by default",
+    "methods group row collapsed by default",
     text:find("methods", 1, true) ~= nil and not text:find("raise_for_status", 1, true)
   )
   check(
-    layout .. ": enum members with values",
+    "enum members with values",
     text:find("RED", 1, true) ~= nil and text:find("= 1", 1, true) ~= nil and text:find("GREEN", 1, true) ~= nil
   )
-  check(layout .. ": property name highlighted TypeScopeProperty", groups_of(result, "ok")["TypeScopeProperty"] == true)
-  check(
-    layout .. ": enum member highlighted TypeScopeEnumMember",
-    groups_of(result, "RED")["TypeScopeEnumMember"] == true
-  )
-  check(layout .. ": group highlighted TypeScopeGroup", groups_of(result, "methods")["TypeScopeGroup"] == true)
+  check("property name highlighted TypeScopeProperty", groups_of(result, "ok")["TypeScopeProperty"] == true)
+  check("enum member highlighted TypeScopeEnumMember", groups_of(result, "RED")["TypeScopeEnumMember"] == true)
+  check("group highlighted TypeScopeGroup", groups_of(result, "methods")["TypeScopeGroup"] == true)
 
   -- open the group: method rows appear, keep block colouring (no injection)
   local roots = tree()
   roots[1].children[4].state.expanded = true
-  local opened = render.render(roots, opts({ layout = layout }))
+  local opened = render.render(roots, opts())
   local otext = table.concat(opened.lines, "\n")
-  print("---- " .. layout .. " (methods open) ----")
+  print("---- rows (methods open) ----")
   print(otext)
   check(
-    layout .. ": opened group lists its methods",
+    "opened group lists its methods",
     otext:find("raise_for_status", 1, true) ~= nil and otext:find("() -> None", 1, true) ~= nil
   )
   local injected = false
@@ -151,7 +139,7 @@ for _, layout in ipairs({ "ledger", "tree" }) do
       injected = true
     end
   end
-  check(layout .. ": the group's count is not treesitter-injected", not injected)
+  check("the group's count is not treesitter-injected", not injected)
 end
 
 -- examples never target an enum member or a group

@@ -173,63 +173,39 @@ local function opts(over)
   return vim.tbl_extend("force", {
     style = styles.get("unicode"),
     max_width = 60,
-    align = "left",
     show_examples = true,
     example_kind = "heuristic",
   }, over or {})
 end
 
--- 1. left-aligned unicode, examples on
-eq_lines("left/unicode/examples", render.render(tree(), opts()).lines, {
-  "▾ config   ServerConfig",
-  '  ├─ · host        str  "localhost"',
-  "  ├─ ▾ retry       RetryPolicy",
-  "  │ └─ · max_attempts  int = 3",
-  "  └─ · timeout_ms  int | None NotRequired = None",
-  "· opaque   Mystery [?]",
-  "▸ returns  Response  (<CR> to expand)",
+-- the panel for one node; an example is on its last line
+local function panel(node, over)
+  return render.render({ node }, opts(vim.tbl_extend("force", { view = "panel", panel_node = node }, over or {})))
+end
+local function last(r)
+  return r.lines[#r.lines]
+end
+
+-- 1. unicode: one line per node, examples left to the panel
+eq_lines("unicode rows", render.render(tree(), opts()).lines, {
+  "▾ config               ServerConfig",
+  "  ├─ · host            str",
+  "  ├─ ▾ retry           RetryPolicy",
+  "  │ └─ · max_attempts  int  = 3",
+  "  └─ · timeout_ms      int | None NotRequired  = None",
+  "· opaque               Mystery [?]",
+  "▸ returns              Response",
 })
 
--- 2. right-aligned rounded, examples off
-eq_lines(
-  "right/rounded",
-  render.render(tree(), opts({ style = styles.get("rounded"), align = "right", show_examples = false })).lines,
-  {
-    " ▾ config  ServerConfig",
-    "  ├─       · host  str",
-    "  ├─      ▾ retry  RetryPolicy",
-    "  │ ╰─ · max_attempts  int = 3",
-    "  ╰─ · timeout_ms  int | None NotRequired = None",
-    " · opaque  Mystery [?]",
-    "▸ returns  Response  (<CR> to expand)",
-  }
-)
-
--- 3. wrap at 40: hanging indent, tree bars carried onto continuations
-eq_lines(
-  "wrap-40 hanging indent",
-  render.render(tree(), opts({ style = styles.get("rounded"), max_width = 40, show_examples = false })).lines,
-  {
-    "▾ config   ServerConfig",
-    "  ├─ · host        str",
-    "  ├─ ▾ retry       RetryPolicy",
-    "  │ ╰─ · max_attempts  int = 3",
-    "  ╰─ · timeout_ms  int | None",
-    "                    NotRequired = None",
-    "· opaque   Mystery [?]",
-    "▸ returns  Response  (<CR> to expand)",
-  }
-)
-
--- 4. minimal style: indentation only
+-- 2. minimal style: indentation only
 eq_lines("minimal style", render.render(tree(), opts({ style = styles.get("minimal"), show_examples = false })).lines, {
-  "- config   ServerConfig",
-  "      host        str",
-  "    - retry       RetryPolicy",
-  "        max_attempts  int = 3",
-  "      timeout_ms  int | None NotRequired = None",
-  "  opaque   Mystery [?]",
-  "+ returns  Response  (<CR> to expand)",
+  "- config              ServerConfig",
+  "      host            str",
+  "    - retry           RetryPolicy",
+  "        max_attempts  int  = 3",
+  "      timeout_ms      int | None NotRequired  = None",
+  "  opaque              Mystery [?]",
+  "+ returns             Response",
 })
 
 -- 5. node mapping: dotted-path ids, grandchildren rooted correctly
@@ -263,13 +239,22 @@ check(
     and h2.col_start == 4
     and h2.col_end == 10
     and h3.group == "TypeScopeType"
-    and h3.col_start == 13
+    -- a byte offset, not a cell count: the name column is padded in cells
+    and h3.col_start == r.lines[1]:find("ServerConfig", 1, true) - 1
 )
 
--- 7. injection spans: types/defaults replace, examples overlay, unsplit only
+-- 7. injection spans: types/defaults replace on the rows, examples overlay
+-- in the panel (the rows carry none)
 local kinds = {}
 for _, ij in ipairs(r.ts_injections) do
   kinds[ij.text] = ij.mode
+end
+do
+  local roots = tree()
+  local host = render.render(roots, opts({ view = "panel", panel_node = model.find(roots, "config.host") }))
+  for _, ij in ipairs(host.ts_injections) do
+    kinds[ij.text] = ij.mode
+  end
 end
 check(
   "injection modes (replace for types/defaults, overlay for examples)",
@@ -278,8 +263,9 @@ check(
 -- a split annotation still injects: each piece names the WHOLE annotation as
 -- its snippet and the byte slice of it that landed on that line, so a
 -- continuation reading `Awaitable[Response | None]]]` is painted from the
--- colors the full type parses to rather than dropping to the base group
-local wide = render.render({
+-- colors the full type parses to rather than dropping to the base group.
+-- The row cuts a long type short, so this is the panel, which wraps it.
+local handlers = {
   model.new({
     name = "handlers",
     kind = "param",
@@ -289,7 +275,9 @@ local wide = render.render({
     },
     default = "None",
   }),
-}, opts({ max_width = 40, show_examples = false }))
+}
+local wide =
+  render.render(handlers, opts({ max_width = 40, show_examples = false, view = "panel", panel_node = handlers[1] }))
 local annotation = "dict[str, Callable[[Request, Session], Awaitable[Response | None]]]"
 local pieces, default_injected, slices_sound = {}, false, true
 for _, ij in ipairs(wide.ts_injections) do
@@ -323,41 +311,34 @@ end
 check("a split annotation injects as slices of the whole", #pieces > 1 and covered and slices_sound)
 check("an unsplit default still injects", default_injected)
 
--- 8b. atomic segments (origin/badges) never split mid-word when wrapping
-eq_lines(
-  "atomic origin tag jumps whole to continuation",
-  render.render({
+-- 8b. atomic segments (origin/badges) never split mid-word when wrapping:
+-- the panel's origin tag jumps whole to a line of its own
+do
+  local px = {
     model.new({
-      name = "px",
+      name = "proxy",
       kind = "param",
-      expanded = true,
-      type = { display = "Wrap", category = "dataclass" },
-      children = {
-        {
-          name = "proxy",
-          type = {
-            display = "ClassVar[dict[weakref.ref[Any], weakref.ref[Proxy[Any]]]]",
-            category = "generic",
-          },
-          origin = "ReversibleProxy",
-          default = "{}",
-        },
-      },
+      type = { display = "dict", category = "generic" },
+      origin = "ReversibleProxy",
+      default = "weakref.WeakValueDictionary()",
     }),
-  }, opts({ style = styles.get("rounded"), max_width = 44, show_examples = false })).lines,
-  {
-    "▾ px  Wrap",
-    "  ╰─ · proxy  ClassVar[dict[weakref.ref[Any]",
-    "              , weakref.ref[Proxy[Any]]]]",
-    "               ↑ReversibleProxy = {}",
   }
-)
+  eq_lines(
+    "atomic origin tag jumps whole to continuation",
+    render.render(px, opts({ max_width = 40, show_examples = false, view = "panel", panel_node = px[1] })).lines,
+    {
+      "proxy  dict",
+      "= weakref.WeakValueDictionary()",
+      "     ↑ReversibleProxy",
+    }
+  )
+end
 
--- 8c. evaluated decorations: alias keeps declared name + ≈ suffix; an
--- unannotated param (implicit Any) shows only the inferred type
-eq_lines(
-  "evaluated decorations",
-  render.render({
+-- 8c. evaluated decorations: an alias keeps its declared name on the row and
+-- shows its ≈ evaluation in the panel; an unannotated param (implicit Any)
+-- shows only the inferred type, drawn as an evaluation
+do
+  local ev = {
     model.new({
       name = "mode",
       kind = "param",
@@ -372,120 +353,65 @@ eq_lines(
       evaluated = "int",
       default = "3",
     }),
-  }, opts({ style = styles.get("rounded"), show_examples = false })).lines,
-  {
-    "· mode   LoopMode ≈ Literal['auto', 'manual'] = \"auto\"",
-    "· count  ≈ int = 3",
   }
-)
+  local er = render.render(ev, opts({ style = styles.get("rounded"), show_examples = false }))
+  eq_lines("evaluated decorations", er.lines, {
+    '· mode   LoopMode  = "auto"',
+    "· count  int  = 3",
+  })
+  local int_group
+  for _, h in ipairs(er.highlights) do
+    if h.line == 1 and er.lines[2]:sub(h.col_start + 1, h.col_end) == "int" then
+      int_group = h.group
+    end
+  end
+  check("an inferred type stands in for Any, drawn as an evaluation", int_group == "TypeScopeEvaluated")
+  eq_lines(
+    "the alias's evaluation is in its panel",
+    render.render(ev, opts({ show_examples = false, view = "panel", panel_node = ev[1] })).lines,
+    {
+      "mode  LoopMode",
+      "≈ Literal['auto', 'manual']",
+      '= "auto"',
+    }
+  )
+end
 
--- 8. inherited fields render with the origin tag
-eq_lines(
-  "origin tag on inherited fields",
-  render.render({
-    model.new({
-      name = "cfg",
-      kind = "param",
-      expanded = true,
-      type = { display = "Child", category = "dataclass" },
-      children = {
-        { name = "z", type = { display = "float", category = "builtin" } },
-        { name = "x", type = { display = "int", category = "builtin" }, origin = "Base" },
-      },
-    }),
-  }, opts({ show_examples = false })).lines,
-  {
-    "▾ cfg  Child",
-    "  ├─ · z  float",
-    "  └─ · x  int ↑Base",
-  }
-)
-
--- 9. unified-float sections: header + separators + docstring (U1)
+-- 9. sections: the header and its rule over the rows; the docstring is the
+-- footer's and the doc view's, never a section under the rows (U1)
 local section_tree = { model.new({ name = "x", kind = "param", type = { display = "int", category = "builtin" } }) }
-eq_lines(
-  "sections: header + collapsed docstring at bottom",
-  render.render(
-    section_tree,
-    opts({
-      style = styles.get("rounded"),
-      max_width = 40,
-      show_examples = false,
-      header = "f(x, *, y=…) -> str",
-      docstring = "First line of prose.\n\nSecond paragraph here.",
-      docstring_expanded = false,
-      docstring_pos = "bottom",
-    })
-  ).lines,
-  {
-    "f(x, *, y=…) -> str",
-    "────────────────────",
-    "· x  int",
-    "────────────────────",
-    "First line of prose.",
-  }
-)
-eq_lines(
-  "sections: expanded docstring at top",
-  render.render(
-    section_tree,
-    opts({
-      style = styles.get("rounded"),
-      max_width = 40,
-      show_examples = false,
-      header = "f(x) -> str",
-      docstring = "First line of prose.\n\nSecond paragraph here.",
-      docstring_expanded = true,
-      docstring_pos = "top",
-    })
-  ).lines,
-  {
-    "f(x) -> str",
-    "First line of prose.",
-    "",
-    "Second paragraph here.",
-    "──────────────────────",
-    "· x  int",
-  }
-)
+local section_opts = {
+  style = styles.get("rounded"),
+  max_width = 40,
+  show_examples = false,
+  header = "f(x, *, y=…) -> str",
+  docstring = "First line of prose.\n\nSecond paragraph here.",
+}
+local sections = render.render(section_tree, opts(section_opts))
+eq_lines("sections: header over the rows, no docstring", sections.lines, {
+  "f(x, *, y=…) -> str",
+  "───────────────────",
+  "· x  int",
+})
+local doc_view = render.render(section_tree, opts(vim.tbl_extend("force", section_opts, { view = "doc" })))
+eq_lines("the doc view is the whole docstring", doc_view.lines, {
+  "First line of prose.",
+  "",
+  "Second paragraph here.",
+})
 
--- the docstring section's line range rides the result so interact can give
--- it plain-movement semantics and jump `d` presses into it
+-- the docstring's line range rides the result so interact can give the doc
+-- view plain-movement semantics and land `d` on a param's definition
+check("doc range: the rows have none", sections.doc_start == nil and sections.doc_end == nil)
+check("doc range: the doc view spans it", doc_view.doc_start == 1 and doc_view.doc_end == 3)
 do
-  local bottom = render.render(
-    section_tree,
-    opts({
-      style = styles.get("rounded"),
-      max_width = 40,
-      show_examples = false,
-      header = "f(x, *, y=…) -> str",
-      docstring = "First line of prose.\n\nSecond paragraph here.",
-      docstring_expanded = false,
-      docstring_pos = "bottom",
-    })
-  )
-  check("doc range: collapsed bottom section is the last line", bottom.doc_start == 5 and bottom.doc_end == 5)
-  local top = render.render(
-    section_tree,
-    opts({
-      style = styles.get("rounded"),
-      max_width = 40,
-      show_examples = false,
-      header = "f(x) -> str",
-      docstring = "First line of prose.\n\nSecond paragraph here.",
-      docstring_expanded = true,
-      docstring_pos = "top",
-    })
-  )
-  check("doc range: expanded top section spans lines 2-4", top.doc_start == 2 and top.doc_end == 4)
   local none = render.render(section_tree, opts({ show_examples = false }))
   check("doc range: absent without a docstring", none.doc_start == nil and none.doc_end == nil)
 end
 
--- 10. table layout (U5): column grid — name | */ | type | default | example |
--- (section 10, the table layout golden, went with the layout in 0.2.0)
+-- 10. (the table layout's golden went with the layout in 0.2.0)
 
--- 11. ledger layout (U6): one line per node — name | type | short default —
+-- 11. the ledger (U6): one line per node — name | type | short default —
 -- with the details (full type, ≈ owner, full default, example, origin) in
 -- the docked panel, rendered as view = "panel" for one node
 do
@@ -542,9 +468,9 @@ do
     t[3].evaluated_owner = "WSProtocolType"
     return t
   end
-  local lopts = opts({ style = styles.get("rounded"), max_width = 60, layout = "ledger" })
+  local lopts = opts({ style = styles.get("rounded"), max_width = 60 })
   local lr = render.render(ledger_tree(), lopts)
-  eq_lines("ledger layout golden (no detail)", lr.lines, {
+  eq_lines("ledger golden (no detail)", lr.lines, {
     "▾   config     ServerConfig",
     "  ├─ ·   host  str",
     "  ├─ ·   port  int  = 8000",
@@ -566,7 +492,6 @@ do
       opts(vim.tbl_extend("force", {
         style = styles.get("rounded"),
         max_width = 60,
-        layout = "ledger",
         view = "panel",
         panel_node = model.find(roots, id),
       }, over or {}))
@@ -609,7 +534,7 @@ do
         type = { display = "str", category = "builtin" },
       }),
     }
-    local rows = table.concat(render.render(ph, opts({ layout = "ledger", max_width = 62 })).lines, "\n")
+    local rows = table.concat(render.render(ph, opts({ max_width = 62 })).lines, "\n")
     check("a placeholder default shows inline", rows:find("level.*= …") ~= nil)
     local function panel_text(id)
       return table.concat(panel_for(ph, id, { max_width = 62 }).lines, "\n")
@@ -634,7 +559,7 @@ do
         type = { display = "ASGIApplication | Callable[..., Any] | str | type[ASGI2Protocol]", category = "generic" },
       }),
     }
-    local row = render.render(wide, opts({ layout = "ledger", max_width = 40 })).lines[1]
+    local row = render.render(wide, opts({ max_width = 40 })).lines[1]
     local whole = table.concat(panel_for(wide, "app", { max_width = 40 }).lines, " ")
     check("a long type is cut on its row", row:find("…") ~= nil)
     check("...and whole in the panel", whole:find("ASGI2Protocol]", 1, true) ~= nil)
@@ -834,7 +759,7 @@ do
     -- while it waits, and what a MISS leaves behind
     node.example.heuristic = '"localhost"'
     node.example.llm = llm
-    local r = render.render({ node }, opts(over))
+    local r = panel(node, over)
     local found = {}
     for _, h in ipairs(r.highlights) do
       found[h.group] = true
@@ -875,32 +800,26 @@ do
     "heuristic mode never renders pending",
     groups_for({ example_pending = pending })["TypeScopeExamplePending"] == nil
   )
-  check(
-    "no predicate (spike, tests) renders normally",
-    groups_for({ example_kind = "llm" })["TypeScopeExample"] == true
-  )
+  check("no predicate renders normally", groups_for({ example_kind = "llm" })["TypeScopeExample"] == true)
 
   -- a leaf no heuristic matches has no example line at all; while its value
-  -- is coming, a bar holds the line open so the block doesn't grow one later
+  -- is coming, a bar holds the line open so the panel doesn't grow one later
   do
     local bare = model.new({ name = "object", kind = "param", type = { display = "_T", category = "typevar" } })
-    local waiting = render.render({ bare }, opts({ example_kind = "llm", example_pending = pending }))
-    local settled = render.render({ bare }, opts({ example_kind = "llm" }))
+    local waiting = panel(bare, { example_kind = "llm", example_pending = pending })
+    local settled = panel(bare, { example_kind = "llm" })
     -- one full wavelength, so every rung of the ramp is on screen at once
     check(
       "pending leaf with no heuristic shows the wave bar",
-      waiting.lines[1]:find("▁") and waiting.lines[1]:find("▇") and waiting.lines[1]:find("▅")
+      last(waiting):find("▁") and last(waiting):find("▇") and last(waiting):find("▅")
     )
-    local ascii = render.render(
-      { bare },
-      opts({
-        style = styles.get("ascii"),
-        example_kind = "llm",
-        example_pending = pending,
-      })
-    ).lines[1]
+    local ascii = last(panel(bare, {
+      style = styles.get("ascii"),
+      example_kind = "llm",
+      example_pending = pending,
+    }))
     check("bar uses the charset ramp", ascii:find("%.") and ascii:find("#") and not ascii:find("▇"))
-    check("nothing pending, nothing shown", settled.lines[1]:find("▇") == nil)
+    check("nothing pending, nothing shown", last(settled):find("▇") == nil)
     -- the type annotation always injects; the bar must not — it isn't code
     local bar_injected = false
     for _, ij in ipairs(waiting.ts_injections) do
@@ -920,9 +839,9 @@ do
     node.example.llm = value
     local progress
     local function frame(over)
-      return render.render(
-        { node },
-        opts(vim.tbl_extend("force", {
+      return panel(
+        node,
+        vim.tbl_extend("force", {
           example_kind = "llm",
           example_pending = function()
             return false
@@ -932,31 +851,31 @@ do
           example_reveal = function()
             return progress, 0.3
           end,
-        }, over or {}))
+        }, over or {})
       )
     end
 
     progress = 0
     local start = frame()
     -- the wave freezes where it stood: it does NOT snap to a full-height bar
-    check("the fall starts from the frozen wave", rung_count(start.lines[1]) >= 3)
-    check("no value text visible yet", not start.lines[1]:find("John"))
+    check("the fall starts from the frozen wave", rung_count(last(start)) >= 3)
+    check("no value text visible yet", not last(start):find("John"))
 
     progress = 0.75
     local mid = frame()
-    check("mid-fall uncovers some of the value", mid.lines[1]:find("name", 1, true) ~= nil)
-    check("mid-fall still has blocks standing", mid.lines[1]:find("[▁▂▃▅▇]") ~= nil)
-    check("mid-fall has not uncovered all of it", not mid.lines[1]:find(value, 1, true))
+    check("mid-fall uncovers some of the value", last(mid):find("name", 1, true) ~= nil)
+    check("mid-fall still has blocks standing", last(mid):find("[▁▂▃▅▇]") ~= nil)
+    check("mid-fall has not uncovered all of it", not last(mid):find(value, 1, true))
 
     progress = nil
     local done = frame()
-    check("settled shows the whole value", done.lines[1]:find(value, 1, true) ~= nil)
+    check("settled shows the whole value", last(done):find(value, 1, true) ~= nil)
     -- the bar holds a space wider than most values, so the reveal only ever
     -- narrows the row — the value is uncovered inside room already reserved,
     -- never shoved into place
-    local w_start = vim.api.nvim_strwidth(start.lines[1])
-    local w_mid = vim.api.nvim_strwidth(mid.lines[1])
-    local w_done = vim.api.nvim_strwidth(done.lines[1])
+    local w_start = vim.api.nvim_strwidth(last(start))
+    local w_mid = vim.api.nvim_strwidth(last(mid))
+    local w_done = vim.api.nvim_strwidth(last(done))
     check("the reveal never widens the row", w_start >= w_mid and w_mid >= w_done)
     check("the bar reserves more room than this value needs", w_start > w_done)
     -- uncovered runs are real code again, blocks never are
@@ -976,18 +895,15 @@ do
     -- disappearing between two frames
     local missed = model.new({ name = "kwargs", kind = "param", type = { display = "T", category = "builtin" } })
     local function miss_frame(pr)
-      return render.render(
-        { missed },
-        opts({
-          example_kind = "llm",
-          example_pending = function()
-            return false
-          end,
-          example_reveal = function()
-            return pr, 0.3
-          end,
-        })
-      ).lines[1]
+      return last(panel(missed, {
+        example_kind = "llm",
+        example_pending = function()
+          return false
+        end,
+        example_reveal = function()
+          return pr, 0.3
+        end,
+      }))
     end
     check("a MISS still falls away rather than popping", miss_frame(0.1):find("[▁▂▃▅▇]") ~= nil)
     check("...and leaves nothing behind", not miss_frame(nil):find("[▁▂▃▅▇]"))
@@ -1031,21 +947,18 @@ do
     -- a pending node has no value yet, so a stale reveal must not fire
     progress = 0.5
     local bare = model.new({ name = "x", kind = "param", type = { display = "_T", category = "typevar" } })
-    local waiting = render.render(
-      { bare },
-      opts({
-        example_kind = "llm",
-        example_pending = function()
-          return true
-        end,
-        example_reveal = function()
-          return progress
-        end,
-      })
-    )
+    local waiting = panel(bare, {
+      example_kind = "llm",
+      example_pending = function()
+        return true
+      end,
+      example_reveal = function()
+        return progress
+      end,
+    })
     check(
       "pending beats reveal: the placeholder stays whole",
-      rung_count(waiting.lines[1]) >= 3 and not waiting.lines[1]:find("John")
+      rung_count(last(waiting)) >= 3 and not last(waiting):find("John")
     )
   end
 
@@ -1081,16 +994,13 @@ do
   -- so its columns are the last PENDING_CELLS characters of the line
   local WIDTH = 28
   local function bar_at(phase)
-    local line = render.render(
-      { bare },
-      opts({
-        example_kind = "llm",
-        example_pending = function()
-          return true
-        end,
-        example_phase = phase,
-      })
-    ).lines[1]
+    local line = last(panel(bare, {
+      example_kind = "llm",
+      example_pending = function()
+        return true
+      end,
+      example_phase = phase,
+    }))
     local chars = vim.fn.strchars(line)
     local cells = {}
     for i = 1, WIDTH do
@@ -1145,7 +1055,6 @@ do
     return render.render(
       { node },
       opts(vim.tbl_extend("force", {
-        layout = "ledger",
         view = "panel",
         panel_node = node,
         max_width = 40,
@@ -1201,18 +1110,15 @@ do
   local value = '"https://api.example.com/data"'
   local node = model.new({ name = "url", kind = "param", type = { display = "str", category = "builtin" } })
   node.example.llm = value
-  local mid = render.render(
-    { node },
-    opts({
-      example_kind = "llm",
-      example_pending = function()
-        return false
-      end,
-      example_reveal = function()
-        return 0.6, 0.3
-      end,
-    })
-  )
+  local mid = panel(node, {
+    example_kind = "llm",
+    example_pending = function()
+      return false
+    end,
+    example_reveal = function()
+      return 0.6, 0.3
+    end,
+  })
   local slices, sound = 0, true
   for _, ij in ipairs(mid.ts_injections) do
     if ij.text == value then
@@ -1271,7 +1177,6 @@ do
     return render.render(
       { short },
       opts(vim.tbl_extend("force", {
-        layout = "ledger",
         view = "panel",
         panel_node = short,
         max_width = 90,
@@ -1340,7 +1245,6 @@ do
     local r = render.render(
       { node },
       opts({
-        layout = "ledger",
         view = "panel",
         panel_node = node,
         max_width = 90,
@@ -1393,21 +1297,13 @@ do
   local wide = model.new({ name = "host", kind = "param", type = { display = "str", category = "builtin" } })
   wide.example.heuristic = '"llm-host.example.io/gateway/v2/ingest?region=us-west-2"'
   wide.origin = "typescope.transport.gateway.RegionalIngestClientConfiguration"
-  local narrow = render.render({ wide }, opts({ layout = "ledger", view = "panel", panel_node = wide, max_width = 40 }))
+  local narrow = render.render({ wide }, opts({ view = "panel", panel_node = wide, max_width = 40 }))
   check("an example wider than the float wraps instead of hanging", #narrow.lines >= 2)
   local widest = 0
   for _, l in ipairs(narrow.lines) do
     widest = math.max(widest, vim.api.nvim_strwidth(l))
   end
   check("...and every wrapped line stays inside max_width", widest <= 40)
-  -- deep chrome eats more of each continuation line; the guard has to be the
-  -- prefix's real width, not a constant. The tree layout still carries chrome
-  -- on its continuations, so that is where depth is exercised now.
-  local parent = model.new({ name = "cfg", kind = "param", type = { display = "C", category = "struct" } })
-  parent.state.expanded = true
-  parent.children = { wide }
-  local nested = render.render({ parent }, opts({ max_width = 40 }))
-  check("...at depth too", #nested.lines >= 3)
 end
 
 -- `e.g.` is a two-character label, and an atomic example left it alone on a
@@ -1418,7 +1314,7 @@ end
 do
   local node = model.new({ name = "returns", kind = "return", type = { display = "R", category = "class" } })
   node.example.heuristic = "Response(status_code=200, content=b\"{'data': [{'id': 1, 'name': 'Item 1'}]}\")"
-  local r = render.render({ node }, opts({ layout = "ledger", view = "panel", panel_node = node, max_width = 64 }))
+  local r = render.render({ node }, opts({ view = "panel", panel_node = node, max_width = 64 }))
   local label
   for _, l in ipairs(r.lines) do
     if l:find("e.g.", 1, true) then
@@ -1465,7 +1361,7 @@ do
   require("typescope.examples").annotate(roots)
   local function example_lines(over)
     local n = 0
-    for _, line in ipairs(render.render(roots, opts(vim.tbl_extend("force", { layout = "ledger" }, over))).lines) do
+    for _, line in ipairs(render.render(roots, opts(over)).lines) do
       if line:find("e%.g%.") then
         n = n + 1
       end
@@ -1474,23 +1370,6 @@ do
   end
   check("ledger rows show no examples", example_lines({}) == 0)
   check("the panel shows its node's", example_lines({ view = "panel", panel_node = roots[2] }) == 1)
-end
-
--- The doc view is the whole docstring and nothing else, and a ledger never
--- draws a docstring section under its rows (the footer carries it).
-do
-  local roots = { model.new({ name = "x", kind = "param", type = { display = "int", category = "builtin" } }) }
-  local doc = "First line of prose.\n\nSecond paragraph here."
-  local base = { layout = "ledger", header = "f(x) -> str", docstring = doc, docstring_pos = "bottom" }
-  local rows = table.concat(render.render(roots, opts(base)).lines, "\n")
-  check("a ledger draws no docstring section", not rows:find("prose"))
-  local view = render.render(roots, opts(vim.tbl_extend("force", base, { view = "doc" })))
-  eq_lines("the doc view is the whole docstring", view.lines, {
-    "First line of prose.",
-    "",
-    "Second paragraph here.",
-  })
-  check("...and marks it as the docstring section", view.doc_start == 1 and view.doc_end == 3)
 end
 
 -- model.frontier: the next level l opens. Shallowest collapsed expandable
@@ -1526,10 +1405,11 @@ do
   check("a leaf: empty", #model.frontier(root.children[2].children[1]) == 0)
 end
 
--- 13. find_break_point: the wrap decision every layout goes through
+-- 13. find_break_point: the wrap decision every surface goes through
 --
--- Five call sites depend on it — tree flow, docstring prose, header elision,
--- table cells, typing surface detail — and until now none of them tested it directly.
+-- Four call sites depend on it — the panel's flow, docstring prose, header
+-- elision, the typing surface's detail — and until now none of them tested it
+-- directly.
 -- Its contract is easy to get wrong from the outside, so pin it here: `limit`
 -- is a count of DISPLAY CELLS, the return is a 1-based INCLUSIVE BYTE index of
 -- the last character to keep, and the caller is expected to strip the leading
@@ -1630,20 +1510,22 @@ do
   -- widths where its cut happens to land mid-character, so a single fixture
   -- width proves almost nothing. This is the check that would have caught all
   -- three sites at once.
-  for _, layout in ipairs({ "tree", "ledger" }) do
+  -- each of the float's three surfaces: the rows (header elision, capped
+  -- names, cut types), the panel (wrapped types and values) and the doc view
+  -- (wrapped prose)
+  for _, view in ipairs({ "rows", "panel", "doc" }) do
     local worst = nil
     for w = 20, 80 do
-      local res = render.render(uni_roots(), {
+      local roots = uni_roots()
+      local res = render.render(roots, {
         style = styles.get("rounded"),
         max_width = w,
-        layout = layout,
-        align = "left",
+        view = view ~= "rows" and view or nil,
+        panel_node = roots[1],
         show_examples = false,
         example_kind = "heuristic",
         lang = "python",
         docstring = uni_doc,
-        docstring_pos = "bottom",
-        docstring_expanded = true,
         header = uni_header,
       })
       for i, line in ipairs(res.lines) do
@@ -1652,7 +1534,11 @@ do
         end
       end
     end
-    check(("%s survives every width from 20 to 80 intact"):format(layout), worst == nil)
+    check(
+      ({ rows = "the rows", panel = "the panel's lines", doc = "the doc view's lines" })[view]
+        .. " survive every width from 20 to 80 intact",
+      worst == nil
+    )
     if worst then
       print("  " .. worst)
     end
@@ -1664,7 +1550,6 @@ do
   local ledger = render.render(uni_roots(), {
     style = styles.get("rounded"),
     max_width = 70,
-    layout = "ledger",
     show_examples = false,
     example_kind = "heuristic",
     lang = "python",

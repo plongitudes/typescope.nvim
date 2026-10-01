@@ -2,6 +2,25 @@
 
 Notable changes to TypeScope, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [Semantic Versioning](https://semver.org/), with the usual 0.x caveat that a minor bump may break something. Each release is an annotated git tag carrying the same notes.
 
+## [Unreleased]
+
+The ledger is the only layout. With the details in a docked panel there was nothing left that `tree` did better, and keeping two layouts meant two render paths, two `d` behaviours and two ways of generating examples.
+
+### Upgrading
+
+If your setup sets `ui.layout` to anything but `"ledger"`, or sets `ui.align`, the key is ignored and you'll see a one-time warning. `ui.docstring` is now `true` or `false`; the old `"bottom"` and `"top"` both mean `true`.
+
+### Removed
+
+- **The `tree` layout**, and `ui.layout` with it. Its inline examples, origin tags and `≈` evaluations are all in the ledger's panel.
+- **`ui.align`.** It aligned the tree's name column; the ledger's rows have always shared one.
+- **`:TypeScope spike`.** It previewed the charset styles on built-in fixtures. The README and `:help typescope-styles` describe them instead.
+- **Generating examples for the whole tree when the float opens.** It was how the tree filled in `example_mode = "llm"`. The ledger already generates a row and its nearest neighbours as the cursor reaches them, which is what `example_mode = "llm"` now always does.
+
+### Changed
+
+- **`ui.docstring` is on or off.** `true` (the default) puts the docstring's first sentence in the frame's bottom edge and lets `d` show the rest; `false` turns both off.
+
 ## [0.3.0] — 2026-09-24
 
 The ledger stops moving. Its details moved out of the rows into a panel docked underneath, so `j` and `k` no longer shove everything below the cursor around, and examples are asked for one row at a time as you reach them instead of for the whole tree up front. On a large third-party type that was the difference between a float that answers in under half a second and an editor pinned for minutes.

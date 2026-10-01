@@ -15,7 +15,7 @@ CONTENTS                                                 *typescope-contents*
     5. Mappings ........................... |typescope-mappings|
     6. Inside the float ................... |typescope-float-keys|
     7. Configuration ...................... |typescope-config|
-    8. Layouts ............................ |typescope-layouts|
+    8. The ledger ......................... |typescope-ledger|
     9. Insert mode ........................ |typescope-insert-mode|
    10. Examples ........................... |typescope-examples|
    11. Styles ............................. |typescope-styles|
@@ -147,9 +147,6 @@ Install with lazy.nvim: >lua
                 through to |vim.lsp.buf.hover()|. A drop-in replacement for
                 |K| in Python buffers.
 
-    spike       Preview the charset styles against built-in fixtures.
-                See |typescope-styles|.
-
 Subcommands tab-complete.
 
 ==============================================================================
@@ -187,8 +184,7 @@ through `keymaps` (|typescope-config|); the defaults are shown.
     k           Move to the previous node
     e           Ask the model for this row's example, and its neighbours'
                 (needs ollama)
-    d           Docstring: show all of it (ledger: in place of the rows), or
-                go back
+    d           Docstring: show all of it in place of the rows, or go back
     q           Close
     <Esc>       Close
     ?           Toggle the help overlay
@@ -231,13 +227,11 @@ Defaults in full: >lua
 
       ui = {
         style = "rounded",
-        layout = "ledger",
         animations = true,
-        align = "left",
         max_width = 0.5,
         max_height = 20,
         border = "rounded",
-        docstring = "bottom",
+        docstring = true,
         hint = true,
         focus = true,
       },
@@ -292,26 +286,25 @@ ui.hint ~
     can tell at a glance where TypeScope has something to say.
 
 ==============================================================================
-8. LAYOUTS                                                *typescope-layouts*
+                                                        *typescope-layouts*
+8. THE LEDGER                                              *typescope-ledger*
 
-Set `ui.layout`. Same data, different shapes.
+One compact line per parameter (name, type, short default), and a panel
+docked under the rows showing everything about the row the cursor is on: its
+whole type, evaluated shape, full default, example, origin. The rows never
+move with the cursor; only the panel changes. The panel grows to the tallest
+node it has shown (up to five lines) and does not shrink back. The frame
+opens below the cursor, or above it when there is more room.
 
-ledger ~
-    The default. One compact line per parameter (name, type, short default),
-    and a panel docked under the rows showing everything about the row the
-    cursor is on: its whole type, evaluated shape, full default, example,
-    origin. The rows never move with the cursor; only the panel changes. The
-    panel grows to the tallest node it has shown (up to five lines) and does
-    not shrink back. The frame's bottom edge carries the docstring's first
-    sentence, and d shows the whole docstring in place of the rows. The
-    frame opens below the cursor, or above it when there is more room.
+                                                      *typescope-docstring*
+ui.docstring ~
+    true (the default): the frame's bottom edge carries the docstring's
+    first sentence, and d shows the whole docstring in place of the rows.
+    false turns both off.
 
-tree ~
-    Flowing segments; type, default and example trail the name and wrap with
-    a hanging indent when they run out of room.
-
-(The "table" layout, deprecated in 0.1.0, was removed in 0.2.0; setting it
-is an error that names the replacement.)
+It used to be one of several layouts. "table" was removed in 0.2.0 and
+"tree" in 0.4.0; a `ui.layout` or `ui.align` left in your setup is ignored
+with a one-time warning.
 
 ==============================================================================
 9. INSERT MODE                                       *typescope-insert-mode*
@@ -344,18 +337,18 @@ insert_mode.max_detail_lines ~
 ==============================================================================
 10. EXAMPLES                                             *typescope-examples*
 
-The example column shows a plausible value for each leaf.
+The panel shows a plausible example value for each leaf.
 
                                                      *typescope-example-mode*
 example_mode ~
     "heuristic"   Pattern-table values matched on name and type. No network,
                   no model, instant. Press e on a row to ask the model
                   for its example on demand. The default.
-    "llm"         Generate through ollama automatically: in the ledger, for
-                  the panel's row and its nearest neighbours as the cursor
-                  reaches them, one batch at a time. Heuristics show until
-                  the real values land, then swap in place.
-    "none"        No example column.
+    "llm"         Generate through ollama automatically, for the panel's
+                  row and its nearest neighbours as the cursor reaches them,
+                  one batch at a time. Heuristics show until the real values
+                  land, then swap in place.
+    "none"        No examples.
 
                                                        *typescope-ollama-ram*
 The RAM cost of ollama ~
@@ -383,20 +376,12 @@ fills in more slowly and never trips it. Only a wedged server does.
 `ui.style` picks the charset: "unicode", "ascii", "minimal", "rounded". All
 four are plain Unicode or ASCII — no Nerd Font glyphs — so any font works.
 
-                                                           *typescope-spike*
-To see them rather than guess: >
-
-    :TypeScope spike
-    :TypeScope spike ascii
-<
-This opens the real float, through the production render path, on built-in
-fixtures: a dataclass, a nested Pydantic model, a TypedDict, and a Protocol
-with an unresolved member. No LSP is involved, so it works in any buffer.
-
-    <Tab>       next fixture
-    <S-Tab>     previous fixture
-    s           next style
-    ?           help, including the keys above
+    rounded     The default: box-drawing tree lines, with a rounded corner
+                on the last child.
+    unicode     The same, with a square corner on the last child.
+    ascii       Tree lines drawn with + - | \ for SSH sessions and
+                terminals with a partial font.
+    minimal     No tree lines; indentation only.
 
 ==============================================================================
 12. HIGHLIGHTS                                         *typescope-highlights*

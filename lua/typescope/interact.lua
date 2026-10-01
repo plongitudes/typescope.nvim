@@ -39,15 +39,12 @@ end
 ---@field max_height integer
 ---@field on_close fun()
 ---@field on_recurse? fun(node: typescope.Node, done: fun()) lazily resolve a beyond-depth node
----@field on_llm? fun(roots: typescope.Node[], done: fun(ok: boolean, err: string?)) generate LLM examples for the visible tree
 ---@field on_llm_nodes? fun(nodes: typescope.Node[], done: fun(ok: boolean, err: string?)) generate LLM examples for these leaves
----@field auto_examples? boolean ledger: generate the panel node's sibling group as the cursor reaches it
+---@field auto_examples? boolean generate the panel node's sibling group as the cursor reaches it
 ---@field on_llm_error? fun(err: string) an automatic generation failed
----@field extra_help? { [1]: string, [2]: string }[] host rows for the ? overlay
 
 ---@param width integer
----@param extra { [1]: string, [2]: string }[]? host-provided rows (e.g. spike harness keys)
-local function help_lines(width, extra)
+local function help_lines(width)
   local km = config.get().keymaps
   local rows = {
     { km.expand, "expand / collapse" },
@@ -58,7 +55,6 @@ local function help_lines(width, extra)
     { km.close .. " / <Esc>", "close" },
     { km.help, "toggle this help" },
   }
-  vim.list_extend(rows, extra or {})
   local lines = { string.rep("·", math.max(4, width)) }
   for _, row in ipairs(rows) do
     table.insert(lines, (" %-11s %s"):format(row[1], row[2]))
@@ -80,14 +76,12 @@ function M.attach(args)
     -- a panel float's frame is capped to its side of the cursor at open
     max_height = args.handle.budget or args.max_height,
     show_help = false,
-    -- ledger: the docked panel shows panel_id's details, and is only ever as
-    -- tall as the tallest it has been (panel_h) — the rows above it must not
-    -- move as the cursor goes from a one-line node to a four-line one
-    panel = args.handle.panel ~= nil,
+    -- the docked panel shows panel_id's details, and is only ever as tall as
+    -- the tallest it has been (panel_h) — the rows above it must not move as
+    -- the cursor goes from a one-line node to a four-line one
     panel_id = nil, ---@type string?
     panel_h = 0,
-    show_doc = false, -- ledger: the full docstring in place of the rows
-    extra_help = args.extra_help,
+    show_doc = false, -- the full docstring in place of the rows
     result = nil, ---@type typescope.RenderResult
   }
   local examples = require("typescope.examples")
@@ -296,7 +290,7 @@ function M.attach(args)
       return { { key .. "back ", "TypeScopeHint" }, help }
     end
     local doc = st.opts.docstring
-    if not doc or doc == "" or not st.opts.docstring_pos then
+    if not doc or doc == "" or not config.get().ui.docstring then
       return { help }
     end
     doc = vim.trim(doc)
@@ -355,7 +349,7 @@ function M.attach(args)
     -- help (?) replaces the view entirely: content routinely exceeds
     -- max_height, so an appended panel lands below the fold and is never seen
     if st.show_help then
-      local lines = help_lines(st.width, st.extra_help)
+      local lines = help_lines(st.width)
       local highlights = {}
       for i, text in ipairs(lines) do
         highlights[i] = { line = i - 1, col_start = 0, col_end = #text, group = "TypeScopeHint" }
@@ -407,12 +401,12 @@ function M.attach(args)
     -- what keeps it from chasing its own tail — the bar reaching the edge is
     -- what makes the edge stay put.
     st.opts.window_width = st.width
-    -- The ledger's rows carry no examples — no bars, no reveals — so an
+    -- The rows carry no examples — no bars, no reveals — so an
     -- animation frame, or the cursor moving, changes the panel and nothing
     -- else. Re-rendering every row 60 times a second anyway was most of what
     -- a big tree cost while a batch was out. Only the rules depend on the
     -- float's width, so a reuse is keyed on that.
-    local reuse = frame and st.panel and rows ~= nil and rows.width == st.width
+    local reuse = frame and rows ~= nil and rows.width == st.width
     if not reuse then
       rows = { result = render.render(st.roots, st.opts), width = st.width }
     end
@@ -420,10 +414,7 @@ function M.attach(args)
     sync_clock()
     local lines = not reuse and vim.list_extend({}, st.result.lines) or nil
     local highlights = st.result.highlights
-    local panel, panel_width = nil, 0
-    if st.panel then
-      panel, panel_width = panel_content()
-    end
+    local panel, panel_width = panel_content()
     -- expanding deep subtrees produces wider content than the float opened
     -- with — grow the window (never shrink; up to max_width) or lines clip
     local target = st.width -- the width we were already headed for
@@ -649,8 +640,8 @@ function M.attach(args)
     if st.show_help then
       return
     end
-    -- ledger: the doc view and back, landing where you left
-    if st.panel and st.show_doc then
+    -- the doc view and back, landing where you left
+    if st.show_doc then
       st.show_doc = false
       refresh(st.doc_return_id)
       return
@@ -660,99 +651,17 @@ function M.attach(args)
       vim.notify("typescope: no docstring available", vim.log.levels.INFO)
       return
     end
-    if not st.opts.docstring_pos then
-      vim.notify("typescope: docstring section disabled (ui.docstring = false)", vim.log.levels.INFO)
-      return
-    end
-    if st.panel then
-      local node = node_under_cursor()
-      st.doc_return_id = node and node.id or nil
-      st.show_doc = true
-      refresh()
-      -- hovering a param opens the docs where they define it
-      vim.api.nvim_win_set_cursor(st.handle.win, { param_doc_line(node) or 1, 0 })
-      return
-    end
-    local lnum = vim.api.nvim_win_get_cursor(st.handle.win)[1]
-    if in_docstring(lnum) then
-      -- second press from inside: fold back to the first paragraph and
-      -- return to the row we came from (mirrors the help overlay's round trip)
-      st.opts.docstring_expanded = false
-      refresh(st.doc_return_id)
+    if not config.get().ui.docstring then
+      vim.notify("typescope: the docstring is turned off (ui.docstring = false)", vim.log.levels.INFO)
       return
     end
     local node = node_under_cursor()
     st.doc_return_id = node and node.id or nil
-    st.opts.docstring_expanded = true
+    st.show_doc = true
     refresh()
-    -- hovering a param jumps to where the docstring defines it
-    local target = param_doc_line(node) or st.result.doc_start
-    if target then
-      vim.api.nvim_win_set_cursor(st.handle.win, { target, 0 })
-    end
+    -- hovering a param opens the docs where they define it
+    vim.api.nvim_win_set_cursor(st.handle.win, { param_doc_line(node) or 1, 0 })
   end)
-  -- Single-flight whole-tree LLM generation, for the tree layout's auto-open
-  -- path: concurrent runs double requests AND nest title spinners (the inner
-  -- one captures "generating…" as the original title and restores it
-  -- forever — Tony's frozen-title screenshot).
-  ---@param on_error? fun(err: string) override the default warn
-  local function generate(on_error)
-    if not args.on_llm or st.generating then
-      return
-    end
-    st.generating = true
-    -- flip upfront: render falls back to heuristics until values land, and
-    -- each batch swaps its rows in as it arrives
-    st.opts.example_kind = "llm"
-    st.opts.show_examples = true
-    -- the spinner starts only if generation is still running after a beat:
-    -- a cache-served run (every reopen) finishes synchronously, and its
-    -- one-frame "generating…" title flash read as real regeneration
-    local spinner = nil
-    local finished = false
-    vim.defer_fn(function()
-      if not finished and vim.api.nvim_win_is_valid(st.handle.win) then
-        spinner = require("typescope.anim").title_spinner(st.handle.win, "generating")
-        -- same 80ms gate as the spinner: a cache-served run finishes
-        -- synchronously and a one-frame flash of bars would read as a glitch.
-        -- The repaint is what starts the animation AT ALL: flipping to llm
-        -- mode above changed no pixels, so nothing on screen is drawn as
-        -- pending yet (38c).
-        refresh()
-      end
-    end, 80)
-    args.on_llm(st.roots, function(ok, err)
-      st.generating = false
-      finished = true
-      if spinner then
-        spinner.stop()
-      end
-      if not vim.api.nvim_win_is_valid(st.handle.win) then
-        return
-      end
-      -- repaint either way. A run that filled NOTHING still cleared every
-      -- leaf's pending flag, and the placeholder bars it painted at the start
-      -- sit there until something repaints them. Not an edge case: a retry
-      -- re-asks only the leaves that whiffed last time, so "filled nothing"
-      -- is the ordinary outcome of asking again about a leaf the model has
-      -- no idea about (Tony's **kwargs).
-      refresh()
-      if not ok and err then
-        if on_error then
-          on_error(err)
-        else
-          vim.notify("typescope: " .. err .. " (keeping heuristic examples)", vim.log.levels.WARN)
-        end
-      end
-    end, function(batches_done, batches_total)
-      if spinner and batches_total and batches_total > 1 then
-        spinner.set_label(("generating %d/%d"):format(math.min(batches_done + 1, batches_total), batches_total))
-      end
-      -- no refresh here: batch repaints ride the examples module's landed
-      -- subscription (40u) — one path for this float's own batches and a
-      -- previous open's late ones alike
-    end)
-  end
 
   local function close()
     stop_clock()
@@ -761,12 +670,10 @@ function M.attach(args)
   map(km.close, close)
   map("<Esc>", close)
 
-  -- j/k jump between interactive rows — params and expandable sub-items —
-  -- skipping display-only lines (detail blocks, wrapped continuations,
-  -- header/rule). Past the last node they fall back to plain movement so
-  -- the docstring section stays reachable and scrollable. Inside the
-  -- docstring it's all plain movement: node-jumping there made k bounce
-  -- from mid-prose back to the ledger (every doc line is "skippable").
+  -- j/k jump between rows, skipping display-only lines (the header and its
+  -- rule). Past the last node they fall back to plain movement. In the doc
+  -- view it's all plain movement: node-jumping there made k bounce from
+  -- mid-prose back to the rows (every doc line is "skippable").
   local function jump(dir)
     if st.show_help then
       vim.cmd("normal! " .. (dir == 1 and "j" or "k"))
@@ -809,7 +716,7 @@ function M.attach(args)
   end)
 
   -- Examples come a sibling group at a time (examples.group_for): the
-  -- panel's node as the cursor reaches it (ledger, example_mode = "llm"),
+  -- panel's node as the cursor reaches it (example_mode = "llm"),
   -- or the cursor's node on e. One batch in flight and never a queue — a
   -- slow local model answers one request at a time anyway, and a backlog
   -- only puts the node you are looking at behind ones you have left. What
@@ -904,44 +811,40 @@ function M.attach(args)
 
   st.auto_examples = args.auto_examples
 
-  -- ledger (U6): the panel follows the cursor. The rows never change with
-  -- it, so a move repaints only the panel (float.update skips unchanged
-  -- lines). A line that maps to no node — the header — leaves the panel on
-  -- the last node it showed rather than blanking it.
-  if st.panel then
-    vim.api.nvim_create_autocmd("CursorMoved", {
-      buffer = st.handle.buf,
-      desc = "TypeScope: the ledger's panel follows the cursor",
-      callback = function()
-        if not st.result or st.show_help or st.show_doc or not vim.api.nvim_win_is_valid(st.handle.win) then
-          return
-        end
-        local id = st.result.line_to_node[vim.api.nvim_win_get_cursor(st.handle.win)[1]]
-        if id and id ~= st.panel_id then
-          st.panel_id = id
-          refresh(nil, true)
-          follow_examples()
-        end
-      end,
-    })
-  end
+  -- the panel follows the cursor. The rows never change with it, so a move
+  -- repaints only the panel (float.update skips unchanged lines). A line
+  -- that maps to no node — the header — leaves the panel on the last node it
+  -- showed rather than blanking it.
+  vim.api.nvim_create_autocmd("CursorMoved", {
+    buffer = st.handle.buf,
+    desc = "TypeScope: the panel follows the cursor",
+    callback = function()
+      if not st.result or st.show_help or st.show_doc or not vim.api.nvim_win_is_valid(st.handle.win) then
+        return
+      end
+      local id = st.result.line_to_node[vim.api.nvim_win_get_cursor(st.handle.win)[1]]
+      if id and id ~= st.panel_id then
+        st.panel_id = id
+        refresh(nil, true)
+        follow_examples()
+      end
+    end,
+  })
 
   st.result = render.render(st.roots, st.opts)
-  if st.panel then
-    -- the panel opens on the cursor's row (the active param, or the first)
-    local lnum = vim.api.nvim_win_get_cursor(st.handle.win)[1]
-    st.panel_id = st.result.line_to_node[lnum]
-    for i = 1, #st.result.lines do
-      if st.panel_id then
-        break
-      end
-      st.panel_id = st.result.line_to_node[i]
+  -- the panel opens on the cursor's row (the active param, or the first)
+  local lnum = vim.api.nvim_win_get_cursor(st.handle.win)[1]
+  st.panel_id = st.result.line_to_node[lnum]
+  for i = 1, #st.result.lines do
+    if st.panel_id then
+      break
     end
-    refresh()
-    follow_examples()
+    st.panel_id = st.result.line_to_node[i]
   end
+  refresh()
+  follow_examples()
 
-  return { opts = st.opts, refresh = refresh, generate = generate }
+  return { opts = st.opts, refresh = refresh }
 end
 
 return M

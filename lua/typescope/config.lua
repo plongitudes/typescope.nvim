@@ -14,13 +14,11 @@
 
 ---@class typescope.UiConfig
 ---@field style "unicode"|"ascii"|"minimal"|"rounded"
----@field layout "ledger"|"tree" one-line rows over a docked detail panel (default) vs flowing segments
 ---@field animations boolean
----@field align "left"|"right" name column alignment (tree layout)
 ---@field max_width number >1: absolute columns; <=1: fraction of editor width
 ---@field max_height integer
 ---@field border string|string[] any nvim float border value
----@field docstring "bottom"|"top"|false tree: docstring section placement; ledger: any value but false puts its first sentence in the footer
+---@field docstring boolean the footer carries the docstring's first sentence and d shows the whole of it
 ---@field hint boolean virtual-text "▸ typescope" marker on resolved call lines
 ---@field focus boolean explicit opens enter the float; false = momentary hover convention (second K focuses)
 
@@ -73,7 +71,8 @@ local defaults = {
   depth = 2,
   show_examples = true,
   -- "heuristic": pattern-table examples, e asks the model on demand
-  -- "llm": auto-generate via ollama on open (heuristics show until they land)
+  -- "llm": generate via ollama as the cursor reaches each row (heuristics
+  -- show until they land)
   -- "none": no examples at all
   example_mode = "heuristic",
   ollama = {
@@ -112,20 +111,13 @@ local defaults = {
   },
   ui = {
     style = "rounded", -- "unicode" | "ascii" | "minimal" | "rounded"
-    -- "ledger" (U6, the default): one line per param (name + type + short
-    -- default) over a docked panel with the cursor row's details (whole
-    -- type, ≈ evaluation, full default, example, origin).
-    -- "tree": flowing segments, type/default/example trailing the name.
-    -- ("table", the column grid, was removed in 0.2.0.)
-    layout = "ledger",
     animations = true,
-    align = "left", -- "left" | "right" name column alignment
     max_width = 0.5, -- fraction of editor width; values > 1 are absolute columns
     max_height = 20,
     border = "rounded",
-    -- tree: where the docstring section sits. ledger: the footer carries
-    -- its first sentence and d swaps it in for the rows; false turns both off
-    docstring = "bottom", -- "bottom" | "top" | false
+    -- the footer carries the docstring's first sentence and d swaps the
+    -- whole of it in for the rows; false turns both off
+    docstring = true,
     hint = true,
     -- true: an explicit open (K / :TypeScope) enters the float — cursor
     -- inside, tree keys live immediately. false: momentary hover convention —
@@ -215,14 +207,7 @@ local function validate(cfg)
 
   check("ui", cfg.ui, "table")
   check("ui.style", cfg.ui.style, { "unicode", "ascii", "minimal", "rounded" })
-  if cfg.ui.layout == "table" then
-    -- removed in 0.2.0 after a release of deprecation: say so plainly
-    -- rather than failing the enum check with a list
-    error('typescope.setup: `ui.layout = "table"` was removed in 0.2.0; use "ledger" (the default) or "tree"', 0)
-  end
-  check("ui.layout", cfg.ui.layout, { "tree", "ledger" })
   check("ui.animations", cfg.ui.animations, "boolean")
-  check("ui.align", cfg.ui.align, { "left", "right" })
   if type(cfg.ui.max_width) ~= "number" or cfg.ui.max_width <= 0 then
     error("typescope.setup: `ui.max_width` must be a positive number (<=1 = fraction of editor width)", 0)
   end
@@ -230,9 +215,7 @@ local function validate(cfg)
   if type(cfg.ui.border) ~= "string" and type(cfg.ui.border) ~= "table" then
     error("typescope.setup: `ui.border` must be a string or table (any nvim float border value)", 0)
   end
-  if cfg.ui.docstring ~= false then
-    check("ui.docstring", cfg.ui.docstring, { "bottom", "top" })
-  end
+  check("ui.docstring", cfg.ui.docstring, "boolean")
   check("ui.hint", cfg.ui.hint, "boolean")
   check("ui.focus", cfg.ui.focus, "boolean")
 
@@ -276,7 +259,27 @@ function M.setup(opts)
       )
     end
   end
+  -- removed in 0.4.0: the ledger is the only layout. A setup naming it is
+  -- already what it gets, so only a different layout is worth a word.
+  if opts and type(opts.ui) == "table" then
+    if opts.ui.layout ~= nil and opts.ui.layout ~= "ledger" then
+      vim.notify(
+        ("typescope: ui.layout = %q was removed in 0.4.0; the ledger is the only layout"):format(
+          tostring(opts.ui.layout)
+        ),
+        vim.log.levels.WARN
+      )
+    end
+    if opts.ui.align ~= nil then
+      vim.notify("typescope: ui.align was removed in 0.4.0 along with the tree layout", vim.log.levels.WARN)
+    end
+  end
   local merged = vim.tbl_deep_extend("force", vim.deepcopy(defaults), opts or {})
+  merged.ui.layout, merged.ui.align = nil, nil
+  -- "top" and "bottom" placed the tree's docstring section; both meant on
+  if merged.ui.docstring == "top" or merged.ui.docstring == "bottom" then
+    merged.ui.docstring = true
+  end
   validate(merged)
   options = merged
   return options

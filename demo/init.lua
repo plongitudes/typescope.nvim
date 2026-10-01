@@ -9,7 +9,7 @@
 local demo = vim.fs.dirname(debug.getinfo(1, "S").source:sub(2))
 local repo = vim.fs.dirname(demo)
 local data = vim.fn.stdpath("data")
--- demo/shots.tape sets these: stills for the README, one style/layout each
+-- demo/shots.tape sets these: stills for the README, one style each
 local shot = vim.env.TYPESCOPE_SHOT ~= nil
 
 vim.opt.rtp:prepend(repo)
@@ -105,7 +105,6 @@ require("typescope").setup({
   ui = {
     max_width = shot and 0.9 or 0.7,
     style = vim.env.TYPESCOPE_STYLE,
-    layout = vim.env.TYPESCOPE_LAYOUT,
   },
 })
 

@@ -251,30 +251,23 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
   local render_opts = {
     style = styles.get(cfg.ui.style),
     max_width = max_width,
-    layout = cfg.ui.layout,
-    align = cfg.ui.align,
     show_examples = cfg.show_examples and cfg.example_mode ~= "none",
     example_kind = cfg.example_mode == "llm" and "llm" or "heuristic",
     lang = vim.bo[srcbuf].filetype,
-    -- unified float (U1): call-shape header + docstring section, absorbing
-    -- the retired anchor float's content
+    -- unified float (U1): call-shape header + docstring view, absorbing the
+    -- retired anchor float's content
     header = header,
     header_active = active_name,
     docstring = meta and meta.docstring or nil,
-    docstring_expanded = false,
-    docstring_pos = cfg.ui.docstring,
   }
   local result = render.render(roots, render_opts)
   local width = math.min(max_width, math.max(result.width, 30))
   local height = math.min(cfg.ui.max_height, #result.lines)
 
-  -- ledger: the rows and a docked panel under them, hung from the cursor's
-  -- screen position (float.lua places both windows itself)
-  local panel = nil
-  if cfg.ui.layout == "ledger" then
-    local pos = vim.fn.screenpos(0, srccursor[1], srccursor[2] + 1)
-    panel = { row = math.max(0, pos.row - 1), col = math.max(0, pos.col - 1), max_height = cfg.ui.max_height }
-  end
+  -- the rows and a docked panel under them, hung from the cursor's screen
+  -- position (float.lua places both windows itself)
+  local pos = vim.fn.screenpos(0, srccursor[1], srccursor[2] + 1)
+  local panel = { row = math.max(0, pos.row - 1), col = math.max(0, pos.col - 1), max_height = cfg.ui.max_height }
   local handle = float.open({
     lines = result.lines,
     highlights = result.highlights,
@@ -294,11 +287,11 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
 
   -- land on the active param's primary row: with ui.focus the tree keys are
   -- live immediately, so the cursor should start where the user is typing.
-  -- The ledger's panel shows the cursor's row, so with no active param it
+  -- The panel shows the cursor's row, so with no active param it
   -- starts on the first one rather than the header.
   for lnum = 1, #result.lines do
     local id = result.line_to_node[lnum]
-    if id and (id == active_id or (not active_id and panel)) then
+    if id and (id == active_id or not active_id) then
       vim.api.nvim_win_set_cursor(handle.win, { lnum, 0 })
       break
     end
@@ -316,11 +309,6 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
         require("typescope.resolve").recurse(session.client, node, session.token, done)
       end
     end,
-    on_llm = function(tree_roots, done, on_progress)
-      if session then
-        require("typescope.examples").llm(tree_roots, session.token, done, on_progress)
-      end
-    end,
     -- not through `session`: the ledger's first ask runs inside attach(),
     -- before `session` exists, and a dropped call never calls `done` —
     -- which left interact waiting on a batch that was never sent, and every
@@ -328,8 +316,8 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
     on_llm_nodes = function(nodes, done)
       require("typescope.examples").llm_nodes(nodes, token, done)
     end,
-    -- ledger: the panel's sibling group, generated as the cursor gets there
-    auto_examples = panel ~= nil and cfg.ollama.enabled and cfg.example_mode == "llm",
+    -- the panel's sibling group, generated as the cursor gets there
+    auto_examples = cfg.ollama.enabled and cfg.example_mode == "llm",
     on_llm_error = function(err)
       if not llm_auto_warned then
         llm_auto_warned = true
@@ -367,22 +355,6 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
   -- pre-load the model in the background so the first e press is warm
   if cfg.ollama.enabled then
     require("typescope.examples.ollama").warmup(cfg.ollama)
-  end
-
-  -- example_mode = "llm": generate automatically on open. The float is fully
-  -- usable meanwhile (heuristics show immediately); LLM values swap in when
-  -- the background request lands. e asks about a row on demand.
-  -- The ledger generates a sibling group at a time as the cursor moves
-  -- (interact's auto_examples) instead.
-  if cfg.ollama.enabled and cfg.example_mode == "llm" and not panel then
-    -- the single-flight whole-tree generation (spinner, progress,
-    -- refresh); only the error policy differs: warn once per nvim session
-    ctrl.generate(function(err)
-      if not llm_auto_warned then
-        llm_auto_warned = true
-        vim.notify("typescope: auto LLM examples unavailable — " .. err, vim.log.levels.WARN)
-      end
-    end)
   end
 
   -- the float follows the builtin hover contract: any movement or edit in the
@@ -528,11 +500,8 @@ end
 --- :TypeScope <sub> entry point. Kept in one place so plugin/typescope.lua
 --- stays a thin shim that never requires anything at startup.
 ---@param sub string
----@param args string[]
-function M.dispatch(sub, args)
-  if sub == "spike" then
-    require("typescope.spike").run(args)
-  elseif sub == "open" then
+function M.dispatch(sub)
+  if sub == "open" then
     M.open()
   elseif sub == "hover" then
     M.hover()
