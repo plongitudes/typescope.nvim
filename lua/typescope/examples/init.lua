@@ -166,33 +166,7 @@ function M.annotate(roots)
   end)
 end
 
---- Eligible leaves that are actually VISIBLE (reachable through expanded
---- ancestors). E means "examples for what I'm looking at" — prompting for
---- the interior of a collapsed SQLAlchemy struct wastes a slow model's time
---- on values nobody can see. Expanding more and pressing E again covers the
---- newly visible leaves; the cache keeps repeat presses cheap.
----@param roots typescope.Node[]
----@return typescope.Node[]
-local function visible_leaves(roots)
-  local leaves = {}
-  local function visit(node)
-    if #node.children == 0 then
-      if eligible(node) then
-        table.insert(leaves, node)
-      end
-    elseif node.state.expanded then
-      for _, child in ipairs(node.children) do
-        visit(child)
-      end
-    end
-  end
-  for _, root in ipairs(roots) do
-    visit(root)
-  end
-  return leaves
-end
-
---- The ledger's unit of generation: the leaves beside `node` that still need
+--- The unit of generation: the leaves beside `node` that still need
 --- asking, nearest first and `node` itself ahead of them, at most one batch.
 --- The panel shows one node at a time, so generating the whole visible tree
 --- asks a slow model about rows nobody may ever look at; the neighbours are
@@ -236,25 +210,17 @@ function M.group_for(roots, node, force)
   return group
 end
 
---- Generate LLM examples for the VISIBLE eligible leaves, in batches, filling
---- progressively: on_progress fires after each batch lands (callers
---- re-render), done fires at the end — done(true) if anything was filled
---- (cache included), done(false, err) on total failure. Staleness is the
---- callers' concern: they guard UI updates, while we always parse and cache —
---- batches that complete after the float closed still pay for the next open.
----@param roots typescope.Node[]
----@param token typescope.CancelToken
----@param done fun(ok: boolean, err: string?)
----@param on_progress? fun(batches_done: integer, batches_total: integer) a batch of values just landed
-function M.llm(roots, token, done, on_progress)
-  return M.llm_nodes(visible_leaves(roots), token, done, on_progress)
-end
-
---- M.llm for an explicit list of leaves (the ledger's sibling group).
+--- Generate LLM examples for `leaves` (a sibling group, from group_for), in
+--- batches, filling progressively: on_progress fires after each batch lands
+--- (callers re-render), done fires at the end — done(true) if anything was
+--- filled (cache included), done(false, err) on total failure. Staleness is
+--- the callers' concern: they guard UI updates, while we always parse and
+--- cache — batches that complete after the float closed still pay for the
+--- next open.
 ---@param leaves typescope.Node[]
 ---@param token typescope.CancelToken
 ---@param done fun(ok: boolean, err: string?)
----@param on_progress? fun(batches_done: integer, batches_total: integer)
+---@param on_progress? fun(batches_done: integer, batches_total: integer) a batch of values just landed
 function M.llm_nodes(leaves, token, done, on_progress)
   local _ = token
   local cfg = require("typescope.config").get()

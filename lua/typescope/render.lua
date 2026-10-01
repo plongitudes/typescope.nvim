@@ -25,9 +25,7 @@
 ---@field style typescope.Charset
 ---@field max_width integer resolved columns (callers use config.resolved_max_width)
 ---@field window_width? integer inner width the float ALREADY has; content is laid out to at least it (rules stretch to it, pending bars reach it)
----@field layout? "tree"|"ledger" flowing segments vs one-line rows whose details live in the docked panel (default)
----@field align? "left"|"right" name column alignment (default left, tree layout)
----@field view? "panel"|"doc" ledger's other two surfaces: the docked panel for `panel_node`, or the full docstring alone
+---@field view? "panel"|"doc" the float's other two surfaces: the docked panel for `panel_node`, or the full docstring alone
 ---@field panel_node? typescope.Node view = "panel": the node whose details the panel shows
 ---@field show_examples boolean
 ---@field example_kind "heuristic"|"llm"
@@ -37,9 +35,7 @@
 ---@field lang? string treesitter language for injected snippet highlighting
 ---@field header? string one-line call shape shown above the tree
 ---@field header_active? string param name lit as active in the header (matches insert's signature block)
----@field docstring? string full docstring text (render decides how much shows)
----@field docstring_expanded? boolean full text vs first paragraph
----@field docstring_pos? "top"|"bottom"|false where the docstring section sits
+---@field docstring? string full docstring text, shown by view = "doc"
 
 local M = {}
 
@@ -626,11 +622,6 @@ local function example_segments(node, opts, fill)
   return { { value, "TypeScopeExample", "overlay" } }
 end
 
---- Render a forest of nodes into lines + highlights. Pure: no window or
---- buffer API calls, so the spike and tests exercise production rendering.
----@param roots typescope.Node[]
----@param opts typescope.RenderOpts
----@return typescope.RenderResult
 --- The highlight group a row's NAME takes from its kind (design/oracle.md §4
 --- kinds): a property and an enum member are data rows with their own
 --- vocabulary; a `methods (n)` group is chrome-coloured so it reads as a
@@ -669,6 +660,11 @@ local function type_injectable(node)
   return k ~= "method" and k ~= "type" and k ~= "overload" and k ~= "group"
 end
 
+--- Render a forest of nodes into lines + highlights. Pure: no window or
+--- buffer API calls, so tests exercise production rendering.
+---@param roots typescope.Node[]
+---@param opts typescope.RenderOpts
+---@return typescope.RenderResult
 function M.render(roots, opts)
   local style = opts.style
   local result = { lines = {}, highlights = {}, ts_injections = {}, line_to_node = {}, width = 0 }
@@ -801,101 +797,7 @@ function M.render(roots, opts)
     emit(line, node_id)
   end
 
-  ---@param node typescope.Node
-  ---@param bars string accumulated ancestor chrome for this node's children
-  ---@param branch string chrome immediately before this node's name
-  local function render_node(node, bars, branch, depth)
-    local line = new_line()
-    -- every row carries a marker glyph — expandable (▾/▸) or leaf (·) — so
-    -- names inside a sibling group align regardless of expandability
-    -- (Tony's call, 2026-07-29)
-    local marker = is_expandable(node) and (node.state.expanded and style.expanded or style.collapsed) or style.leaf
-    if depth > 0 then
-      line:add(branch, "TypeScopeChrome")
-    end
-
-    -- marker + name form one unit, aligned within the sibling group's column:
-    -- left mode pads after the name, right mode pads before the marker
-    local unit_width = strwidth(node.name) + strwidth(marker)
-    local pad = math.max(0, (node._unit_col or unit_width) - unit_width)
-    if opts.align == "right" then
-      line:add(string.rep(" ", pad))
-    end
-    line:add(marker, "TypeScopeChrome")
-    local name_group = name_group_of(node)
-    line:add(node.name, name_group)
-    if opts.align ~= "right" then
-      line:add(string.rep(" ", pad))
-    end
-    line:add("  ")
-
-    local cont_prefix = depth == 0 and "" or bars
-    local cont_pad = line.width - strwidth(cont_prefix)
-
-    local segments = {}
-    local type_text = node.type.display or node.type.raw or "?"
-    -- method "signatures" like (path: str) -> bytes, class-root category
-    -- labels like (pydantic), and overload shapes with elision marks aren't
-    -- parseable expressions, so they keep block coloring
-    local injectable = type_injectable(node) and "replace" or nil
-    -- an unannotated param's declared type is only implicit Any; when we have
-    -- pyright's inferred type, show just that instead of "Any ≈ T"
-    if not (node.evaluated and type_text == "Any") then
-      table.insert(segments, { type_text, "TypeScopeType", injectable })
-    end
-    -- an evaluation acquired BY expanding folds with its node (h hides it
-    -- again); pipeline-acquired evaluations are always visible
-    if node.evaluated and not (node.evaluated_on_expand and not node.state.expanded) then
-      table.insert(segments, { (type_text == "Any" and "" or " ") .. style.evaluated, "TypeScopeEvaluated" })
-      table.insert(segments, { node.evaluated, "TypeScopeEvaluated" })
-    end
-    if node.type.category == "unresolved" then
-      table.insert(segments, { " " .. style.unresolved, "TypeScopeUnresolved", nil, true })
-    end
-    if node.badge then
-      table.insert(segments, { " " .. node.badge, "TypeScopeBadge", nil, true })
-    end
-    if node.origin then
-      table.insert(segments, { " " .. style.inherit .. node.origin, "TypeScopeHint", nil, true })
-    end
-    if node.default then
-      table.insert(segments, { " = ", "TypeScopeChrome" })
-      table.insert(segments, { node.default, "TypeScopeDefault", "replace" })
-    end
-    local example_segs = example_segments(node, opts, true)
-    if #example_segs > 0 then
-      table.insert(segments, { "  ", nil })
-      -- overlay: examples are hypothetical values, they keep their dim
-      -- TypeScopeExample styling underneath the syntax colors
-      vim.list_extend(segments, example_segs)
-    end
-    if is_expandable(node) and not node.state.expanded and depth == 0 then
-      table.insert(segments, { "  (<CR> to expand)", "TypeScopeHint" })
-    end
-
-    flow(line, cont_prefix, cont_pad, segments, node.id)
-
-    if node.state.expanded then
-      local kids = node.children
-      local unit_col = 0
-      for _, child in ipairs(kids) do
-        -- all marker glyphs share one width, so units align uniformly
-        unit_col = math.max(unit_col, strwidth(child.name) + strwidth(style.expanded))
-      end
-      for i, child in ipairs(kids) do
-        local last = i == #kids
-        child._unit_col = unit_col
-        render_node(
-          child,
-          bars .. (last and string.rep(" ", strwidth(style.vert)) or style.vert),
-          bars .. (last and style.last or style.branch),
-          depth + 1
-        )
-      end
-    end
-  end
-
-  -- ── sections (unification U1): header / docstring around the tree ──────
+  -- ── sections: the header over the rows, and the docstring view ─────────
   local separators = {}
   local function emit_separator()
     table.insert(separators, #result.lines + 1)
@@ -924,9 +826,6 @@ function M.render(roots, opts)
   end
   local function emit_docstring()
     local text = opts.docstring or ""
-    if not opts.docstring_expanded and opts.view ~= "doc" then
-      text = text:match("^(.-)\n%s*\n") or text -- first paragraph
-    end
     result.doc_start = #result.lines + 1
     for _, doc_line in ipairs(vim.split(vim.trim(text), "\n")) do
       if doc_line == "" then
@@ -1032,13 +931,8 @@ function M.render(roots, opts)
     return result
   end
 
-  -- the ledger's docstring is a line in the float's footer and a view of its
-  -- own (opts.view = "doc"), never a section under the rows
-  local has_doc = opts.docstring ~= nil
-    and opts.docstring ~= ""
-    and opts.docstring_pos ~= nil
-    and opts.docstring_pos ~= false
-    and opts.layout ~= "ledger"
+  -- the docstring is a line in the float's footer and a view of its own
+  -- (opts.view = "doc"), never a section under the rows
   if opts.header then
     -- the header is a one-liner by contract: a 48-param call shape must not
     -- eat the float, so the param list elides at width with the return type
@@ -1104,28 +998,17 @@ function M.render(roots, opts)
     end
     emit(hline, nil)
   end
-  if has_doc and opts.docstring_pos == "top" then
-    emit_docstring()
-  end
-  if opts.header or (has_doc and opts.docstring_pos == "top") then
+  if opts.header then
     emit_separator()
   end
 
-  -- no spacer lines between top-level entries: the expander markers carry
-  -- the visual grouping (Tony's call, 2026-07-26 — revisit if it feels dense)
-  --
-  -- roots share a name column so annotations align. Left mode caps
-  -- participation at 16 cells — one ws_per_message_deflate must not drag
-  -- every annotation to column 30 and force wraps; outliers sit ragged.
-  -- Right mode is uncapped: padding lands before the name, so long names
-  -- cost nothing extra (Tony's full-width request).
-  -- ── ledger layout (U6): one line per node, details in the docked panel ──
+  -- ── the ledger (U6): one line per node, details in the docked panel ─────
   -- Rows carry identity + discriminators only (name, pass mode, type, short
   -- default); everything read one-at-a-time (full type, ≈ evaluation,
   -- example, origin, long defaults) lives in the panel (opts.view = "panel").
   -- Rows NEVER wrap — the single-line invariant is what keeps the float
   -- narrow and scanning cheap.
-  local function render_ledger()
+  local function render_rows()
     local NAME_CAP = 24
     -- middle-ellipsis: identifiers discriminate at both ends
     -- (ws_per_message_deflate → ws_per_mess…ge_deflate)
@@ -1140,7 +1023,7 @@ function M.render(roots, opts)
       return name:sub(1, fit_prefix(name, front)) .. "…" .. name:sub(fit_suffix(name, keep - front))
     end
 
-    -- pass 1: visible rows, tree chrome carried like the other layouts
+    -- pass 1: visible rows, with their tree chrome
     local rows = {}
     local function collect(node, bars, branch, depth)
       table.insert(rows, { node = node, bars = bars, branch = branch, depth = depth })
@@ -1248,29 +1131,7 @@ function M.render(roots, opts)
     end
   end
 
-  if opts.layout == "ledger" then
-    render_ledger()
-  else
-    local cap = opts.align == "right" and math.huge or 16
-    local marker_w = strwidth(style.expanded)
-    local root_col = 0
-    for _, root in ipairs(roots) do
-      local w = strwidth(root.name)
-      if w <= cap then
-        root_col = math.max(root_col, w + marker_w)
-      end
-    end
-    for _, root in ipairs(roots) do
-      local w = strwidth(root.name)
-      root._unit_col = w <= cap and root_col or (w + marker_w)
-      render_node(root, string.rep(" ", marker_w), "", 0)
-    end
-  end
-
-  if has_doc and opts.docstring_pos == "bottom" then
-    emit_separator()
-    emit_docstring()
-  end
+  render_rows()
 
   -- Separators stretch to the final content width, known only now — but never
   -- back in from a width they have already reached. The window is monotonic
@@ -1602,9 +1463,6 @@ end
 -- from the remainder. Five call sites route through it and the asymmetry in
 -- that contract is where both UTF-8 truncation defects came from, so it is
 -- worth asserting on its own rather than only through a rendered tree.
---
--- (It previously also claimed to be here for the spike to hot-swap
--- experiments. Nothing ever did, and nothing does now.)
 M._find_break_point = find_break_point
 
 return M

@@ -220,7 +220,7 @@ do
     return "a = 42"
   end
   local f1 = forest()
-  examples.llm(f1, token, function() end)
+  examples.llm_nodes(f1, token, function() end)
   check(
     "miss run: one request, a filled, b empty",
     #calls == 1 and f1[1].example.llm == "42" and f1[2].example.llm == nil
@@ -230,7 +230,7 @@ do
   -- b's sentinel stands
   local f2 = forest()
   local done_ok
-  examples.llm(f2, token, function(ok)
+  examples.llm_nodes(f2, token, function(ok)
     done_ok = ok
   end)
   check(
@@ -261,9 +261,9 @@ do
   examples._clear_llm_cache()
   respond = nil -- defer: the batch stays in flight
   local f4 = forest()
-  examples.llm(f4, token, function() end)
+  examples.llm_nodes(f4, token, function() end)
   local f5 = forest()
-  examples.llm(f5, token, function() end)
+  examples.llm_nodes(f5, token, function() end)
   check("in-flight batch not duplicated by reopen", #calls == 4 and deferred ~= nil)
   -- 40u: the float open at landing time hears about the late batch through
   -- the landed subscription, and apply_cache copies the values onto its
@@ -284,7 +284,7 @@ do
   respond = function()
     return ""
   end
-  examples.llm(f6, token, function() end)
+  examples.llm_nodes(f6, token, function() end)
   check(
     "late batch cached for the next open",
     #calls == 4 and f6[1].example.llm == "7" and f6[2].example.llm == '"late"'
@@ -308,13 +308,13 @@ do
   end
   local w1 = wide()
   local before = #calls
-  examples.llm(w1, token, function() end)
+  examples.llm_nodes(w1, token, function() end)
   check("wide run dispatches one batch of 8", #calls == before + 1 and #calls[#calls] == 8)
   check("dispatched leaf is awaiting", examples.awaiting(w1[1]))
   check("queued-but-undispatched leaf is awaiting too", examples.awaiting(w1[10]))
   check("any_awaiting true while values are coming", examples.any_awaiting())
 
-  examples.llm(wide(), token, function() end)
+  examples.llm_nodes(wide(), token, function() end)
   check("reopen mid-run re-asks nothing, queue tail included", #calls == before + 1)
 
   local batch1 = deferred
@@ -330,7 +330,7 @@ do
   respond = function()
     return ""
   end
-  examples.llm(wide(), token, function() end)
+  examples.llm_nodes(wide(), token, function() end)
   check("transport failure leaves no sentinel — the tail is re-asked", #calls == before + 3)
 
   -- a batch that fills NOTHING still has to reach the float: its leaves
@@ -347,7 +347,7 @@ do
   end
   local m1 = forest()
   local miss_ok, miss_err
-  examples.llm(m1, token, function(ok, err)
+  examples.llm_nodes(m1, token, function(ok, err)
     miss_ok, miss_err = ok, err
   end)
   check("an all-miss batch still notifies the subscriber", empty_landings == 1)

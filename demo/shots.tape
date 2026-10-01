@@ -42,7 +42,7 @@ Hide
 Type "qZQ"
 Sleep 300ms
 
-# Layouts: ledger, cursor on host
+# The ledger, cursor on host
 Hide
 Type "nvim shots.py"
 Enter
@@ -56,23 +56,6 @@ Sleep 500ms
 Show
 Sleep 100ms
 Screenshot demo/shots/ledger.png
-Sleep 500ms
-Hide
-Type "qZQ"
-Sleep 300ms
-
-# Layouts: tree
-Hide
-Type "TYPESCOPE_LAYOUT=tree nvim shots.py"
-Enter
-# the oracle and basedpyright index
-Sleep 4s
-# the call at the top of the window, so the float opens below it
-Type "Gzt0K"
-Sleep 1500ms
-Show
-Sleep 100ms
-Screenshot demo/shots/tree.png
 Sleep 500ms
 Hide
 Type "qZQ"

@@ -14,13 +14,7 @@ if vim.fn.executable(oracle_bin) ~= 1 then
   return
 end
 
--- Most of this suite asserts on INLINE content — an example beside its leaf,
--- an origin tag on an inherited field — which is the tree layout's shape. The
--- default is "ledger", where those live in the cursor-follow detail block and
--- only one row's is on screen at a time, so these sections pin tree
--- explicitly. They are testing the resolve/render pipeline, not the layout.
--- Ledger has its own section further down, which sets it back.
-require("typescope").setup({ ui = { layout = "tree" } })
+require("typescope").setup({})
 
 local failures = 0
 local function check(desc, cond)
@@ -37,6 +31,52 @@ local function float_lines()
       return vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(w), 0, -1, false), w
     end
   end
+end
+
+-- The rows carry one line per node; an example, an origin tag and a ≈
+-- evaluation are the docked panel's, which shows the cursor's row.
+local function panel()
+  for _, w in ipairs(vim.api.nvim_list_wins()) do
+    if vim.bo[vim.api.nvim_win_get_buf(w)].filetype == "typescope_panel" then
+      return vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(w), 0, -1, false), w
+    end
+  end
+end
+local function panel_text()
+  local lines, w = panel()
+  if not lines or vim.api.nvim_win_get_config(w).hide then
+    return ""
+  end
+  return table.concat(lines, "\n")
+end
+
+--- Focus the float, put the cursor on the first row matching `pattern`, and
+--- return what the panel shows for it.
+local function panel_of(pattern)
+  local lines, w = float_lines()
+  if not lines then
+    return ""
+  end
+  vim.api.nvim_set_current_win(w)
+  for i, l in ipairs(lines) do
+    if l:find(pattern) then
+      vim.api.nvim_win_set_cursor(w, { i, 0 })
+      vim.cmd("doautocmd CursorMoved")
+      break
+    end
+  end
+  return panel_text()
+end
+
+-- the frame's bottom edge: the docstring's first sentence lives there
+local function footer_text()
+  local _, w = panel()
+  local footer = w and vim.api.nvim_win_get_config(w).footer
+  local text = ""
+  for _, chunk in ipairs(type(footer) == "table" and footer or {}) do
+    text = text .. chunk[1]
+  end
+  return text
 end
 
 -- open the fixture: setup() attaches the oracle on FileType; the basedpyright
@@ -80,15 +120,10 @@ if lines then
   check("union annotation intact", all:find("int | None", 1, true) ~= nil)
   check("param timeout with default", all:find("timeout") and all:find("30%.0"))
   check("returns Response present, collapsed", all:find("returns") and not all:find("status"))
-  check("heuristic examples rendered (host -> localhost)", all:find("localhost") ~= nil)
-  check("inherited field with origin tag", all:find("env") ~= nil and all:find("↑BaseConfig", 1, true) ~= nil)
+  check("heuristic examples rendered (host -> localhost)", panel_of("·%s+host%s"):find("localhost") ~= nil)
+  check("inherited field with origin tag", panel_of("·%s+env%s"):find("↑BaseConfig", 1, true) ~= nil)
   local _, override_count = all:gsub("verbose", "")
-  local verbose_badged = false
-  for _, l in ipairs(lines) do
-    if l:find("verbose") and l:find("↑", 1, true) then
-      verbose_badged = true
-    end
-  end
+  local verbose_badged = panel_of("·%s+verbose%s"):find("↑", 1, true) ~= nil
   check("child override wins (verbose appears once, unbadged)", override_count == 1 and not verbose_badged)
 
   -- expand retry (depth 2 resolved its fields inline)
@@ -245,23 +280,17 @@ if lines_l24 then
   -- the sink: str overload over sink: TextIO
   check("client pick expands the str overload [2/2]", lines_l24[1]:find("%[2/2%]") ~= nil)
   check("stub annotations replace Any", all_l24:find("sink") ~= nil and not all_l24:find("Any"))
-  check("runtime docstring rides the hop", all_l24:find("Register a sink") ~= nil)
+  check("runtime docstring rides the hop", footer_text():find("Register a sink") ~= nil)
 
   -- d on an overload group's param (loguru's log.add case, 082): the group
   -- root is the callable, not a param, so the jump must resolve one level
   -- down — and land on sink's DEFINITION, not its prose mention in the
   -- first paragraph ("Register a sink for…")
-  local ov_win = (function()
-    for _, w in ipairs(vim.api.nvim_list_wins()) do
-      if vim.api.nvim_win_get_config(w).relative ~= "" then
-        return w
-      end
-    end
-  end)()
+  local _, ov_win = float_lines()
   vim.api.nvim_set_current_win(ov_win)
   local ov_buf = vim.api.nvim_win_get_buf(ov_win)
   for i, l in ipairs(vim.api.nvim_buf_get_lines(ov_buf, 0, -1, false)) do
-    if l:find("· sink ", 1, true) then
+    if l:find("·%s+sink%s") then
       vim.api.nvim_win_set_cursor(ov_win, { i, 0 })
       break
     end
@@ -293,7 +322,8 @@ if lines_h8h then
 end
 require("typescope").close()
 
--- unified float (U1): single window with header + tree + docstring sections
+-- unified float (U1): one window with the header over the rows, the panel
+-- docked under it, and the docstring in its own view
 local function all_floats()
   local out = {}
   for _, w in ipairs(vim.api.nvim_list_wins()) do
@@ -313,7 +343,13 @@ require("typescope").open()
 vim.wait(2000, function()
   return float_lines() ~= nil
 end)
-check("exactly one float (anchor retired)", #all_floats() == 1)
+local panels = 0
+for _, w in ipairs(all_floats()) do
+  if vim.bo[vim.api.nvim_win_get_buf(w)].filetype == "typescope_panel" then
+    panels = panels + 1
+  end
+end
+check("exactly one float and its panel (anchor retired)", #all_floats() == 2 and panels == 1)
 local ulines, ts_win = float_lines()
 if ulines then
   local all_u = table.concat(ulines, "\n")
@@ -322,20 +358,11 @@ if ulines then
     ulines[1]:find("create_server(config", 1, true) ~= nil and ulines[1]:find("-> Response", 1, true) ~= nil
   )
   check("separator rule present", all_u:find("────", 1, true) ~= nil)
-  check("docstring first paragraph at bottom", ulines[#ulines]:find("Spin up the demo service") ~= nil)
-  check("docstring second paragraph hidden when collapsed", not all_u:find("considerable length"))
-
-  -- d expands the docstring, d again collapses
-  vim.api.nvim_set_current_win(ts_win)
-  vim.api.nvim_feedkeys("d", "x", false)
-  local expanded = table.concat(float_lines(), "\n")
-  check("d expands full docstring", expanded:find("considerable length") ~= nil)
-  vim.api.nvim_feedkeys("d", "x", false)
-  check("d collapses again", not table.concat(float_lines(), "\n"):find("considerable length"))
 
   -- d from a param row jumps to that param's definition in the docstring,
-  -- movement inside the section is plain (k = one line, no ledger bounce),
-  -- and a second d folds the section and returns to the row it left
+  -- movement inside it is plain (k = one line, no bounce back to the rows),
+  -- and a second d returns to the row it left
+  vim.api.nvim_set_current_win(ts_win)
   local ts_buf2 = vim.api.nvim_win_get_buf(ts_win)
   local function cursor_text()
     local l = vim.api.nvim_win_get_cursor(ts_win)[1]
@@ -344,7 +371,7 @@ if ulines then
   for i, l in ipairs(vim.api.nvim_buf_get_lines(ts_buf2, 0, -1, false)) do
     -- the exact row ("· timeout  float"): plain "timeout" also hits the
     -- header and config's timeout_ms child
-    if l:find("· timeout ", 1, true) then
+    if l:find("·%s+timeout%s") then
       vim.api.nvim_win_set_cursor(ts_win, { i, 0 })
       break
     end
@@ -354,11 +381,11 @@ if ulines then
   check("d jumps to the hovered param's docstring definition", dtext:find("timeout : float", 1, true) ~= nil)
   vim.api.nvim_feedkeys("k", "x", false)
   local kl = vim.api.nvim_win_get_cursor(ts_win)[1]
-  check("k inside the docstring moves exactly one line", kl == dl - 1)
+  check("k inside the doc view moves exactly one line", kl == dl - 1)
   vim.api.nvim_feedkeys("d", "x", false)
   local _, back = cursor_text()
   check("d returns to the param row it left", back:find("timeout", 1, true) ~= nil)
-  check("return trip folds the docstring", not table.concat(float_lines(), "\n"):find("Seconds to wait"))
+  check("the return trip leaves the docstring", not table.concat(float_lines(), "\n"):find("Seconds to wait"))
 
   -- active param (mock always reports 0 → config) renders TypeScopeActive
   local ts_buf = vim.api.nvim_win_get_buf(ts_win)
@@ -677,21 +704,6 @@ end
 -- K ledger layout (U6): one-line rows — name | type | short default — with a
 -- docked panel under them that follows the cursor once the float is focused
 do
-  require("typescope").setup({ ui = { layout = "ledger" } })
-  local function panel()
-    for _, w in ipairs(vim.api.nvim_list_wins()) do
-      if vim.bo[vim.api.nvim_win_get_buf(w)].filetype == "typescope_panel" then
-        return vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(w), 0, -1, false), w
-      end
-    end
-  end
-  local function panel_text()
-    local lines, w = panel()
-    if not lines or vim.api.nvim_win_get_config(w).hide then
-      return ""
-    end
-    return table.concat(lines, "\n")
-  end
   vim.api.nvim_win_set_cursor(0, { call_line, 12 })
   require("typescope").open()
   vim.wait(3000, function()
@@ -715,13 +727,7 @@ do
     check("the panel opens with the float", panel() ~= nil)
     check("...on the first row when no param is active", panel_text():find("^config") ~= nil)
     check("the ledger carries no docstring section", not all:find("Spin up"))
-    local _, pw = panel()
-    local footer = vim.api.nvim_win_get_config(pw).footer
-    local footer_text = ""
-    for _, chunk in ipairs(type(footer) == "table" and footer or {}) do
-      footer_text = footer_text .. chunk[1]
-    end
-    check("the footer carries the docstring's first sentence", footer_text:find("Spin up") ~= nil)
+    check("the footer carries the docstring's first sentence", footer_text():find("Spin up") ~= nil)
 
     -- focus, rest on the timeout row: the panel shows it, the rows stay put
     vim.api.nvim_set_current_win(lw)
@@ -765,7 +771,6 @@ do
     check("...with the panel back", panel_text():find("^timeout") ~= nil)
     require("typescope").close()
   end
-  require("typescope").setup({})
 end
 
 -- hover() takeover: function symbol → typescope; non-function → plain hover
@@ -826,7 +831,7 @@ require("typescope").setup({ ui = { focus = false } })
 fw = focus_open()
 check("ui.focus=false config: open() stays momentary", fw ~= nil and vim.api.nvim_get_current_win() == focus_srcwin)
 require("typescope").close()
-require("typescope").setup({ ui = { layout = "tree" } })
+require("typescope").setup({})
 
 -- hover-backed evaluated leaves: alias annotations decorate with the
 -- evaluated type; unannotated params show pyright's inference
@@ -844,10 +849,15 @@ check("evaluated-leaf float opened", lines6 ~= nil)
 if lines6 then
   local all6 = table.concat(lines6, "\n")
   check("alias leaf keeps declared name", all6:find("LoopMode") ~= nil)
-  check("alias leaf decorated with evaluated type", all6:find("≈", 1, true) ~= nil and all6:find("Literal") ~= nil)
+  local mode_panel = panel_of("·%s+mode%s")
+  check(
+    "alias leaf decorated with evaluated type",
+    mode_panel:find("≈", 1, true) ~= nil and mode_panel:find("Literal") ~= nil
+  )
+  -- the row shows the inference as the type itself; the panel has no ≈ to add
   local count_ok = false
   for _, l in ipairs(lines6) do
-    if l:find("count") and l:find("≈ int", 1, true) and not l:find("Any") then
+    if l:find("·%s+count%s") and l:find("int", 1, true) and not l:find("Any") then
       count_ok = true
     end
   end
@@ -894,7 +904,7 @@ if lines9 then
   check("overload header carries [1/2]", lines9[1]:find("%[1/2%]") ~= nil)
   check("both overload groups stacked", all9:find("%[1/2%]") ~= nil and all9:find("%[2/2%]") ~= nil)
   check("active overload expanded (key: int visible)", all9:find("int") ~= nil)
-  check("inactive overload collapsed (its default hidden)", not all9:find("auto"))
+  check("inactive overload collapsed (its params hidden)", not all9:find("·%s+default%s"))
   -- expanding the second group reveals its params
   vim.api.nvim_set_current_win(ov_win)
   for i, l in ipairs(float_lines()) do
@@ -904,7 +914,7 @@ if lines9 then
     end
   end
   vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "x", false)
-  check("second overload expands to its params", table.concat(float_lines(), "\n"):find("auto") ~= nil)
+  check("second overload expands to its params", table.concat(float_lines(), "\n"):find("·%s+default%s") ~= nil)
 
   -- lazy params INSIDE an overload group must actually resolve on expand
   -- (regression: a still-attached _lazy hook swallowed the whole recurse
@@ -927,10 +937,7 @@ if lines9 then
   -- resolution from the first paint: the oracle answers `resolved` inline,
   -- so there is no evaluation-only expansion to fold (that mechanic went
   -- with the treesitter resolver, design/oracle.md §7)
-  check(
-    "alias leaf shows its resolution ≈ from the first paint",
-    table.concat(float_lines(), "\n"):find("Literal") ~= nil
-  )
+  check("alias leaf shows its resolution ≈ from the first paint", panel_of("·%s+mode%s"):find("Literal") ~= nil)
 end
 require("typescope").close()
 
@@ -949,13 +956,14 @@ local lines7 = float_lines()
 check("class-hover float opened", lines7 ~= nil)
 if lines7 then
   local all7 = table.concat(lines7, "\n")
+  -- the row may cut the category short at this width; the panel has it whole
   check(
     "class root with category + ancestry header",
-    lines7[1]:find("ServerConfig") and lines7[1]:find("(dataclass ← BaseConfig)", 1, true)
+    lines7[1]:find("ServerConfig") and panel_of("ServerConfig"):find("(dataclass ← BaseConfig)", 1, true)
   )
   check("class fields shown", all7:find("host") and all7:find("retry"))
-  check("class inheritance merged", all7:find("env") and all7:find("↑BaseConfig", 1, true))
-  check("class docstring section at bottom", lines7[#lines7]:find("Connection settings container") ~= nil)
+  check("class inheritance merged", all7:find("env") and panel_of("·%s+env%s"):find("↑BaseConfig", 1, true))
+  check("class docstring in the footer", footer_text():find("Connection settings") ~= nil)
 end
 require("typescope").close()
 
@@ -1029,7 +1037,6 @@ end
 local prev_columns = vim.o.columns
 vim.o.columns = 200
 require("typescope").setup({
-  ui = { layout = "tree" },
   ollama = { enabled = true, port = fake_port, timeout_ms = 3000 },
 })
 for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
@@ -1046,12 +1053,7 @@ check("float for LLM test opened", llm_win ~= nil)
 if llm_win then
   vim.api.nvim_set_current_win(llm_win)
   -- e asks about the cursor's row and its siblings: park on config.host
-  for i, l in ipairs(float_lines()) do
-    if l:find("host") then
-      vim.api.nvim_win_set_cursor(0, { i, 0 })
-      break
-    end
-  end
+  panel_of("·%s+host%s")
   vim.api.nvim_feedkeys("e", "x", false)
   -- wait for BOTH: values uncover progressively as the reveal's blocks fall
   -- (38c), so the first one on screen doesn't mean the row has settled
@@ -1063,8 +1065,7 @@ if llm_win then
   end
   vim.wait(4000, function()
     sample()
-    local now = table.concat(float_lines() or {}, "\n")
-    return now:find("llm%-host") ~= nil and now:find("8443") ~= nil
+    return panel_text():find("llm%-host") ~= nil
   end, 20)
   -- values become legible partway through the grow, so keep sampling past the
   -- predicate or the tail of the ease is never seen
@@ -1072,8 +1073,9 @@ if llm_win then
     sample()
     return false
   end, 20)
-  local all9 = table.concat(float_lines() or {}, "\n")
-  check("LLM values rendered after e", all9:find("llm%-host") ~= nil and all9:find("8443") ~= nil)
+  check("LLM values rendered after e", panel_text():find("llm%-host") ~= nil)
+  -- one ask covers the row's siblings: port's value came back in the same batch
+  check("...and its siblings' with it", panel_of("·%s+port%s"):find("8443") ~= nil)
   -- >2 distinct widths means it eased; exactly 2 (old width, new width) is the
   -- single-frame snap this replaced
   local lo, hi = math.huge, 0
@@ -1081,12 +1083,6 @@ if llm_win then
     lo, hi = math.min(lo, w), math.max(hi, w)
   end
   check("the float grows into the width the landed values need", hi > lo)
-  local title_ok = false
-  local cfg9 = vim.api.nvim_win_get_config(llm_win)
-  if cfg9.title and cfg9.title[1] and cfg9.title[1][1]:find("typescope") then
-    title_ok = true
-  end
-  check("spinner restored the title", title_ok)
 end
 require("typescope").close()
 vim.o.columns = prev_columns
@@ -1113,7 +1109,6 @@ do
   end)
 end
 require("typescope").setup({
-  ui = { layout = "tree" },
   ollama = { enabled = true, port = silent_port, timeout_ms = 1000 },
 })
 require("typescope").open()
@@ -1131,12 +1126,7 @@ if slow_win then
   end
   vim.api.nvim_set_current_win(slow_win)
   -- e asks about the cursor's row and its siblings: park on config.host
-  for i, l in ipairs(float_lines()) do
-    if l:find("host") then
-      vim.api.nvim_win_set_cursor(0, { i, 0 })
-      break
-    end
-  end
+  panel_of("·%s+host%s")
   vim.api.nvim_feedkeys("e", "x", false)
   -- Generous on purpose: ~1s warmup probe, then 4.1s + 4.1s across the retry,
   -- and the whole thing shifts under load. A tight window here fails by
@@ -1158,7 +1148,7 @@ require("typescope").close()
 -- whose leaves still carry its values
 require("typescope.examples")._clear_llm_cache()
 require("typescope.resolve").clear_cache()
-require("typescope").setup({ ui = { layout = "tree" }, ollama = { enabled = true, port = 1, timeout_ms = 1000 } })
+require("typescope").setup({ ollama = { enabled = true, port = 1, timeout_ms = 1000 } })
 require("typescope").open()
 vim.wait(2000, function()
   return float_lines() ~= nil
@@ -1168,25 +1158,19 @@ check("float for fallback test opened", dead_win ~= nil)
 if dead_win then
   vim.api.nvim_set_current_win(dead_win)
   -- e asks about the cursor's row and its siblings: park on config.host
-  for i, l in ipairs(float_lines()) do
-    if l:find("host") then
-      vim.api.nvim_win_set_cursor(0, { i, 0 })
-      break
-    end
-  end
+  panel_of("·%s+host%s")
   vim.api.nvim_feedkeys("e", "x", false)
-  -- the rows are bars while the ask is out; the failure takes them down
+  -- the panel is a bar while the ask is out; the failure takes it down
   vim.wait(5000, function()
-    return table.concat(float_lines() or {}, "\n"):find("localhost") ~= nil
+    return panel_text():find("localhost") ~= nil
   end)
-  local all10 = table.concat(float_lines() or {}, "\n")
-  check("heuristics survive unreachable ollama", all10:find("localhost") ~= nil)
+  check("heuristics survive unreachable ollama", panel_text():find("localhost") ~= nil)
 end
 require("typescope").close()
 
--- example_mode = "llm": generation fires automatically on open, no e needed
+-- example_mode = "llm": generation fires as the cursor reaches a row, no e
+-- needed
 require("typescope").setup({
-  ui = { layout = "tree" },
   example_mode = "llm",
   ollama = { enabled = true, port = fake_port, timeout_ms = 3000 },
 })
@@ -1202,12 +1186,16 @@ vim.notify = function(m, ...)
   return auto_orig_notify(m, ...)
 end
 require("typescope").open()
+vim.wait(2000, function()
+  return float_lines() ~= nil
+end)
+panel_of("·%s+host%s")
 vim.wait(6000, function()
-  return table.concat(float_lines() or {}, "\n"):find("llm%-host") ~= nil
+  return panel_text():find("llm%-host") ~= nil
 end)
 vim.notify = auto_orig_notify
-local auto = table.concat(float_lines() or {}, "\n")
-check("auto LLM values render without pressing E", auto:find("llm%-host") ~= nil)
+local auto = panel_text()
+check("auto LLM values render without pressing e", auto:find("llm%-host") ~= nil)
 if not auto:find("llm%-host") then
   print("  DEBUG float:\n" .. auto)
   print("  DEBUG notifies: " .. vim.inspect(auto_msgs))
@@ -1225,14 +1213,6 @@ require("typescope").setup({
   ollama = { enabled = true, port = fake_port, timeout_ms = 3000 },
 })
 do
-  local function panel_text()
-    for _, w in ipairs(vim.api.nvim_list_wins()) do
-      if vim.bo[vim.api.nvim_win_get_buf(w)].filetype == "typescope_panel" then
-        return table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(w), 0, -1, false), "\n")
-      end
-    end
-    return ""
-  end
   for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
     if l:find("greeted = greet") then
       vim.api.nvim_win_set_cursor(0, { i, 10 })
