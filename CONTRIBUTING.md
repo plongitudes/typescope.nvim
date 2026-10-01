@@ -39,6 +39,10 @@ Some things this suite learned the hard way:
 - **Headless float geometry is not real geometry.** With no UI attached there is no anchor to measure against, so assert on `nvim_win_get_config` rather than on positions a headless probe reports.
 - **`tests/fixtures/shapes.py` is the capability sheet.** It records every class shape the oracle draws, as `typescope:` marker comments that `cargo test` in `oracle/` asserts against. A marker is a statement of policy (`design/oracle.md` §4), not a test expectation to be edited into passing: change one only with the rule that justifies it in the commit message. Add a marker whenever you teach the oracle a new shape.
 
+## The README demo
+
+The demo is recorded with [VHS](https://github.com/charmbracelet/vhs) from `demo/typescope.tape`, so re-record it after a change that shows up in it: `vhs demo/typescope.tape && demo/encode.sh` from the repo root. The tape writes lossless 2x frames, and `encode.sh` turns them into `demo/typescope.gif` (1x) and `demo/typescope.mp4` (2x), neither committed to `main`. GitHub only plays video it hosts itself, so upload the mp4 by dragging it into GitHub's README editor and put the resulting `user-attachments` URL under the gif. The tape's header lists what it needs. It runs nvim under `--clean` with `demo/init.lua`, so your own config stays out of the frame. The `e` beat's value comes from the model and changes from run to run; look over the new gif before publishing it. `demo/publish.sh` pushes the gif to the orphan `assets` branch, which the README links to; it lives there so installing the plugin doesn't download it. The README's stills of the float come from `demo/shots.tape` (`vhs demo/shots.tape && demo/publish.sh`), shot from `demo/shots.py` with heuristic examples, so they come out the same every run; `publish.sh` pushes them alongside the gif.
+
 ## Style
 
 Beyond what stylua and luacheck enforce:
