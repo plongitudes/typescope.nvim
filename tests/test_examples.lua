@@ -482,16 +482,53 @@ do
   local bgot = gen()
   check("blank lines in the stream are skipped", bgot == "ok", tostring(bgot))
 
-  -- silence (curl 28) retries once, then reports
+  -- silence (curl 28) retries once, then reports. Before blaming the server
+  -- it asks /api/ps whether the model is even loaded (typescope.nvim-hjf):
+  -- a load that never finished is silent too, and says nothing until done.
   local attempts = 0
+  local ps_reply = '{"models":[{"name":"testmodel","model":"testmodel"}]}'
   ---@diagnostic disable-next-line: duplicate-set-field
-  vim.system = function(_, _, cb)
-    attempts = attempts + 1
-    cb({ code = 28, stdout = "" })
+  vim.system = function(cmd, _, cb)
+    if cmd[#cmd]:find("/api/ps", 1, true) then
+      cb({ code = 0, stdout = ps_reply })
+    else
+      attempts = attempts + 1
+      cb({ code = 28, stdout = "" })
+    end
     return { wait = function() end }
   end
   local sgot, serr, sfired = gen()
   check("stall retries exactly once then errors", sfired and sgot == nil and serr ~= nil and attempts == 2, attempts)
+  check("...as wedged when the model IS loaded", (serr or ""):find("wedged") ~= nil, serr)
+
+  ps_reply = '{"models":[]}'
+  local _, uerr = gen()
+  check(
+    "a stall on an unloaded model says so, not wedged",
+    (uerr or ""):find("testmodel is not loaded") ~= nil and not (uerr or ""):find("wedged"),
+    uerr
+  )
+
+  -- the warmup load keeps ollama's own reason (no -f), and the stall names it
+  local stall_stub = vim.system
+  ---@diagnostic disable-next-line: duplicate-set-field
+  vim.system = function(cmd, _, cb)
+    if cmd[#cmd]:find("/api/version", 1, true) then
+      cb({ code = 0, stdout = "{}" })
+    else
+      cb({ code = 0, stdout = '{"error":"model requires more system memory"}\n500' })
+    end
+    return { wait = function() end }
+  end
+  ollama.warmup(cfg)
+  vim.wait(100)
+  vim.system = stall_stub
+  local _, lerr = gen()
+  check(
+    "a failed load's reason reaches the stall message",
+    (lerr or ""):find("requires more system memory") ~= nil,
+    lerr
+  )
 
   vim.system = real_system
 end
