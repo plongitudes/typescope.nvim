@@ -609,3 +609,16 @@ fn a_class_docstring_comes_from_the_module_that_defines_it() {
     let s = probe("oracle/importer.py", "gadget = Widget()", 9, true);
     assert_eq!(s.docstring.as_deref(), Some("A widget, documented in the runtime module."));
 }
+
+/// A function whose stub is one of pyrefly's bundled third-party stubs, as
+/// `requests.get` is in practice: no `.py` sits beside the `.pyi`, so only
+/// pyrefly's definition reaches the runtime docstring (typescope.nvim-q1v).
+#[test]
+fn a_function_docstring_crosses_a_bundled_stub() {
+    let want = "Guess whether a file is binary, documented in the runtime module.";
+    let s = probe("oracle/importer.py", "binary = check.is_binary(", 15, true);
+    assert_eq!(s.scope, "function");
+    assert_eq!(s.docstring.as_deref(), Some(want));
+}
+
+
