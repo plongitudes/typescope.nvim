@@ -135,6 +135,32 @@ check("...even padded", declined.padded == nil)
 check('a quoted "SKIP" is a real value', declined.label == '"SKIP"')
 check("declining does not disturb its neighbours", declined.host == '"localhost"' and declined.port == "8080")
 
+-- A value wrapped across lines (or cut off by num_predict) arrives as its
+-- first line. Stored, that is a wrong example; dropped, it is an honest MISS.
+-- Shapes from real qwen2.5-coder:3b replies (typescope.nvim-o6s).
+local wrapped = ollama.parse(table.concat({
+  "ws_max_size = 1024 * 1024  # 1 MB",
+  "log_config = {",
+  '    "version": 1,',
+  '    "handlers": {"console": {"class": "logging.StreamHandler"}}',
+  "}",
+  'fmt = "%(name)s # not a comment"',
+  'tag = "it\\"s"  # escaped quote, then a comment',
+  "cut = (1, [2, 3",
+  'open = "unterminated',
+  "bad = (1, 2]",
+  "hosts = ['a', 'b']",
+}, "\n"))
+check("a trailing comment is cut", wrapped.ws_max_size == "1024 * 1024", wrapped.ws_max_size)
+check("a value wrapped across lines is dropped, not stored as `{`", wrapped.log_config == nil, wrapped.log_config)
+check("...and its continuation lines are not values", wrapped.version == nil and wrapped.handlers == nil)
+check("a # inside a string is kept", wrapped.fmt == '"%(name)s # not a comment"', wrapped.fmt)
+check("an escaped quote doesn't end the string", wrapped.tag == '"it\\"s"', wrapped.tag)
+check("a value cut off mid-bracket is dropped", wrapped.cut == nil, wrapped.cut)
+check("...or mid-string", wrapped.open == nil, wrapped.open)
+check("mismatched brackets are dropped", wrapped.bad == nil, wrapped.bad)
+check("a balanced collection survives", wrapped.hosts == "['a', 'b']", wrapped.hosts)
+
 -- Types that admit no literal are never asked about at all. pyright renders a
 -- receiver as Self@Bar and a bound TypeVar as T@func; neither is a Python type.
 do
