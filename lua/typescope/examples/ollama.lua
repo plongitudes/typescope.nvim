@@ -466,14 +466,56 @@ function M.parse(text)
   local out = {}
   for line in text:gmatch("[^\n]+") do
     local path, value = line:match("^%s*([%w_%.]+)%s*=%s*(.+)$")
-    if path and value then
-      value = vim.trim(value)
-      if value ~= "SKIP" then
-        out[path] = value
-      end
+    value = value and M._complete(value)
+    if path and value and value ~= "SKIP" then
+      out[path] = value
     end
   end
   return out
+end
+
+local CLOSER = { ["("] = ")", ["["] = "]", ["{"] = "}" }
+
+--- The value as a whole literal, or nil if this line holds only part of one.
+---
+--- A value the model wrapped across lines arrives here as its first line —
+--- `log_config = {` — and so does one cut off by num_predict. Stored as is,
+--- either is a plausible-looking wrong example, worse than a MISS
+--- (typescope.nvim-o6s). So brackets and quotes must balance, and a trailing
+--- `# comment` (`1024 * 1024  # 1 MB`) is cut, but not a # inside a string.
+---@param value string
+---@return string?
+function M._complete(value)
+  local stack = {}
+  local quote = nil
+  local i = 1
+  while i <= #value do
+    local c = value:sub(i, i)
+    if quote then
+      if c == "\\" then
+        i = i + 1 -- the escaped character can't close the string
+      elseif c == quote then
+        quote = nil
+      end
+    elseif c == '"' or c == "'" then
+      quote = c
+    elseif c == "#" then
+      value = value:sub(1, i - 1)
+      break
+    elseif CLOSER[c] then
+      table.insert(stack, CLOSER[c])
+    elseif c == ")" or c == "]" or c == "}" then
+      if table.remove(stack) ~= c then
+        return nil
+      end
+    end
+    i = i + 1
+  end
+  value = vim.trim(value)
+  if quote or #stack > 0 or value == "" then
+    return nil
+  end
+  return value
 end
 
 return M
