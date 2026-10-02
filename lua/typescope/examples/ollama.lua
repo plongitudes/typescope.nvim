@@ -11,6 +11,33 @@ local M = {}
 local warming = false
 -- generates parked while that warmup resolves; see M.generate
 local warm_waiters = {}
+-- why the most recent warmup load failed; nil once one succeeds. Read by
+-- generate's stall path to say why the model it hit was not loaded.
+local last_load_error = nil
+
+--- Is cfg.model resident right now? /api/ps is the server's own answer.
+--- cb(nil) when the server could not be asked at all.
+---@param cfg typescope.OllamaConfig
+---@param cb fun(loaded: boolean?)
+local function model_loaded(cfg, cb)
+  local url = ("http://%s:%d/api/ps"):format(cfg.host, cfg.port)
+  vim.system(
+    { "curl", "-sf", "--max-time", "2", url },
+    { text = true },
+    vim.schedule_wrap(function(out)
+      local ok, decoded = pcall(vim.json.decode, out.stdout or "")
+      if out.code ~= 0 or not ok or type(decoded) ~= "table" then
+        return cb(nil)
+      end
+      for _, m in ipairs(decoded.models or {}) do
+        if m.name == cfg.model or m.model == cfg.model then
+          return cb(true)
+        end
+      end
+      cb(false)
+    end)
+  )
+end
 
 local function flush_warm_waiters()
   local queued = warm_waiters
@@ -87,12 +114,26 @@ function M.generate(prompt, cfg, cb, gen_opts, retrying)
         return M.generate(prompt, cfg, cb, gen_opts, true)
       end
       if out.code == 28 then
-        return cb(
-          nil,
-          ("ollama went silent for %ds, twice — server wedged? (ollama.timeout_ms is a stall timeout, not a total budget)"):format(
-            timeout_s
+        -- Silent twice. Usually that is not a wedged server but a model that
+        -- never finished loading: ollama sends nothing until the load is done,
+        -- and each hang-up cancels it (typescope.nvim-hjf). Ask before blaming.
+        return model_loaded(cfg, function(loaded)
+          if loaded == false then
+            return cb(
+              nil,
+              ("%s is not loaded — %s. Try e again; a first load after an ollama upgrade can be slow"):format(
+                cfg.model,
+                last_load_error and ("the last load failed: " .. last_load_error) or "it was still loading"
+              )
+            )
+          end
+          cb(
+            nil,
+            ("ollama went silent for %ds, twice — server wedged? (ollama.timeout_ms is a stall timeout, not a total budget)"):format(
+              timeout_s
+            )
           )
-        )
+        end)
       end
       if out.code ~= 0 then
         return cb(nil, "ollama unreachable at " .. url)
@@ -218,11 +259,39 @@ end
 local function load_model(cfg, cb)
   local url = ("http://%s:%d/api/generate"):format(cfg.host, cfg.port)
   local body = vim.json.encode({ model = cfg.model, prompt = "", stream = false, keep_alive = cfg.keep_alive or "5m" })
+  -- No -f: on an HTTP error ollama says why in the body ({"error": ...}),
+  -- and -f throws that away. The status rides on the last line instead.
   vim.system(
-    { "curl", "-sf", "--max-time", "120", url, "-H", "Content-Type: application/json", "-d", body },
-    {},
+    {
+      "curl",
+      "-s",
+      "--max-time",
+      "120",
+      "-w",
+      "\n%{http_code}",
+      url,
+      "-H",
+      "Content-Type: application/json",
+      "-d",
+      body,
+    },
+    { text = true },
     vim.schedule_wrap(function(out)
-      cb(out.code == 0)
+      local reply, status = (out.stdout or ""):match("^(.-)\n?(%d%d%d)$")
+      if out.code == 0 and status == "200" then
+        last_load_error = nil
+        return cb(true)
+      end
+      if out.code == 28 then
+        last_load_error = "loading took longer than 120s"
+      elseif out.code ~= 0 then
+        last_load_error = ("curl exited %d"):format(out.code)
+      else
+        local ok, decoded = pcall(vim.json.decode, reply or "")
+        local why = ok and type(decoded) == "table" and decoded.error
+        last_load_error = type(why) == "string" and why or ("HTTP %s"):format(status or "?")
+      end
+      cb(false)
     end)
   )
 end

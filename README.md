@@ -218,6 +218,8 @@ The panel shows a plausible example value for each leaf.
 
 `timeout_ms` is a **stall** timeout — how long the server may go completely silent — not a total budget. The reply is streamed, so a slow machine simply fills in slower and never trips it; only a wedged server does.
 
+**A slow first load after upgrading ollama.** After a Homebrew upgrade to ollama 0.35.0, the first load of `qwen2.5-coder:3b` took about 45 seconds, long enough that TypeScope gave up on it and examples never arrived. Every load since has taken 2–3 seconds, even with the OS file cache cleared. My suspicion is a one-time rebuild after the upgrade, though my swap was nearly full at the time, so memory pressure may have played a part. If `e` reports that the model is not loaded, wait a minute and press it again. I'll update this once I know more.
+
 ## Styles
 
 `ui.style` picks the charset: `rounded`, `unicode`, `ascii`, `minimal`. All four are plain Unicode or ASCII — no Nerd Font glyphs — so any font works. The same ledger, in each:
