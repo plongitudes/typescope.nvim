@@ -111,6 +111,16 @@ local function is_unbound_notation(display)
   return stripped:find("[%w_]+@[%w_]+") ~= nil
 end
 
+--- `*args` / `**kwargs`: the name keeps its stars. One value can't stand for
+--- a bundle of arguments, so asking only invites a guess (typescope.nvim-o6s).
+--- Its stars also put the id outside ollama.parse's path pattern, so every
+--- answer was dropped and the row came back a MISS.
+---@param node typescope.Node
+---@return boolean
+local function is_splat(node)
+  return node.name ~= nil and node.name:sub(1, 1) == "*"
+end
+
 -- Leaves per request: a batch's ~8×15 output tokens finishes in a few
 -- seconds even on small machines. One monolithic request for a 48-leaf
 -- uvicorn.run takes 30s+ of generation — no timeout survives that, and a
@@ -136,6 +146,7 @@ local function eligible(node)
     and node._lazy == nil
     and not has_real_default
     and not is_unbound_notation(node.type.display)
+    and not is_splat(node)
 end
 
 --- Why `node` gets no example, in words for the e key; nil when it can.
@@ -151,6 +162,9 @@ function M.why_not(node)
   local d = node.default
   if d ~= nil and d ~= "None" and d ~= "..." and d ~= "…" then
     return ("%s has a default, %s — that is its example"):format(node.name, d)
+  end
+  if is_splat(node) then
+    return ("no example for %s: it collects the arguments the others don't take"):format(node.name)
   end
   return ("no example for %s: its type is not one a value can be written for"):format(node.name)
 end
