@@ -11,23 +11,23 @@ https://github.com/user-attachments/assets/b6391f46-8bc7-4573-b6ac-5e97d5044f92
 
 </details>
 
-TypeScope asks a type checker what the symbol under your cursor *is* — a function's parameters and return, the structure of a class, a variable's type and innards — and shows the result in a floating pane, structured hierarchically so that you can dive further in when needed. Where a parameter is a dataclass, a Pydantic model, a TypedDict, a NamedTuple, an Enum, a Protocol or a plain class with annotated attributes, you get its fields — not just its name. Generics arrive specialized (`Box[ServerConfig]` shows `item ServerConfig`), an unannotated local shows the type the checker inferred (drawn `≈`), and a narrowed variable shows its narrowed type.
+TypeScope _(like 'periscope'! Get it? ... wow, tough crowd.)_ asks a type checker what the symbol under your cursor *is* — a function's parameters and return, the structure of a class, a variable's type and innards — and shows the result in a floating pane, structured hierarchically so that you can dive further in when needed. Where a parameter is a dataclass, a Pydantic model, a TypedDict, a NamedTuple, an Enum, a Protocol or a plain class with annotated attributes, you get its fields — not just its name. Generics arrive specialized (`Box[ServerConfig]` shows `item ServerConfig`), an unannotated local shows the type the checker inferred (drawn `≈`), and a narrowed variable shows its narrowed type.
 
-The checker is [pyrefly](https://github.com/facebook/pyrefly) wrapped in a small binary. TypeScope calls it the `oracle`, and it runs alongside your Python LSP. I use basedpyright, this repo assumes you're using that or vanilla pyright. If you're using another type checker in your nvim setup, the results from pyrefly _might_ be a bit different from your own typechecker, but I believe that most results should be satisfactory. The `oracle` is downloaded for your platform the first time you open a Python buffer (see [Requirements](#requirements)). The patch to Pyrefly is a small change that takes a function pyrefly already uses internally for attribute completion and makes it public. With that patch in place, `oracle` can ask for every attribute of a type (its own and inherited ones), each with its type filled in. It adds no type-checking logic of its own, and if pyrefly eventually makes this a public feature, oracle could be dropped in favor of vanilla pyrefly.
+The checker is [pyrefly](https://github.com/facebook/pyrefly) wrapped in a small binary. We call this the `oracle` (it really kind of needs a name change, doesn't it), and it runs alongside your Python LSP. I use basedpyright, this repo assumes you're using that or vanilla pyright. If you're using another type checker in your nvim setup, the results from pyrefly _might_ be a bit different from your own typechecker, but I believe that most results should be satisfactory. The `oracle` is downloaded for your platform the first time you open a Python buffer (see [Requirements](#requirements)). The patch to Pyrefly is a small change that takes a function pyrefly already uses internally for attribute completion and makes it public. With that patch in place, `oracle` can ask for every attribute of a type (its own and inherited ones), each with its type filled in. It adds no type-checking logic of its own, and if pyrefly eventually makes this a public feature, oracle could be dropped in favor of vanilla pyrefly.
 
 <img src="https://raw.githubusercontent.com/plongitudes/typescope.nvim/assets/intro.png" width="470" alt="TypeScope on create_server(config, timeout=…) -> Response: config expanded to host, port and debug, then timeout and returns, over a panel for the config row">
 
 One compact line per parameter, and a panel docked under the rows shows everything about the row your cursor is on. See [The ledger](#the-ledger).
 
-*(Real output, not a mockup — every image in this README is a screenshot of the float, shot by `demo/shots.tape`.)*
-
 ## Requirements
 
-These are hard requirements. TypeScope does nothing useful without them, and `:checkhealth typescope` will tell you which is missing.
+These are hard requirements. TypeScope won't work very well (read: at all) without them, and `:checkhealth typescope` will tell you which is missing.
 
-- **Neovim 0.11+**. In order for this plugin to work nicely without a lot of fuss, I made the call to only support 0.11+. I doubt this plugin will ever reach a lot of folks, so I felt ok with drawing the line there.
-- **The oracle binary, `typescope-oracle`.** This is where every type comes from. With the default `oracle.download = true` the plugin fetches the release build for your platform (Apple Silicon macOS, or Linux on x86_64 or arm64) into `stdpath("data")/typescope/oracle/<release>/` the first time a Python buffer opens, verifies it against the release's `SHA256SUMS` before running it, and tells you once when it is in place. A plugin update that pins a new release fetches that one and removes the old. It needs `curl`, and `sha256sum` or `shasum` for the check (every Linux and macOS has one). Intel Macs have no release build: build it yourself and set `oracle.path`. To skip the download, build it yourself (see [Development](#development)) and set `oracle.path`, or set `oracle.download = false` and put the binary at that path. The oracle settles at about 150 MB of memory on a real project.
+- **Neovim v0.11+**. In order for this plugin to work nicely without a lot of fuss, I made the call to only support v0.11+. I doubt this plugin will ever reach a lot of folks, so I felt okay with drawing the line there.
+- **The oracle binary, `typescope-oracle`.** This is where every type comes from. With the default option `oracle.download = true`, the plugin fetches the release build for your platform (Apple Silicon macOS, or Linux on x86_64 or arm64) into `stdpath("data")/typescope/oracle/<release>/` the first time a Python buffer opens, verifies it against the release's `SHA256SUMS` before running it, and tells you once when it is in place. A plugin update that pins a new release fetches that one and removes the old. It needs `curl`, and `sha256sum` or `shasum` for the check (every Linux and macOS has one). Apologies that Intel Macs have no release build; you'll need to build it yourself and set `oracle.path`. You're welcome to just build it yourself for whatever reason, actually (see [Development](#development))! Set `oracle.path`, or set `oracle.download = false` and put the binary at that path. The oracle settles at about 150 MB of memory on a real project.
 - **The TreeSitter Python parser.** The float's own highlighting and the call-site questions (is the cursor on a call? what was written in it?) read the syntax tree. `:TSInstall python`.
+  - [Treesitter](https://github.com/tree-sitter/tree-sitter)
+  - [Treesitter plugin for nvim](https://github.com/nvim-treesitter/nvim-treesitter)
 
 Recommended:
 
@@ -73,8 +73,8 @@ If you use `lazy.nvim`, `opts = {}` calls `setup()` for you. If you configure by
 
 ## Usage
 
-Put the cursor on (or inside the parens of) a call and open the float. I use typescope in place of nvim's default
-hover (`K`). Feel free to set up the keys however suits you best :)
+Put the cursor on (or inside the parens of) a call and open the float. I use Typescope in place of nvim's default
+hover (`K`). Feel free to set up the keys in whatever way suits you best :)
 
 ```lua
 vim.keymap.set("n", "<leader>ts", "<Plug>(TypeScopeToggle)")
@@ -176,31 +176,29 @@ require("typescope").setup({
 })
 ```
 
-Bad values are rejected at `setup()` time with a message naming the key, rather than failing later at paint time.
+Bad values are rejected at `setup()` time with a message.
 
 ### `ui.focus`
 
-`true` (the default) means an explicit open — `K`, `:TypeScope` — puts your cursor *inside* the float, so the tree keys are live immediately. `false` picks the momentary-hover convention instead: the float opens unfocused, any cursor movement dismisses it, and a second `K` focuses it.
+`true` (the default) means an explicit open — `K` or `:TypeScope` will put your cursor inside the float, so the tree keys are live immediately. `false` picks the momentary-hover convention instead: the float opens unfocused, any cursor movement dismisses it, and a second `K` focuses it.
 
 The `trigger = "hover"` auto-open never steals focus in either mode.
 
 ## The ledger
 
-One compact line per parameter, and a panel docked under the rows showing everything about the row the cursor is on: its whole type (the row cuts long ones short), the evaluated shape, the full default, an example, where it was inherited from. The rows never move as the cursor does; only the panel changes. The frame's bottom edge carries the docstring's first sentence, and `d` swaps the whole docstring in for the rows. Below, the cursor is on `host`:
+One compact line per parameter, and a small subpanel is docked at the bottom of the float, showing details of the row the cursor is on: its whole type (the row truncates ones that are too long), the evaluated shape, the full default, an example, and where it was inherited from. The detail panel changes as you move the cursor from row to row. The frame's bottom edge carries the docstring's first sentence for a little extra info, and `d` swaps the floating window's contents for the full docstring (it's a toggle). Below, the cursor is on `host`:
 
 <img src="https://raw.githubusercontent.com/plongitudes/typescope.nvim/assets/ledger.png" width="470" alt="TypeScope on create_server(config, timeout=…) -> Response, with the cursor on host: the panel under the rows shows host str, e.g. "localhost"">
 
-The panel grows to fit the tallest node it has shown (up to five lines) and never shrinks back, so the rows above it stay put. The frame opens below the cursor, or above it when there is more room there.
-
-(It used to be one of several layouts. `table` was removed in 0.2.0 and `tree` in 0.4.0; a `ui.layout` or `ui.align` left in your setup is ignored with a one-time warning.)
+The panel grows to fit the tallest node it has shown (up to five lines) and doesn't shrink back, so the rows above it stay put. The frame opens below the cursor, or above it when there is more room there.
 
 ## Insert mode
 
-`insert_mode.enabled = true` replaces your signature help with a *typing surface*: every parameter name on one wrapped block, the active one highlighted, a rule, then the active parameter's detail — type, evaluated shape, default, example. It follows `textDocument/signatureHelp` silently, including overload changes, and repositions on every keystroke so it never covers the line you are typing on or the one below it.
+As a bonus, `insert_mode.enabled = true` replaces your signature help with a *typing surface*: every parameter name on one wrapped block, the active one highlighted, a rule, then the active parameter's detail — type, evaluated shape, default, example. It follows `textDocument/signatureHelp` silently, including overload changes, and repositions on every keystroke so it never covers the line you are typing on or the one below it.
 
 It has no keymaps and is never focusable, by design. If you enable it, **turn off your existing signature help** (blink.cmp's, nvim-cmp's, or core's) or you will have two floats fighting over the same space.
 
-`max_detail_lines` caps the *detail* only — the signature block above it wraps as far as it needs to keep every parameter name visible, so this is not a cap on the surface as a whole. Past the cap, the shape (the one unbounded part) elides member-by-member rather than the detail growing: a short union still shows in full, a 53-member `Literal` still can't eat the float. Raise it if you work with big `Literal`s and want more of them at a glance.
+`max_detail_lines` caps the *detail* only — the signature block above it wraps as far as it needs to keep every parameter name visible, so this is not a cap on the surface as a whole. Past the cap, the shape (the one unbounded part) elides member-by-member rather than the detail growing: a short union still shows in full, but a 53-member `Literal` won't be allowed to subsume the whole window. Raise it if you work with big `Literal`s and want more of them at a glance.
 
 Off by default while it bakes.
 
@@ -214,9 +212,9 @@ The panel shows a plausible example value for each leaf.
 
 ### The RAM cost of ollama
 
-`ollama.enabled` defaults to `false` for a reason worth stating plainly: a loaded model is **resident RAM**, roughly 2GB for the default `qwen2.5-coder:3b`. `keep_alive` controls how long it stays after a request — the default `"5m"` matches ollama's own, and on a small-RAM machine it is the *only* thing that gives the memory back on a server TypeScope borrowed rather than spawned. Raise it if you have the headroom and want warm `e` presses all session.
+`ollama.enabled` defaults to `false` for a good reason: if you're not already aware of how LLM models work, a loaded model stays resident in RAM. This means that however much RAM you have, the model will gobble up however much it needs in order to run, so subtract that from however much you have available normally on your device. As an example, that's roughly 2GB for the default `qwen2.5-coder:3b` model. Note that that's not the tiniest model, but it's the smallest one I can run on my 2020 M1 Macbook Air and still get decent output. `keep_alive` controls how long it stays after a request — the default `"5m"` matches ollama's own, and on a small-RAM machine it is the *only* thing that gives the memory back on a server TypeScope borrowed rather than spawned. Raise it if you have the headroom and want warm `e` presses all session.
 
-`autostart = true` spawns `ollama serve` as a child process when the port refuses connections, and that child dies with Neovim, so the RAM comes back on quit. A server that is already running is never touched, and never shut down.
+`autostart = true` spawns `ollama serve` as a child process when the port refuses connections, and that process dies with Neovim so that the RAM comes back when you quite editing files. If you're running an ollama server for other reasons as well, Typescope will use it to call up the model you specify, but will never alter that server or ask it to shut down.
 
 `timeout_ms` is a **stall** timeout — how long the server may go completely silent — not a total budget. The reply is streamed, so a slow machine simply fills in slower and never trips it; only a wedged server does.
 
@@ -251,7 +249,7 @@ The panel shows a plausible example value for each leaf.
 
 ## Highlights
 
-Every group links to something sensible in your colorscheme, so TypeScope inherits your theme rather than fighting it. Override any of them through `highlights`:
+Every group links to something sensible in your colorscheme, so TypeScope simply inherits your theme. Override any of them through `highlights`:
 
 `TypeScopeField` `TypeScopeProperty` `TypeScopeEnumMember` `TypeScopeGroup` `TypeScopeParam` `TypeScopeType` `TypeScopeDefault` `TypeScopeExample` `TypeScopeExamplePending` `TypeScopeChrome` `TypeScopeKeyword` `TypeScopeBadge` `TypeScopeEvaluated` `TypeScopeHeader` `TypeScopeHeaderDim` `TypeScopeDocstring` `TypeScopeUnresolved` `TypeScopeHint` `TypeScopeActive` `TypeScopeTitle`
 
