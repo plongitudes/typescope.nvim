@@ -524,7 +524,11 @@ do
   vim.wait(100)
   vim.system = stall_stub
   local _, lerr = gen()
-  check("a failed load's reason reaches the stall message", (lerr or ""):find("requires more system memory") ~= nil, lerr)
+  check(
+    "a failed load's reason reaches the stall message",
+    (lerr or ""):find("requires more system memory") ~= nil,
+    lerr
+  )
 
   vim.system = real_system
 end
