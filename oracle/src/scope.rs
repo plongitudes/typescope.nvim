@@ -82,10 +82,19 @@ pub fn build(req: &Request<'_>, ty: &Type) -> Option<Scope> {
 fn function_scope(req: &Request<'_>, walker: &Walker<'_>, ty: &Type) -> Scope {
     let node = walker.node("function", "function", ty, req.depth);
     let name = node.def_name.clone().unwrap_or_else(|| req.cursor.text.clone());
-    let docstring = match (&node.def_handle, node.def_range) {
-        (Some(handle), Some(range)) => docstring_of_def(req, handle, &name, range),
-        _ => None,
-    };
+    // pyrefly's own definition first, as class_docstring does: it reaches the
+    // runtime module behind one of pyrefly's bundled third-party stubs, which
+    // has no `.py` beside it for our sibling search to find (`requests.get`).
+    // Attribute: that is how pyrefly reports `get` reached through a module.
+    // The sibling search stays as the fallback for a cursor that is not on
+    // the function's name (`f = requests.get; f(`).
+    let kinds = [SymbolKind::Function, SymbolKind::Method, SymbolKind::Attribute];
+    let docstring = definition_docstring(req, &kinds).or_else(|| {
+        match (&node.def_handle, node.def_range) {
+            (Some(handle), Some(range)) => docstring_of_def(req, handle, &name, range),
+            _ => None,
+        }
+    });
 
     if node.kind == "function" && node.children.iter().all(|c| c.kind == "overload") && !node.children.is_empty() {
         // an overload set: each signature is a group root, the plugin picks
@@ -312,6 +321,17 @@ fn docstring_of_def(req: &Request<'_>, handle: &Handle, name: &str, name_range: 
 /// cursor is not on the class's name (`x` in `x = Widget`), the class's own
 /// module is read at the class's range.
 fn class_docstring(req: &Request<'_>, cls: &Class) -> Option<String> {
+    definition_docstring(req, &[SymbolKind::Class]).or_else(|| {
+        let (ast, _) = ast_of(req, cls)?;
+        docstring_of_body(find_body(&ast.body, cls.range())?)
+    })
+}
+
+/// The docstring pyrefly's hover would show for the name under the cursor,
+/// when that name is defined as one of `kinds`: follow it to its definition,
+/// preferring the runtime `.py` over a stub (whose body is usually `...`),
+/// then the stub. None when the cursor is not on such a name.
+fn definition_docstring(req: &Request<'_>, kinds: &[SymbolKind]) -> Option<String> {
     let from_definition = |prefer_pyi: bool| {
         let mut pref = FindPreference::default();
         pref.prefer_pyi = prefer_pyi;
@@ -319,7 +339,7 @@ fn class_docstring(req: &Request<'_>, cls: &Class) -> Option<String> {
         pref.resolve_call_dunders = false;
         let items = req.tx.find_definition(req.handle, req.cursor.range.start(), pref).ok()?;
         items.into_iter().find_map(|item| {
-            if item.metadata.symbol_kind() != Some(SymbolKind::Class) {
+            if !item.metadata.symbol_kind().is_some_and(|k| kinds.contains(&k)) {
                 return None;
             }
             // the range is the docstring statement; our own formatting, so
@@ -329,10 +349,7 @@ fn class_docstring(req: &Request<'_>, cls: &Class) -> Option<String> {
             docstring_of_body(&ast.body)
         })
     };
-    from_definition(false).or_else(|| from_definition(true)).or_else(|| {
-        let (ast, _) = ast_of(req, cls)?;
-        docstring_of_body(find_body(&ast.body, cls.range())?)
-    })
+    from_definition(false).or_else(|| from_definition(true))
 }
 
 /// Quotes stripped and following lines dedented, as `docstring_of` did.

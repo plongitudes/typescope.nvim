@@ -3,4 +3,7 @@
 # virtualenv and no network. pyrefly recognises pydantic models by the
 # qualified name pydantic.BaseModel, which the stub provides.
 search-path = [".", "site", "site-packages"]
+# A real site-packages directory, not a search path: a package here without
+# py.typed loses to pyrefly's bundled stubs, as `requests` does in practice.
+site-package-path = ["site-untyped"]
 python-version = "3.12"
