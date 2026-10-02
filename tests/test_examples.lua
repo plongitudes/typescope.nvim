@@ -602,6 +602,14 @@ do
   check("a real default is the example", (examples.why_not(with_default) or ""):find("has a default") ~= nil)
   check("structure is opened, not asked about", (examples.why_not(open_to) or ""):find("open it") ~= nil)
   check("a plain leaf can be asked about", examples.why_not(plain) == nil)
+  -- splat params: no single value stands for a bundle of arguments, and the
+  -- stars put the id outside ollama.parse's path pattern (typescope.nvim-o6s)
+  for _, name in ipairs({ "*args", "**kwargs" }) do
+    local splat = model.new({ name = name, kind = "param", type = { display = "Any", category = "builtin" } })
+    check(name .. " is not asked about", (examples.why_not(splat) or ""):find("collects the arguments") ~= nil)
+    local roots = { plain, splat }
+    check(name .. " stays out of the group", #examples.group_for(roots, plain) == 1)
+  end
 end
 
 print(failures == 0 and "EXAMPLES ALL PASS" or ("EXAMPLES " .. failures .. " FAILURES"))
