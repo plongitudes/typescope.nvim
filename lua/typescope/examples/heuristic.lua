@@ -44,6 +44,35 @@ local function base_type(display)
   return display and display:match("^([%w_]+)") or nil
 end
 
+--- The first member of a leading `Literal[...]`, as written: `Literal[True]`
+--- → `True`, `Literal["auto", "h11"] | None` → `"auto"`. A Literal's members
+--- are the only values it admits, so one of them IS the example, and no name
+--- rule may override it (typescope.nvim-g1c). Quotes are respected, so a comma
+--- or bracket inside a string member doesn't end it.
+---@param display? string
+---@return string?
+local function literal_member(display)
+  local body = display and display:match("^Literal%[(.*)$")
+  if not body then
+    return nil
+  end
+  local quote = nil
+  for i = 1, #body do
+    local c = body:sub(i, i)
+    if quote then
+      if c == quote then
+        quote = nil
+      end
+    elseif c == '"' or c == "'" then
+      quote = c
+    elseif c == "," or c == "]" then
+      local member = vim.trim(body:sub(1, i - 1))
+      return member ~= "" and member or nil
+    end
+  end
+  return nil
+end
+
 ---@param token string
 ---@return typescope.HeuristicRule?
 local function rule_for_token(token)
@@ -63,6 +92,10 @@ end
 function M.value(name, display)
   if display == "None" then
     return "None"
+  end
+  local member = literal_member(display)
+  if member then
+    return member
   end
   local ordered = {}
   for tok in name:lower():gmatch("%w+") do

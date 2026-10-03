@@ -182,6 +182,21 @@ do
   )
   check("a class named SelfEmployed is still asked", heuristic_for("email", "SelfEmployed") ~= nil)
 
+  -- a Literal's members are its only values: the first one IS the example,
+  -- and no name rule overrides it (typescope.nvim-g1c; shapes from sqlalchemy
+  -- and uvicorn signatures)
+  check("Literal[True] gives True", heuristic_for("future", "Literal[True]") == "True")
+  check(
+    "a Literal's first member, past a union",
+    heuristic_for("loop", "Literal['none', 'auto', 'asyncio'] | None") == "'none'",
+    heuristic_for("loop", "Literal['none', 'auto', 'asyncio'] | None")
+  )
+  local member = heuristic_for("host", 'Literal["0.0.0.0", "::"]')
+  check("the member wins over a name rule", member == '"0.0.0.0"', member)
+  local comma = heuristic_for("sep", 'Literal[", ", ";"]')
+  check("a comma inside a member doesn't split it", comma == '", "', comma)
+  check("a Literal later in a union is not taken", heuristic_for("mode", 'int | Literal["auto"]') == "42")
+
   -- An unspecified default is exactly the case worth showing an example FOR, so
   -- neither spelling of the stub placeholder may suppress one. The normalised
   -- glyph arrived with the render fix and would otherwise have read as a real
