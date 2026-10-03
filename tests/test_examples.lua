@@ -35,13 +35,13 @@ local cases = {
   { "id", "str", '"a1b2c3d4"' },
   { "uuid", "str", '"a1b2c3d4"' },
   { "debug", "bool", "True" },
-  { "count", "int", "42" },
-  { "ratio", "float", "3.14" },
+  { "count", "int", "2600" },
+  { "ratio", "float", "3.14159" },
   { "label", "str", '"example"' },
   { "nothing", "None", "None" },
   -- token semantics: substring is not enough, tokens are
   { "timeout_ms", "int | None", "30" }, -- 'ms' head unknown → any-token fallback: timeout + int variant
-  { "width", "int", "42" }, -- 'id' must NOT match inside 'width'
+  { "width", "int", "2600" }, -- 'id' must NOT match inside 'width'
   { "user_id", "str", '"a1b2c3d4"' },
   { "user_id", "int", "42" }, -- by_type variant: a numeric id is a number
   { "id", "int | None", "42" },
@@ -85,7 +85,7 @@ check("method skipped", roots[1].children[2].example.heuristic == nil)
 check("unresolved skipped", roots[1].children[3].example.heuristic == nil)
 check("real default suppresses example", roots[1].children[4].example.heuristic == nil)
 check("None default still gets example", roots[1].children[5].example.heuristic == '"example"')
-check("stub ... default still gets example", roots[1].children[6].example.heuristic == "42")
+check("stub ... default still gets example", roots[1].children[6].example.heuristic == "2600")
 
 -- ollama prompt/parse round trip
 local ollama = require("typescope.examples.ollama")
@@ -181,6 +181,45 @@ do
     heuristic_for("email", 'Literal["user@example.com"]') == '"user@example.com"'
   )
   check("a class named SelfEmployed is still asked", heuristic_for("email", "SelfEmployed") ~= nil)
+
+  -- a Literal's members are its only values: the first one IS the example,
+  -- and no name rule overrides it (typescope.nvim-g1c; shapes from sqlalchemy
+  -- and uvicorn signatures)
+  check("Literal[True] gives True", heuristic_for("future", "Literal[True]") == "True")
+  check(
+    "a Literal's first member, past a union",
+    heuristic_for("loop", "Literal['none', 'auto', 'asyncio'] | None") == "'none'",
+    heuristic_for("loop", "Literal['none', 'auto', 'asyncio'] | None")
+  )
+  local member = heuristic_for("host", 'Literal["0.0.0.0", "::"]')
+  check("the member wins over a name rule", member == '"0.0.0.0"', member)
+  local comma = heuristic_for("sep", 'Literal[", ", ";"]')
+  check("a comma inside a member doesn't split it", comma == '", "', comma)
+  local later = heuristic_for("mode", 'int | Literal["auto"]')
+  check("a Literal later in a union is not taken", later ~= '"auto"', later)
+
+  -- gap 2: a later member of the union with a type example, before None.
+  -- None was usually the default as well, so the row used to come up blank.
+  -- Shapes from uvicorn.run.
+  local function with_none_default(name, display)
+    local n = model.new({ name = name, kind = "param", default = "None", type = { display = display } })
+    examples.annotate({ n })
+    return n.example.heuristic
+  end
+  local certfile = with_none_default("ssl_certfile", "PathLike[Unknown] | str | None")
+  check("a later str member gives the example", certfile == '"example"', certfile)
+  local dirs = with_none_default("reload_dirs", "list[str] | str | None")
+  check("...past a container it can't build", dirs == '"example"', dirs)
+  local nested = with_none_default("pairs", "list[str | int] | None")
+  check("a | inside brackets is not a member boundary", nested == nil, nested)
+  local cwd = with_none_default("cwd", "PathLike[bytes] | PathLike[str] | bytes | str | None")
+  check("str is preferred over an earlier bytes member", cwd == '"example"', cwd)
+  local stdin = with_none_default("stdin", "IO[Any] | int | None")
+  check("an int mixed with a type we can't exemplify stays blank", stdin == nil, stdin)
+  local num = with_none_default("scale", "int | float | None")
+  check("int | float shows a float, so a float is visibly accepted", num == "3.14159", num)
+  local info = with_none_default("info", "dict[Any, Any] | None")
+  check("nothing usable still leaves the row blank", info == nil, info)
 
   -- An unspecified default is exactly the case worth showing an example FOR, so
   -- neither spelling of the stub placeholder may suppress one. The normalised
