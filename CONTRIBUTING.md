@@ -60,6 +60,29 @@ The vocabulary is settled and worth keeping straight, since several of these wor
 | segment | a `{text, group}` run, the renderer's primitive |
 | ledger | the reading float: one line per node over a panel docked under the rows, showing the cursor's row |
 
+## Releasing
+
+The plugin and the oracle are released together under one version. The version lives in four places: `oracle/Cargo.toml`, its entry in `oracle/Cargo.lock`, `M.RELEASE` in `lua/typescope/oracle.lua` (the release the plugin downloads its binary from), and the dated heading in `CHANGELOG.md`. `scripts/release.sh` keeps them in step, in two halves either side of the release PR's merge.
+
+**Pick the version from `[Unreleased]`.** Versions follow semver with the 0.x convention the changelog states: anything under Removed or Upgrading, or any setting that now warns and is ignored, makes a minor bump; fixes alone make a patch. The warnings in `lua/typescope/config.lua` name the version a key went away in, so check they agree with what you pick.
+
+```sh
+git checkout -b release/v0.4.0 main
+scripts/release.sh prepare 0.4.0   # bumps the four places, dates [Unreleased]
+```
+
+`prepare` refuses a malformed version, one that is already tagged or not after the latest tag, an empty `[Unreleased]`, a dirty tree, and running on main. It doesn't write the notes: finish the section it dated (an intro paragraph, then Upgrading, Removed, Changed, Added, Fixed, Deprecated, Development as they apply), commit, and merge the PR.
+
+```sh
+git checkout main && git pull --ff-only
+scripts/release.sh tag             # checks, shows the version and notes, asks y/N
+git push origin v0.4.0
+```
+
+`tag` reads the version back from `M.RELEASE`, checks the Cargo files agree, and refuses unless the checkout is clean and exactly `origin/main`: behind means the tag would miss the merged release, ahead means it would point at commits main doesn't have. On a yes it creates an annotated tag whose message is the changelog section. It doesn't push; pushing the tag is what publishes.
+
+The pushed tag runs `.github/workflows/release.yml`, which checks again: the tagged commit must be on main, and `M.RELEASE` and `oracle/Cargo.toml` must match the tag. It then builds the three binaries and publishes them with `SHA256SUMS`. If it fails after the tag is pushed, fix forward on main, then delete the tag (`git push origin :refs/tags/v0.4.0 && git tag -d v0.4.0`) and run `tag` again.
+
 ## Issues
 
 Work is tracked in [beads](https://github.com/steveyegge/beads) under `.beads/`, which is not committed. If you are opening a PR from outside, a plain GitHub issue is fine — no need to install anything.
