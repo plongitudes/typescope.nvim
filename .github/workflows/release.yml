@@ -118,6 +118,13 @@ jobs:
             grep -n "^M.RELEASE" lua/typescope/oracle.lua >&2
             exit 1
           fi
+          # and so must the oracle's own version, or `--version` lies about
+          # which release it came from
+          if ! grep -q "^version = \"${TAG#v}\"$" oracle/Cargo.toml; then
+            echo "oracle/Cargo.toml has a different version than tag ${TAG}:" >&2
+            grep -n "^version" oracle/Cargo.toml >&2
+            exit 1
+          fi
           # and the three assets are all here
           for t in darwin-arm64 linux-x86_64 linux-arm64; do
             test -f "dist/typescope-oracle-$t" || { echo "missing asset for $t" >&2; exit 1; }

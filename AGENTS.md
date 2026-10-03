@@ -4,6 +4,8 @@
 
 This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
 
+Releases follow "Releasing" in [CONTRIBUTING.md](CONTRIBUTING.md) via `scripts/release.sh`. Pushing a version tag publishes a release: leave `tag` and the tag push to the user unless they hand them to you.
+
 ## Quick Reference
 
 ```bash

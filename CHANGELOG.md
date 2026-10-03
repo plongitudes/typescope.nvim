@@ -2,7 +2,7 @@
 
 Notable changes to TypeScope, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [Semantic Versioning](https://semver.org/), with the usual 0.x caveat that a minor bump may break something. Each release is an annotated git tag carrying the same notes.
 
-## [Unreleased]
+## [0.4.0] — 2026-10-03
 
 The ledger is the only layout. With the details in a docked panel there was nothing left that `tree` did better, and keeping two layouts meant two render paths, two `d` behaviours and two ways of generating examples.
 
@@ -20,6 +20,16 @@ If your setup sets `ui.layout` to anything but `"ledger"`, or sets `ui.align`, t
 ### Changed
 
 - **`ui.docstring` is on or off.** `true` (the default) puts the docstring's first sentence in the frame's bottom edge and lets `d` show the rest; `false` turns both off.
+
+### Fixed
+
+- **A function from a package the checker reads through its bundled stubs showed no docstring.** `requests.get` is one: no `.py` sits beside a bundled `.pyi` for the sibling search to find. Function docstrings now go through the checker's definition lookup, as class docstrings already did.
+- **The model's wrapped or cut-off answers were stored as examples.** A dict spread over 22 lines was kept as `{`, and `1024 * 1024  # 1 MB` kept its comment. An answer is now kept only if its brackets and quotes balance, and a trailing comment is cut.
+- **`*args` and `**kwargs` rows always came back empty from the model.** One value can't stand for a bundle of arguments, and the stars kept the answer from ever matching its row. They are no longer asked about, and the panel says why there's no example.
+- **A model that never finished loading was reported as a wedged server.** A first load after an ollama upgrade can take most of a minute. The error now says the model isn't loaded and names the last load failure.
+- **Heuristic examples ignored `Literal` members.** `Literal["0.0.0.0", "::"]` on a parameter named `host` got `"localhost"`, which the type doesn't admit. A Literal's first member is now its example.
+- **An optional type's heuristic example was usually blank.** A union with `None` fell back to `None`, which was usually also its default, so the row showed nothing. It now takes an example from its other members when they all have one.
+- **`user_id: int` was given `"a1b2c3d4"`.** Numeric ids now get a number.
 
 ## [0.3.0] — 2026-09-24
 
@@ -125,6 +135,8 @@ First public release. Type structure for the Python function under your cursor: 
 - Four charsets, all plain Unicode/ASCII; no Nerd Font required.
 - Requires Neovim 0.10+, basedpyright, and the TreeSitter python parser.
 
+[0.4.0]: https://github.com/plongitudes/typescope.nvim/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/plongitudes/typescope.nvim/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/plongitudes/typescope.nvim/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/plongitudes/typescope.nvim/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/plongitudes/typescope.nvim/compare/v0.1.0...v0.1.1
