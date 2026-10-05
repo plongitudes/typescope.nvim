@@ -752,6 +752,20 @@ do
     vim.api.nvim_feedkeys("k", "x", false)
     check("k moves back", cursor_line():find("timeout") ~= nil)
 
+    -- a count is that many node jumps, not one (typescope.nvim-zdi)
+    local function row_after(keys, from)
+      vim.api.nvim_win_set_cursor(lw, { from or timeout_row, 0 })
+      for _, k in ipairs(keys) do
+        vim.api.nvim_feedkeys(k, "x", false)
+      end
+      return vim.api.nvim_win_get_cursor(lw)[1]
+    end
+    local one, two = row_after({ "k" }), row_after({ "k", "k" })
+    check("...two k's move two nodes", one ~= two)
+    check("2k is k twice", row_after({ "2k" }) == two)
+    check("2j comes back", row_after({ "2j" }, two) == timeout_row)
+    vim.api.nvim_win_set_cursor(lw, { timeout_row, 0 })
+
     -- d: the whole docstring where the rows were, the panel folded away; d
     -- again brings the rows back with the cursor where it was
     vim.api.nvim_feedkeys("d", "x", false)
