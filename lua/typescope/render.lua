@@ -944,8 +944,16 @@ function M.render(roots, opts)
       local suffix = "…)" .. ret_part
       local budget = math.max(8, opts.max_width - strwidth(", " .. suffix))
       local cut = math.max(1, find_break_point(body, budget))
-      -- drop the final (possibly cut-in-half) token so only whole params show
-      header = body:sub(1, cut):gsub(",%s*[^,]*$", "") .. ", " .. suffix
+      -- drop the final (possibly cut-in-half) token so only whole params show.
+      -- With no comma kept there is no whole param to show: back up to the
+      -- paren, or `run_main(comline_list)` drew as `run_main(com, …)`, a
+      -- half name and a comma promising a second param that doesn't exist
+      local kept, dropped = body:sub(1, cut):gsub(",%s*[^,]*$", "")
+      if dropped > 0 then
+        header = kept .. ", " .. suffix
+      else
+        header = body:sub(1, (body:find("(", 1, true) or cut)) .. suffix
+      end
     end
     -- colors align with the typing surface's signature block (Tony,
     -- 2026-08-06): yellow reserved for the callable + parens, params in
