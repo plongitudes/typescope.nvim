@@ -920,6 +920,26 @@ pub fn self_attribute_type(tx: &Transaction<'_>, handle: &Handle, body: &[Stmt],
         .and_then(|a| a.ty)
 }
 
+/// `module.attr` as the module declares it. In call position pyrefly's
+/// declaration-preserving lookup still answers an attribute with the callable
+/// the call resolved to: a class's `__init__` (`httpx.Client`), or the one
+/// overload that matched (`logging.basicConfig`), so the class or the
+/// overload set never reached scope::build (typescope.nvim-7zd). The module's
+/// own attribute is the declaration. `None` unless the base is a module.
+pub fn module_attribute_type(tx: &Transaction<'_>, handle: &Handle, cursor: &Cursor) -> Option<Type> {
+    let (_, attr) = cursor.text.rsplit_once('.')?;
+    // the base's last character sits just before the `.`
+    let base_end = cursor.range.start().checked_sub(ruff_text_size::TextSize::from(2))?;
+    let module = match tx.get_type_at(handle, base_end)? {
+        m @ Type::Module(_) => m,
+        _ => return None,
+    };
+    tx.attributes_of_type(handle, module)?
+        .into_iter()
+        .find(|a| a.name.as_str() == attr)
+        .and_then(|a| a.ty)
+}
+
 // ------------------------------------------------------------------ helpers
 
 /// See through the wrappers that carry no shape of their own.

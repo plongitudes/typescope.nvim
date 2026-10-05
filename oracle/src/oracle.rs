@@ -154,6 +154,17 @@ impl Oracle {
         {
             ty = tx.get_type_at_preserving_declaration(&handle, impl_range.start());
         }
+        // a synthesized callable on `module.attr` stands in for the declaration
+        use pyrefly_types::types::{Forallable, Type};
+        let synthesized = match &ty {
+            Some(Type::Callable(_)) => true,
+            Some(Type::Forall(fa)) => matches!(fa.body, Forallable::Callable(_)),
+            _ => false,
+        };
+        if synthesized && let Some(declared) = crate::walk::module_attribute_type(&tx, &handle, &cursor)
+        {
+            ty = Some(declared);
+        }
         if ty.is_none() {
             ty = crate::walk::self_attribute_type(&tx, &handle, &ast.body, module.contents(), &cursor);
         }
