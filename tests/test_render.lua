@@ -393,6 +393,18 @@ eq_lines("sections: header over the rows, no docstring", sections.lines, {
   "───────────────────",
   "· x  int",
 })
+-- a header past max_width elides to whole params; with only one param there
+-- is no whole one to keep, so it elides to the parens (typescope.nvim-ssu)
+do
+  local function header_at(header, width)
+    return render.render(section_tree, opts({ show_examples = false, header = header, max_width = width })).lines[1]
+  end
+  local one = header_at("run_main(comline_list) -> dict[str, _F2PyDict]", 40)
+  check("elided header: one param elides to the parens (" .. one .. ")", one == "run_main(…) -> dict[str, _F2PyDict]")
+  local some = header_at("connect(hôte, port=…, timeout=…) -> Conn", 34)
+  check("elided header: whole params survive (" .. some .. ")", some == "connect(hôte, port=…, …) -> Conn")
+end
+
 local doc_view = render.render(section_tree, opts(vim.tbl_extend("force", section_opts, { view = "doc" })))
 eq_lines("the doc view is the whole docstring", doc_view.lines, {
   "First line of prose.",

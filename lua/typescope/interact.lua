@@ -708,11 +708,18 @@ function M.attach(args)
       vim.cmd("normal! " .. (dir == 1 and "j" or "k"))
     end
   end
+  -- a count is that many jumps; read it first, the normal! fallbacks inside
+  -- jump reset v:count
+  local function jumps(dir)
+    for _ = 1, vim.v.count1 do
+      jump(dir)
+    end
+  end
   map("j", function()
-    jump(1)
+    jumps(1)
   end)
   map("k", function()
-    jump(-1)
+    jumps(-1)
   end)
 
   -- Examples come a sibling group at a time (examples.group_for): the
