@@ -672,6 +672,14 @@ fn a_constructor_is_what_the_call_runs() {
     // NamedTuple's synthesized __new__, receiver dropped
     let s = ctor("point = Point(");
     assert_eq!(params_of(&s), ["x", "y"]);
+    // dataclass_transform: the `__init__` attribute stitches the base's written
+    // definition to a synthesized signature (`self` and all); the checker's
+    // constructor is what's drawn
+    let s = ctor("record = Record(");
+    assert_eq!(s.header.as_deref(), Some("Record(title=…) -> Record"));
+    // an enum's call runs its metaclass's __call__, not an __init__
+    let s = ctor("color = Color(");
+    assert_eq!(params_of(&s).first(), Some(&"value"));
     // pydantic against the fixture's stub, whose BaseModel pyrefly doesn't
     // synthesize a constructor for: only `**data: Any` is left, so the fields
     // stand in. (With real pydantic, each field's declared type replaces the

@@ -351,7 +351,9 @@ impl<'a> Walker<'a> {
         // the receiver is dropped by POSITION: a method's first parameter
         // whatever it is called, never a staticmethod's (the resolver's
         // binds_receiver rule, carried forward)
-        let receiver_bound = bound_to.is_some() || (def.is_some_and(|d| d.cls.is_some()) && !flags.is_staticmethod);
+        // (a method pyrefly synthesized, like a dataclass's `__init__`, has
+        // no def but still names its class)
+        let receiver_bound = bound_to.is_some() || (f.metadata.kind.class().is_some() && !flags.is_staticmethod);
         self.param_rows(&mut node, &f.signature.params, receiver_bound, &facts, depth);
         // an `async def` evaluates to Coroutine[_, _, X]; the float says what
         // the author declared, X, the way hover does

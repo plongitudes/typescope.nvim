@@ -3,7 +3,8 @@
 from argparse import ArgumentParser
 from dataclasses import InitVar, dataclass, field
 from smtplib import SMTP
-from typing import NamedTuple
+from enum import Enum
+from typing import NamedTuple, dataclass_transform
 
 from pydantic import BaseModel
 
@@ -41,6 +42,22 @@ class Model(BaseModel):
     n: int = 3
 
 
+@dataclass_transform()
+class ModelBase:
+    """Like SQLAlchemy's DeclarativeBase: a written __init__ on the base, and
+    subclasses get a synthesized one from their fields."""
+
+    def __init__(self, **kw: object) -> None: ...
+
+
+class Record(ModelBase):
+    title: str = "untitled"
+
+
+class Color(Enum):
+    RED = 1
+
+
 mailer = SMTP("localhost")
 parser = MyParser()
 plain = Plain()
@@ -48,3 +65,5 @@ child = Child()
 mapping = MyDict()
 point = Point(1)
 model = Model()
+record = Record()
+color = Color(1)
