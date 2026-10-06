@@ -1,0 +1,4 @@
+{
+    "exclude": ["oracle/vendor", "oracle/target", "**/__pycache__", "**/.*"]
+}
+
