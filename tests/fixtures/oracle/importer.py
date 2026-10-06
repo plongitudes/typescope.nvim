@@ -9,3 +9,7 @@ alias = UsesThirdParty
 built = UsesThirdParty()
 gadget = Widget()
 binary = check.is_binary("a.png")
+import first
+picked = first.first([0, 1])
+import thirdparty
+opened = thirdparty.Opaque({})

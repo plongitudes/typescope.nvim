@@ -622,3 +622,18 @@ fn a_function_docstring_crosses_a_bundled_stub() {
 }
 
 
+/// `module.attr(...)`: pyrefly answers the attribute with the callable the
+/// call resolved to, a class's `__init__` or the one overload that matched,
+/// and that drew as a one-line declaration (typescope.nvim-7zd). The module's
+/// own attribute is the declaration: the whole overload set, or the class.
+#[test]
+fn a_module_attribute_in_a_call_is_its_declaration() {
+    // pyrefly's bundled first.pyi: five @overloads, generic over _T/_S
+    let s = probe("oracle/importer.py", "picked = first.first(", 15, true);
+    assert_eq!(s.scope, "function");
+    assert_eq!(s.overloads, Some(5));
+    assert_eq!(s.docstring.as_deref(), Some("Return the first true value of the iterable, or default."));
+    let s = probe("oracle/importer.py", "opened = thirdparty.Opaque(", 20, true);
+    assert_eq!(s.scope, "constructor");
+    assert!(s.roots.iter().any(|r| r.name == "scope"), "Opaque's __init__ params: {:?}", s.roots);
+}
