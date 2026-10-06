@@ -10,6 +10,7 @@ use pyrefly::state::state::Transaction;
 use pyrefly_build::handle::Handle;
 use pyrefly_python::module::Module;
 use pyrefly_python::module_path::ModulePath;
+use pyrefly_types::callable::Callable;
 use pyrefly_types::callable::Param;
 use pyrefly_types::callable::Params;
 use pyrefly_types::callable::Required;
@@ -253,31 +254,17 @@ impl<'a> Walker<'a> {
         }
     }
 
-    /// Bare params + returns for a function, `self`/`cls` dropped when bound
-    /// or when the function is a method by position.
-    pub fn function_node(&self, name: &str, kind: &str, f: &Function, bound_to: Option<&Type>, depth: u32) -> Node {
-        let mut node = Node::leaf(name, kind, display_function(f), "function");
-        let def = f.metadata.kind.as_func_def_id();
-        let facts = def.map(|d| self.def_facts(d)).unwrap_or_default();
-        node.location = facts.location.clone();
-        if let Some(d) = def {
-            node.def_name = Some(d.qname.id().as_str().to_owned());
-            node.def_range = Some(d.qname.range());
-            node.def_handle = Some(Handle::new(d.qname.module_name(), d.qname.module().path().dupe(), self.handle.sys_info().dupe()));
-        }
-        let flags = &f.metadata.flags;
-        // the receiver is dropped by POSITION: a method's first parameter
-        // whatever it is called, never a staticmethod's (the resolver's
-        // binds_receiver rule, carried forward)
-        let receiver_bound = bound_to.is_some() || (def.is_some_and(|d| d.cls.is_some()) && !flags.is_staticmethod);
+    /// The parameter rows and the header's shape tokens for one signature;
+    /// `skip_receiver` drops the first parameter (`self`, `cls`, `_cls`).
+    fn param_rows(&self, node: &mut Node, params: &Params, skip_receiver: bool, facts: &DefFacts, depth: u32) {
         // shape tokens mirror the resolver's header: names, `name=…` for a
         // default, and the `/` and `*` separators the signature implies
         let mut shape: Vec<String> = Vec::new();
         let mut had_pos_only = false;
         let mut star_written = false;
-        if let Params::List(list) = &f.signature.params {
+        if let Params::List(list) = params {
             for (i, p) in list.items().iter().enumerate() {
-                if i == 0 && receiver_bound {
+                if i == 0 && skip_receiver {
                     continue;
                 }
                 if had_pos_only && !matches!(p, Param::PosOnly(..)) {
@@ -335,6 +322,37 @@ impl<'a> Walker<'a> {
             }
         }
         node.shape = shape;
+    }
+
+    /// A constructor as the checker resolved it at a call: a bare signature
+    /// with no definition behind it (a dataclass's synthesized `__init__`, a
+    /// NamedTuple's `__new__`), so no source facts. Its first parameter is
+    /// always the receiver (`self`, or `_cls` for `__new__`).
+    pub fn callable_node(&self, name: &str, kind: &str, c: &Callable, depth: u32) -> Node {
+        let mut node = Node::leaf(name, kind, Type::Callable(Box::new(c.clone())).to_string(), "function");
+        self.param_rows(&mut node, &c.params, true, &DefFacts::default(), depth);
+        node.children.push(self.node("returns", "return", &c.ret, depth));
+        node
+    }
+
+    /// Bare params + returns for a function, `self`/`cls` dropped when bound
+    /// or when the function is a method by position.
+    pub fn function_node(&self, name: &str, kind: &str, f: &Function, bound_to: Option<&Type>, depth: u32) -> Node {
+        let mut node = Node::leaf(name, kind, display_function(f), "function");
+        let def = f.metadata.kind.as_func_def_id();
+        let facts = def.map(|d| self.def_facts(d)).unwrap_or_default();
+        node.location = facts.location.clone();
+        if let Some(d) = def {
+            node.def_name = Some(d.qname.id().as_str().to_owned());
+            node.def_range = Some(d.qname.range());
+            node.def_handle = Some(Handle::new(d.qname.module_name(), d.qname.module().path().dupe(), self.handle.sys_info().dupe()));
+        }
+        let flags = &f.metadata.flags;
+        // the receiver is dropped by POSITION: a method's first parameter
+        // whatever it is called, never a staticmethod's (the resolver's
+        // binds_receiver rule, carried forward)
+        let receiver_bound = bound_to.is_some() || (def.is_some_and(|d| d.cls.is_some()) && !flags.is_staticmethod);
+        self.param_rows(&mut node, &f.signature.params, receiver_bound, &facts, depth);
         // an `async def` evaluates to Coroutine[_, _, X]; the float says what
         // the author declared, X, the way hover does
         let ret = if facts.is_async { unwrap_coroutine(&f.signature.ret) } else { &f.signature.ret };

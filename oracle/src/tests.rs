@@ -637,3 +637,46 @@ fn a_module_attribute_in_a_call_is_its_declaration() {
     assert_eq!(s.scope, "constructor");
     assert!(s.roots.iter().any(|r| r.name == "scope"), "Opaque's __init__ params: {:?}", s.roots);
 }
+
+fn params_of(s: &Scope) -> Vec<&str> {
+    s.roots.iter().filter(|r| r.kind == "param").map(|r| r.name.as_str()).collect()
+}
+
+/// A constructor is what the call runs, wherever it was written: the member
+/// cut used to drop any `__init__` from the bundled typeshed, so a stdlib
+/// class's own constructor drew empty (typescope.nvim-pmy).
+#[test]
+fn a_constructor_is_what_the_call_runs() {
+    let ctor = |prefix: &str| probe("oracle/constructors.py", prefix, prefix.find('=').unwrap() as u32 + 2, true);
+    // a stdlib class's own __init__, and one a subclass inherits
+    let s = ctor("mailer = SMTP(");
+    assert_eq!(s.scope, "constructor");
+    assert_eq!(&params_of(&s)[..2], ["host", "port"]);
+    let s = ctor("parser = MyParser(");
+    assert_eq!(params_of(&s).first(), Some(&"prog"), "ArgumentParser's, inherited");
+    // no __init__ anywhere but object's: annotated attributes aren't params
+    let s = ctor("plain = Plain(");
+    assert_eq!(s.header.as_deref(), Some("Plain() -> Plain"));
+    assert!(params_of(&s).is_empty());
+    // a dataclass: a base's fields first, init=False left out, the InitVar
+    // typed as the checker types it, defaults from source
+    let s = ctor("child = Child(");
+    assert_eq!(params_of(&s), ["x", "y", "seed"]);
+    let seed = s.roots.iter().find(|r| r.name == "seed").unwrap();
+    assert_eq!(seed.ty.display, "int");
+    assert_eq!(s.roots[1].default.as_deref(), Some("\"y\""));
+    // an overloaded __init__: groups, each making the instance
+    let s = ctor("mapping = MyDict(");
+    assert!(s.overloads.unwrap_or(0) > 1, "dict's overloads: {:?}", s.headers);
+    assert!(s.headers.unwrap().iter().all(|h| h.ends_with("-> MyDict")));
+    // NamedTuple's synthesized __new__, receiver dropped
+    let s = ctor("point = Point(");
+    assert_eq!(params_of(&s), ["x", "y"]);
+    // pydantic against the fixture's stub, whose BaseModel pyrefly doesn't
+    // synthesize a constructor for: only `**data: Any` is left, so the fields
+    // stand in. (With real pydantic, each field's declared type replaces the
+    // checker's validation-mode `LaxInt`; probed against kitchen's venv.)
+    let s = ctor("model = Model(");
+    assert_eq!(params_of(&s), ["n"]);
+    assert_eq!(s.roots[0].ty.display, "int");
+}
