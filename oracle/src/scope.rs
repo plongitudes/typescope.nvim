@@ -211,46 +211,175 @@ fn source_bases(req: &Request<'_>, cls: &Class) -> Vec<String> {
 // ------------------------------------------------------------------ constructor
 
 /// `Recipe(` under the cursor: what the call takes, then what it makes.
-/// A written `__init__` supplies the parameters; without one (dataclass,
-/// pydantic, NamedTuple, TypedDict) the instance's fields are the
-/// parameters, which is exactly what those constructs synthesize.
+///
+/// The checker's constructor at the call decides which parameters exist,
+/// their order and how they are passed: it has already followed the MRO,
+/// `__new__`, a metaclass's `__call__` and whatever a construct synthesizes
+/// (typescope.nvim-pmy). The sources we read for detail only draw it when
+/// they agree with it, so a source that disagrees costs detail, never
+/// correctness:
+/// - a written `__init__`, own or inherited, stdlib or not, when its
+///   parameter names (or one overload's) are the checker's: drawn as that
+///   function, for its source defaults and docstring, an overload set as
+///   groups. Not one pyrefly synthesized: the attribute stitches two lookups
+///   together (`MappedAsDataclass` reports SQLAlchemy's `__init__` as the
+///   definition and its own synthesized signature as the type), and a
+///   synthesized one is the checker's answer again with no source behind it.
+/// - otherwise, for a class built from its fields (dataclass, pydantic,
+///   NamedTuple, TypedDict): each parameter drawn as the field of its name,
+///   for the declared type (pyrefly types a pydantic field in validation
+///   mode, `LaxInt`), the source default, the field's structure.
+/// - otherwise the checker's signature as it stands. For a plain class that
+///   is `object`'s, which takes nothing: `Plain(x=1)` is a TypeError.
+///
+/// With no call to ask about (the cursor on a `class` line), the fields or
+/// the written `__init__` stand in, as they did before the checker was asked.
 fn constructor_scope(req: &Request<'_>, walker: &Walker<'_>, cls: &Class, ty: &Type) -> Scope {
     let name = cls.name().as_str().to_owned();
     let instance = walker.node(&name, "return", ty, req.depth);
     let docstring = class_docstring(req, cls);
-    let mut roots = Vec::new();
-    let mut shape = Vec::new();
+    let mut made = instance.clone();
+    made.name = "returns".to_owned();
+    made.kind = "return".to_owned();
 
-    let init = req
+    let built_from_fields = matches!(instance.ty.category.as_str(), "dataclass" | "pydantic" | "typeddict" | "namedtuple");
+    let written = req
         .tx
         .attributes_of_type(req.handle, ty.clone())
         .unwrap_or_default()
         .into_iter()
         .find(|a| a.name.as_str() == "__init__")
-        .filter(|a| match &a.definition {
-            pyrefly::alt::attr::AttrDefinition::FullyResolved { cls: owner, .. } => !policy::is_cut_base(owner),
-            _ => false,
-        })
-        .and_then(|a| a.ty);
-    if let Some(init_ty) = init {
-        let init_node = walker.node("__init__", "function", &init_ty, req.depth);
-        shape = init_node.shape.clone();
-        roots.extend(init_node.children.into_iter().filter(|c| c.kind == "param"));
-    } else {
-        for field in instance.children.iter().filter(|c| matches!(c.kind.as_str(), "field")) {
-            let mut p = field.clone();
-            p.kind = "param".to_owned();
-            p.origin = None;
-            shape.push(if p.default.is_some() { format!("{}=…", p.name) } else { p.name.clone() });
-            roots.push(p);
+        .and_then(|a| a.ty)
+        // one pyrefly synthesized (a dataclass_transform or pydantic class's)
+        // is the checker's own answer again, with no source behind it to add
+        .filter(|t| !matches!(t, Type::Function(f) if matches!(f.metadata.kind, pyrefly_types::function::FunctionKind::Synthesized(_))))
+        .map(|t| walker.node("__init__", "function", &t, req.depth));
+    let ctor = match checked_constructor(req) {
+        Some(c) => {
+            let checked = walker.callable_node("__init__", "function", &c, req.depth);
+            // pydantic's own `__init__(**data)`, when the checker didn't
+            // synthesize one (no pydantic it recognises), names nothing a
+            // field-built class takes: the fields say more
+            let says_nothing = |n: &Node| built_from_fields && !n.children.iter().any(|c| c.kind == "param" && !is_untyped_extra(c));
+            match written {
+                Some(w) if agrees(&w, &checked) && !says_nothing(&w) => w,
+                _ if built_from_fields => {
+                    let mut node = checked;
+                    draw_as_fields(&mut node, &instance);
+                    if says_nothing(&node) {
+                        node = fields_as_params(&instance);
+                    }
+                    node
+                }
+                _ => checked,
+            }
         }
+        None if built_from_fields => fields_as_params(&instance),
+        None => written.unwrap_or_else(|| fields_as_params(&instance)),
+    };
+
+    if !ctor.children.is_empty() && ctor.children.iter().all(|c| c.kind == "overload") {
+        // an overloaded `__init__` (`dict`, `subprocess.Popen`): one group per
+        // signature, each returning the instance rather than `__init__`'s None
+        let n = ctor.children.len();
+        let mut roots = Vec::new();
+        let mut headers = Vec::new();
+        for (i, mut g) in ctor.children.into_iter().enumerate() {
+            g.name = name.clone();
+            g.badge = Some(format!("[{}/{}]", i + 1, n));
+            g.ty.display = format!("({})", g.shape.join(", "));
+            g.children.retain(|c| c.kind != "return");
+            g.children.push(made.clone());
+            headers.push(format!("{name}({}) -> {name}", g.shape.join(", ")));
+            roots.push(g);
+        }
+        return Scope { scope: "constructor".to_owned(), header: headers.first().cloned(), docstring, headers: Some(headers), overloads: Some(n), roots, reason: None };
     }
-    let mut made = instance;
-    made.name = "returns".to_owned();
-    made.kind = "return".to_owned();
-    let header = format!("{name}({}) -> {name}", shape.join(", "));
+
+    let header = format!("{name}({}) -> {name}", ctor.shape.join(", "));
+    let mut roots: Vec<Node> = ctor.children.into_iter().filter(|c| c.kind == "param").collect();
     roots.push(made);
     Scope { scope: "constructor".to_owned(), header: Some(header), docstring, headers: None, overloads: None, roots, reason: None }
+}
+
+/// Does a written `__init__` say the same as the checker's constructor? The
+/// same parameter names in the same order, or that for one of its overloads
+/// (the checker answers with the overload the arguments matched).
+fn agrees(written: &Node, checked: &Node) -> bool {
+    fn names(n: &Node) -> Vec<&str> {
+        n.children.iter().filter(|c| c.kind == "param").map(|c| c.name.as_str()).collect()
+    }
+    let want = names(checked);
+    if !written.children.is_empty() && written.children.iter().all(|c| c.kind == "overload") {
+        written.children.iter().any(|g| names(g) == want)
+    } else {
+        names(written) == want
+    }
+}
+
+/// The constructor the checker resolved at the call: pyrefly types the
+/// callee of `Recipe(...)` as the signature it checks the arguments against,
+/// synthesized ones included.
+fn checked_constructor(req: &Request<'_>) -> Option<pyrefly_types::callable::Callable> {
+    match req.tx.get_type_at(req.handle, req.cursor.range.start())? {
+        Type::Callable(c) => Some(*c),
+        Type::Forall(fa) => match fa.body {
+            Forallable::Callable(c) => Some(c),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// A synthesized constructor's parameters drawn as the fields they were made
+/// from, matched by name. The checker keeps the list and how each is passed;
+/// a parameter with no field of its name (an `InitVar`, a pydantic alias)
+/// stays as the checker typed it. The `**` pydantic adds for extra keys is
+/// dropped: it is untyped and says nothing about the model.
+fn draw_as_fields(ctor: &mut Node, instance: &Node) {
+    for p in ctor.children.iter_mut().filter(|c| c.kind == "param") {
+        let Some(field) = instance.children.iter().find(|f| f.kind == "field" && f.name == p.name) else {
+            continue;
+        };
+        let mut drawn = field.clone();
+        drawn.kind = "param".to_owned();
+        drawn.origin = None;
+        drawn.pass_mode = p.pass_mode.take();
+        if drawn.default.is_none() {
+            drawn.default = p.default.take();
+        }
+        // an `InitVar` is a pseudo-field the instance can't type; the
+        // checker's parameter type is the real one
+        if drawn.ty.display == "?" {
+            drawn.ty = p.ty.clone();
+            drawn.children = std::mem::take(&mut p.children);
+        }
+        *p = drawn;
+    }
+    let dropped: Vec<String> = ctor.children.iter().filter(|c| is_untyped_extra(c)).map(|c| c.name.clone()).collect();
+    ctor.children.retain(|c| !is_untyped_extra(c));
+    ctor.shape.retain(|t| !dropped.contains(t));
+}
+
+/// A `**kwargs: Any` row: extra keys, untyped.
+fn is_untyped_extra(c: &Node) -> bool {
+    c.kind == "param" && c.name.starts_with("**") && c.ty.display == "Any"
+}
+
+/// No constructor the checker could name: the fields stand in, as they did
+/// before the checker was asked.
+fn fields_as_params(instance: &Node) -> Node {
+    let mut node = instance.clone();
+    node.children = Vec::new();
+    node.shape = Vec::new();
+    for field in instance.children.iter().filter(|c| c.kind == "field") {
+        let mut p = field.clone();
+        p.kind = "param".to_owned();
+        p.origin = None;
+        node.shape.push(if p.default.is_some() { format!("{}=…", p.name) } else { p.name.clone() });
+        node.children.push(p);
+    }
+    node
 }
 
 // ------------------------------------------------------------------ declaration
