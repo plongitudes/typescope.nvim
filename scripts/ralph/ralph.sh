@@ -101,8 +101,25 @@ Then summarise which of 1-3, 6-8 failed and why." | jq --unbuffered -rj "$stream
 fi
 
 # --- loop -----------------------------------------------------------------
+# A killed run leaves its bead claimed (in_progress), and bd ready skips
+# claimed beads. With nothing uncommitted there is no half-done work to
+# protect, so hand them back.
+if [ -z "$(git -C "$wt" status --porcelain)" ]; then
+  (cd "$repo" && bd list --status in_progress --json | jq -r --arg p "$epic." '.[] | select(.id | startswith($p)) | .id') |
+    while read -r stale; do
+      echo "=== reopening $stale (claimed by an earlier, interrupted run)"
+      (cd "$repo" && bd update "$stale" --status open --assignee "" >/dev/null)
+    done
+else
+  echo "=== $wt has uncommitted changes from an interrupted run; clean it up first" >&2
+  exit 1
+fi
+
 for ((i = 1; i <= max; i++)); do
-  id=$(cd "$repo" && bd ready --json | jq -r --arg p "$epic." '[.[] | select(.id | startswith($p))][0].id // empty')
+  # only beads triaged for an agent: iterations file follow-ups as
+  # needs-triage, and those may need things the sandbox can't do
+  id=$(cd "$repo" && bd ready --json | jq -r --arg p "$epic." \
+    '[.[] | select((.id | startswith($p)) and ((.labels // []) | index("ready-for-agent")))][0].id // empty')
   if [ -z "$id" ]; then
     echo "=== no ready bead under $epic: done after $((i - 1)) iterations"
     exit 0
