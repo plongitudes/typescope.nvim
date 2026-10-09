@@ -42,8 +42,10 @@ end
 ---@field auto_examples? boolean generate the inspector node's sibling group as the cursor reaches it
 ---@field on_llm_error? fun(err: string) an automatic generation failed
 
----@param width integer
-local function help_lines(width)
+--- The help view's key list. `?` itself isn't listed: it is the key that
+--- just opened it, and the footer under the list names it.
+---@return typescope.HelpUpdate
+local function help_content()
   local km = config.get().keymaps
   local rows = {
     { km.expand, "expand / collapse" },
@@ -52,13 +54,13 @@ local function help_lines(width)
     { km.llm_generate, "example for this row, from the model" },
     { km.docstring, "docstring: open / back" },
     { km.close .. " / <Esc>", "close" },
-    { km.help, "toggle this help" },
   }
-  local lines = { string.rep("·", math.max(4, width)) }
-  for _, row in ipairs(rows) do
-    table.insert(lines, (" %-11s %s"):format(row[1], row[2]))
+  local lines, highlights = {}, {}
+  for i, row in ipairs(rows) do
+    lines[i] = (" %-11s %s"):format(row[1], row[2])
+    highlights[i] = { line = i - 1, col_start = 0, col_end = #lines[i], group = "TypeScopeHint" }
   end
-  return lines
+  return { lines = lines, highlights = highlights }
 end
 
 --- Wire tree navigation into an open TypeScope float. Returns a controller
@@ -347,25 +349,6 @@ function M.attach(args)
   ---@param focus_id? string park the cursor on this node's row
   ---@param frame? boolean nothing but the clock or the cursor moved
   function refresh(focus_id, frame)
-    -- help (?) replaces the view entirely: content routinely exceeds
-    -- max_height, so an appended inspector lands below the fold and is never seen
-    if st.show_help then
-      local lines = help_lines(st.width)
-      local highlights = {}
-      for i, text in ipairs(lines) do
-        highlights[i] = { line = i - 1, col_start = 0, col_end = #text, group = "TypeScopeHint" }
-      end
-      float.update(st.handle, {
-        lines = lines,
-        highlights = highlights,
-        width = st.width,
-        height = #lines,
-        footer = footer(),
-      })
-      vim.api.nvim_win_set_cursor(st.handle.win, { 1, 0 })
-      rows = nil
-      return
-    end
     -- phase first: the wave's position is a function of the clock, never
     -- accumulated state (a dropped frame skips ahead instead of stretching the
     -- animation), and sync_reveals freezes newly-landed rows AT this value
@@ -426,6 +409,9 @@ function M.attach(args)
       -- the header follows the cursor's overload group, as the inspector
       -- follows its row
       header = group_of(st.inspector_id),
+      -- help (?) is drawn over the frame, which goes on being laid out (and
+      -- animated) under it exactly as it was
+      help = st.show_help and help_content() or nil,
     })
     if focus_id then
       for lnum, id in pairs(st.result.line_to_node) do
@@ -438,9 +424,7 @@ function M.attach(args)
   end
 
   local function node_under_cursor()
-    -- while help covers the view, st.result's line map is stale — node
-    -- keymaps become no-ops instead of acting on invisible rows
-    if not st.result or st.show_help then
+    if not st.result then
       return nil
     end
     local lnum = vim.api.nvim_win_get_cursor(st.handle.win)[1]
@@ -451,6 +435,15 @@ function M.attach(args)
   local km = config.get().keymaps
   local function map(lhs, fn)
     vim.keymap.set("n", lhs, fn, { buffer = st.handle.buf, nowait = true })
+  end
+  --- A key that acts on the outline's rows: inert while help covers them,
+  --- rather than moving or changing rows the user can't see.
+  local function row_map(lhs, fn)
+    map(lhs, function()
+      if not st.show_help then
+        fn()
+      end
+    end)
   end
 
   -- expanding a node whose children weren't resolved yet (beyond config
@@ -466,7 +459,7 @@ function M.attach(args)
     return false
   end
 
-  map(km.expand, function()
+  row_map(km.expand, function()
     local node = node_under_cursor()
     if not node then
       return
@@ -515,7 +508,7 @@ function M.attach(args)
 
   -- l: one level more under the cursor's node per press. On a collapsed
   -- node that's just opening it; on an open one it's the next level down.
-  map(km.expand_node, function()
+  row_map(km.expand_node, function()
     local node = node_under_cursor()
     if not node then
       return
@@ -525,7 +518,7 @@ function M.attach(args)
       open_nodes(targets)
     end
   end)
-  map(km.collapse_node, function()
+  row_map(km.collapse_node, function()
     local node = node_under_cursor()
     if not node then
       return
@@ -543,7 +536,7 @@ function M.attach(args)
       end
     end
   end)
-  map(km.collapse_all, function()
+  row_map(km.collapse_all, function()
     local node = node_under_cursor()
     model.walk(st.roots, function(n)
       n.state.expanded = false
@@ -551,15 +544,11 @@ function M.attach(args)
     -- the cursor's node likely vanished; land on its root ancestor
     refresh(node and node.id:match("^[^.]+"))
   end)
+  -- help opens over whichever view the loupe shows, and closes back onto it;
+  -- the rows under it never moved, so there is nothing to put back
   map(km.help, function()
-    local node = node_under_cursor()
     st.show_help = not st.show_help
-    if st.show_help then
-      st.help_return_id = node and node.id or nil
-      refresh()
-    else
-      refresh(st.help_return_id)
-    end
+    refresh()
   end)
   -- Locate a param's definition line inside the rendered docstring section.
   -- Docstring formats vary — numpy/loguru ("name : type"), google
@@ -637,7 +626,11 @@ function M.attach(args)
   end
 
   map(km.docstring, function()
-    if st.show_help then
+    -- from help: help closes onto the docstring view, which is already
+    -- under it or opens below
+    if st.show_help and st.show_doc then
+      st.show_help = false
+      refresh()
       return
     end
     -- the loupe swaps back to the inspector; the outline never left
@@ -661,7 +654,7 @@ function M.attach(args)
     if not ok then
       error(r)
     end
-    st.doc, st.show_doc = r, true
+    st.doc, st.show_doc, st.show_help = r, true, false
     refresh()
     -- hovering a param opens the docs where they define it
     scroll_doc(node_under_cursor())
@@ -670,7 +663,7 @@ function M.attach(args)
   -- <C-d>/<C-u> scroll the docstring view from the outline; elsewhere they
   -- scroll the outline as usual
   for _, key in ipairs({ "<C-d>", "<C-u>" }) do
-    map(key, function()
+    row_map(key, function()
       local keys = vim.keycode(key)
       if not in_loupe(function()
         vim.cmd("normal! " .. keys)
@@ -690,10 +683,6 @@ function M.attach(args)
   -- j/k jump between rows, skipping display-only lines. Past the last node
   -- they fall back to plain movement.
   local function jump(dir)
-    if st.show_help then
-      vim.cmd("normal! " .. (dir == 1 and "j" or "k"))
-      return
-    end
     local win = st.handle.win
     local lnum = vim.api.nvim_win_get_cursor(win)[1]
     local cur = st.result.line_to_node[lnum]
@@ -726,10 +715,10 @@ function M.attach(args)
       jump(dir)
     end
   end
-  map("j", function()
+  row_map("j", function()
     jumps(1)
   end)
-  map("k", function()
+  row_map("k", function()
     jumps(-1)
   end)
 
@@ -802,7 +791,7 @@ function M.attach(args)
     end
   end
 
-  map(km.llm_generate, function()
+  row_map(km.llm_generate, function()
     if not args.on_llm_nodes then
       return
     end

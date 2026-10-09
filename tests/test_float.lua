@@ -379,6 +379,41 @@ local layout_cases = {
     { docstring = 30, row = 30 },
     { content = 20, extent = 26, top = 30 - 26 },
   },
+  -- the help view is drawn over the frame: the panes under it keep their
+  -- sizes, and it grows from the frame's bottom edge away from the cursor's
+  -- code line. The frame here is 3 + 10 + 5 = 18 rows; help's own box adds 2.
+  { "no help, no overlay", {}, { help = "none" } },
+  {
+    "help leaves every pane its size and place",
+    { help = 6 },
+    { header_h = 1, outline_h = 8, inspector_h = 3, header_row = 0, outline_row = 3, inspector_row = 13, top = 6 },
+  },
+  {
+    "help below the cursor: it grows up from the frame's bottom edge",
+    { help = 6 },
+    { help_row = 18 - 8, help_h = 6, help_footer = true, help_border = "rounded" },
+  },
+  { "...up to the frame's top", { help = 16 }, { help_row = 0, help_h = 16 } },
+  { "...then down past the frame's bottom", { help = 25 }, { help_row = 0, help_h = 25 } },
+  { "...stopping at the screen edge", { help = 40 }, { help_row = 0, help_h = 40 - 6 - 2 } },
+  {
+    "help above the cursor: it grows up from the frame's bottom edge",
+    { help = 6, row = 30 },
+    { below = false, top = 30 - 18, help_row = 18 - 8, help_h = 6 },
+  },
+  { "...and on up past the frame's top", { help = 25, row = 30 }, { help_row = 18 - 27, help_h = 25 } },
+  { "...stopping at the screen's top", { help = 40, row = 30 }, { help_row = 18 - 30, help_h = 30 - 2 } },
+  {
+    "help over the docstring view sits on its grown bottom edge",
+    { help = 4, docstring = 6 },
+    { inspector_h = 6, help_row = 21 - 6, help_h = 4 },
+  },
+  {
+    "help with the loupe hidden sits on the outline's bottom edge",
+    { help = 4, inspector = false },
+    { help_row = 13 - 6, help_h = 4 },
+  },
+  { "help without a border: no box to add", { help = 4, border = "none" }, { help_row = 12 - 4, help_h = 4 } },
 }
 
 for _, case in ipairs(layout_cases) do
@@ -398,9 +433,9 @@ for _, case in ipairs(layout_cases) do
     rule = got.rule or "none",
     content = 0,
   }
-  for _, pane in ipairs({ "header", "outline", "inspector" }) do
+  for _, pane in ipairs({ "header", "outline", "inspector", "help" }) do
     local p = got[pane]
-    if p then
+    if p and pane ~= "help" then
       view.content = view.content + p.height
       -- the frame's outer rows: down to the last pane's bottom edge
       view.extent = p.row + p.height + (got.rule and 2 or 0)

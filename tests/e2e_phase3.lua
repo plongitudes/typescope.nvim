@@ -549,6 +549,87 @@ if ulines then
   check("...not the docstring", not inspector_text():find("Seconds to wait"))
   check("...and every pane back at its prior height", vim.deep_equal(pane_heights(), heights_before))
 
+  -- ?: the help view, an overlay over the frame. The panes under it keep
+  -- their sizes, row keys are inert, and ? again returns to what the loupe
+  -- showed; d from help goes to the docstring view
+  local function help_win()
+    for _, w in ipairs(vim.api.nvim_list_wins()) do
+      if vim.bo[vim.api.nvim_win_get_buf(w)].filetype == "typescope_help" then
+        local c = vim.api.nvim_win_get_config(w)
+        return not c.hide and w or nil
+      end
+    end
+  end
+  local function title_of(w)
+    local text = ""
+    for _, chunk in
+      ipairs(type(vim.api.nvim_win_get_config(w).title) == "table" and vim.api.nvim_win_get_config(w).title or {})
+    do
+      text = text .. chunk[1]
+    end
+    return text
+  end
+  local function shown(w)
+    return not vim.api.nvim_win_get_config(w).hide
+  end
+  vim.api.nvim_feedkeys("?", "x", false)
+  local hw = help_win()
+  check("?: the help view opens", hw ~= nil)
+  if hw then
+    local hc = vim.api.nvim_win_get_config(hw)
+    local htext = table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(hw), 0, -1, false), "\n")
+    check("...titled `typescope help`", title_of(hw):find("typescope help", 1, true) ~= nil)
+    check(
+      "...drawn over the panes",
+      hc.zindex > vim.api.nvim_win_get_config(ts_win).zindex and hc.zindex > vim.api.nvim_win_get_config(iwin2).zindex
+    )
+    check("...with the same `? help` footer", footer_of(hw) == " ? help ─")
+    check("...listing the keys", htext:find("expand / collapse", 1, true) ~= nil)
+    check("...but not the key that opened it", not htext:find("toggle this help", 1, true))
+    check(
+      "...the panes under it stay shown, at their sizes",
+      vim.deep_equal(pane_heights(), heights_before) and shown(hwin) and shown(ts_win) and shown(iwin2)
+    )
+    check("...the inspector still in the loupe", inspector_text():find("^timeout") ~= nil)
+    check("...focus stays in the outline", vim.api.nvim_get_current_win() == ts_win)
+    local outline_now = vim.api.nvim_buf_get_lines(ts_buf2, 0, -1, false)
+    for _, key in ipairs({ "j", "2j", "k", "<CR>", "l", "h", "H", "<C-d>" }) do
+      vim.api.nvim_feedkeys(vim.keycode(key), "x", false)
+    end
+    check(
+      "row keys don't move or change the outline under help",
+      vim.api.nvim_win_get_cursor(ts_win)[1] == timeout_row
+        and vim.deep_equal(vim.api.nvim_buf_get_lines(ts_buf2, 0, -1, false), outline_now)
+    )
+    vim.api.nvim_feedkeys("?", "x", false)
+    check("? again closes help", help_win() == nil)
+    check("...back to the inspector", inspector_text():find("^timeout") ~= nil)
+    check("...every pane at its prior height", vim.deep_equal(pane_heights(), heights_before))
+
+    -- from the docstring view, ? and ? again land back in it
+    vim.api.nvim_feedkeys("d", "x", false)
+    local doc_heights = pane_heights()
+    vim.api.nvim_feedkeys("?", "x", false)
+    check("help opens over the docstring view", help_win() ~= nil)
+    check("...which keeps its size under it", vim.deep_equal(pane_heights(), doc_heights))
+    vim.api.nvim_feedkeys("?", "x", false)
+    check(
+      "? from help returns to the docstring view",
+      help_win() == nil and inspector_text():find("Spin up", 1, true) ~= nil
+    )
+    vim.api.nvim_feedkeys("d", "x", false)
+
+    -- d from help: help closes onto the docstring view
+    vim.api.nvim_feedkeys("?", "x", false)
+    vim.api.nvim_feedkeys("d", "x", false)
+    check(
+      "d from help shows the docstring view",
+      help_win() == nil and inspector_text():find("Spin up", 1, true) ~= nil
+    )
+    vim.api.nvim_feedkeys("d", "x", false)
+    check("...and d again the inspector", inspector_text():find("^timeout") ~= nil)
+  end
+
   -- active param (mock always reports 0 → config) renders TypeScopeActive
   local ts_buf = vim.api.nvim_win_get_buf(ts_win)
   local ns = vim.api.nvim_create_namespace("typescope")
@@ -1078,12 +1159,16 @@ do
     check("...on the row it left", cursor_line():find("timeout") ~= nil)
     check("...with the inspector back", inspector_text():find("^timeout") ~= nil)
 
-    -- q and <Esc> close the float from the docstring view
-    for _, key in ipairs({ "q", "<Esc>" }) do
-      vim.api.nvim_feedkeys("d", "x", false)
+    -- q and <Esc> close the float from the docstring view and from help
+    for i, key in ipairs({ "q", "<Esc>", "q", "<Esc>" }) do
+      local from = i <= 2 and "d" or "?"
+      vim.api.nvim_feedkeys(from, "x", false)
       vim.api.nvim_feedkeys(vim.keycode(key), "x", false)
-      check(key .. " closes the float from the docstring view", float_lines() == nil and inspector() == nil)
-      if key == "q" then
+      check(
+        ("%s closes the float from the %s view"):format(key, from == "d" and "docstring" or "help"),
+        #all_floats() == 0
+      )
+      if i < 4 then
         vim.api.nvim_win_set_cursor(0, { call_line, 12 })
         require("typescope").open()
         vim.wait(3000, function()

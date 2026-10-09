@@ -4,6 +4,7 @@
 ---@field ns integer
 ---@field header? typescope.HeaderPane the frame's header pane, above the outline (the handle's own buf/win are the outline)
 ---@field inspector? { buf: integer, win: integer } the frame's loupe, below the outline
+---@field help? { buf: integer, win: integer } the help view, drawn over the frame; opened by the first update that shows it
 ---@field budget? integer content rows the frame's panes may share; fixed at open so the frame never outgrows its side of the cursor
 ---@field frame? typescope.Frame
 
@@ -369,6 +370,7 @@ end
 ---@field outline integer the outline's content rows
 ---@field inspector? integer the inspector's content rows; nil hides the loupe (help) and the outline closes the frame
 ---@field docstring? integer the docstring view's rows: the loupe shows it, grown from the inspector's rows toward the budget (needs `inspector`)
+---@field help? integer the help view's rows: an overlay over the frame, which leaves the panes as they are
 
 ---@class typescope.PaneLayout
 ---@field row integer the pane's outer top edge, as an offset from the frame's top
@@ -386,6 +388,7 @@ end
 ---@field header? typescope.PaneLayout nil without a header
 ---@field outline typescope.PaneLayout
 ---@field inspector? typescope.PaneLayout nil while hidden
+---@field help? typescope.PaneLayout the help overlay; its row may be negative (above the frame's top)
 
 --- Where every pane of the frame goes: the side of the cursor, the content
 --- budget there, and each pane's rows. Pure — reads no editor state, opens
@@ -433,6 +436,18 @@ function M.frame_layout(spec)
     offset = offset + 2 * edge + heights[pane.name]
   end
   layout.top = below and (spec.row + 1) or (spec.row - offset)
+  if spec.help then
+    -- drawn over the frame, not in it: the panes keep their rows. It sits on
+    -- the frame's bottom edge and grows up; under the cursor it stops at the
+    -- frame's top and grows on down instead, so it never covers the code line
+    local outer = math.min(math.max(1, spec.help) + 2 * edge, below and below_room or above_room)
+    layout.help = {
+      row = below and math.max(0, offset - outer) or (offset - outer),
+      height = math.max(1, outer - 2 * edge),
+      border = spec.border,
+      footer = true,
+    }
+  end
   return layout
 end
 
@@ -483,8 +498,9 @@ end
 --- placed, and shown, by the first update.
 ---@param filetype string
 ---@param border any
+---@param zindex? integer default 50, the frame's
 ---@return { buf: integer, win: integer }
-local function pane_window(filetype, border)
+local function pane_window(filetype, border, zindex)
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].bufhidden = "wipe"
   vim.bo[buf].undolevels = -1 -- repainted every animation frame; see M.open
@@ -500,7 +516,7 @@ local function pane_window(filetype, border)
     border = border,
     focusable = false,
     hide = true,
-    zindex = 50,
+    zindex = zindex or 50,
   })
   vim.wo[win].wrap = false
   -- the docstring view scrolls the loupe by parking its cursor on the line
@@ -657,6 +673,10 @@ end
 ---@field height integer the inspector's rows (in the docstring view, the rows the loupe grows from)
 ---@field docstring? boolean the lines are the docstring view: the loupe grows toward them, away from the cursor
 
+---@class typescope.HelpUpdate
+---@field lines string[]
+---@field highlights typescope.Highlight[]
+
 --- Lay out the frame: the header, the outline, and, when `inspector` is
 --- given, the loupe under them, on the side of the cursor chosen at open.
 --- `inspector = nil` hides it (help) and the outline closes the frame
@@ -667,7 +687,8 @@ end
 ---@param inspector? typescope.InspectorUpdate
 ---@param footer? { [1]: string, [2]: string }[]
 ---@param lang? string
-local function layout(handle, width, outline_h, inspector, footer, lang)
+---@param help? typescope.HelpUpdate
+local function layout(handle, width, outline_h, inspector, footer, lang, help)
   local p = handle.inspector
   local open = inspector ~= nil and p ~= nil and vim.api.nvim_win_is_valid(p.win)
   local hdr = handle.header
@@ -678,6 +699,7 @@ local function layout(handle, width, outline_h, inspector, footer, lang)
     outline = outline_h,
     inspector = open and inspector.height or nil,
     docstring = open and inspector.docstring and #inspector.lines or nil,
+    help = help and #help.lines or nil,
   })
   -- right-justified on a bottom edge, ending one rule glyph short of the
   -- corner: ╰────── ? help ─╯
@@ -690,7 +712,8 @@ local function layout(handle, width, outline_h, inspector, footer, lang)
 
   ---@param pane typescope.PaneLayout
   ---@param tag? { [1]: string, [2]: string }[] the pane's own bottom-edge chunks (the header's `✓ [i/n]`)
-  local function place(win, pane, tag)
+  ---@param title? string
+  local function place(win, pane, tag, title)
     local chunks = pane.footer and footer or on_rule(tag)
     local row = placed.top + pane.row
     local cfg = {
@@ -700,6 +723,8 @@ local function layout(handle, width, outline_h, inspector, footer, lang)
       width = placed.width,
       height = pane.height,
       border = pane.border,
+      -- a title needs an edge to sit on
+      title = title and placed.rule and { { title, "TypeScopeTitle" } } or nil,
       hide = false,
     }
     -- the footer belongs to whichever pane draws the frame's bottom; "" takes
@@ -718,6 +743,14 @@ local function layout(handle, width, outline_h, inspector, footer, lang)
     local shown = hdr.groups[hdr.shown]
     place(hdr.win, placed.header, shown and shown.tag)
   end
+  if placed.help then
+    -- above the panes' zindex, so it covers them without moving them
+    handle.help = handle.help or pane_window("typescope_help", handle.frame.border, 60)
+    set_content(handle.help.buf, help.lines, help.highlights)
+    place(handle.help.win, placed.help, nil, " typescope help ")
+  elseif handle.help then
+    configure(handle.help.win, { hide = true }, "hidden")
+  end
   if not p or not vim.api.nvim_win_is_valid(p.win) then
     return
   end
@@ -732,7 +765,7 @@ end
 --- Swap content and resize in one synchronous block — no scheduling between
 --- buffer and window updates, so expand/collapse never shows a partial frame.
 ---@param handle typescope.FloatHandle
----@param opts { lines?: string[], highlights: typescope.Highlight[], ts_injections?: typescope.Injection[], lang?: string, width?: integer, height?: integer, title?: string, inspector?: typescope.InspectorUpdate, footer?: { [1]: string, [2]: string }[], header?: integer } lines = nil: the outline's content is unchanged (only the inspector or the frame moved); header: the overload group the header shows (nil: unchanged)
+---@param opts { lines?: string[], highlights: typescope.Highlight[], ts_injections?: typescope.Injection[], lang?: string, width?: integer, height?: integer, title?: string, inspector?: typescope.InspectorUpdate, footer?: { [1]: string, [2]: string }[], header?: integer, help?: typescope.HelpUpdate } lines = nil: the outline's content is unchanged (only the inspector or the frame moved); header: the overload group the header shows (nil: unchanged); help: the help view over the frame (nil: closed)
 function M.update(handle, opts)
   if opts.lines then
     set_content(handle.buf, opts.lines, opts.highlights, opts.ts_injections, opts.lang)
@@ -741,7 +774,7 @@ function M.update(handle, opts)
     show_header(handle.header, opts.header)
   end
   if handle.frame then
-    layout(handle, opts.width, opts.height, opts.inspector, opts.footer, opts.lang)
+    layout(handle, opts.width, opts.height, opts.inspector, opts.footer, opts.lang, opts.help)
     return
   end
   local cfg = {}
@@ -788,7 +821,7 @@ function M.close(handle)
   if vim.api.nvim_win_is_valid(handle.win) then
     vim.api.nvim_win_close(handle.win, true)
   end
-  for _, pane in ipairs({ handle.header or false, handle.inspector or false }) do
+  for _, pane in ipairs({ handle.header or false, handle.inspector or false, handle.help or false }) do
     if pane then
       M._forget(pane.buf)
       applied[pane.win] = nil
