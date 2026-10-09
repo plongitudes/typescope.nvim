@@ -472,6 +472,9 @@ local function pane_window(filetype, border)
     zindex = 50,
   })
   vim.wo[win].wrap = false
+  -- the docstring view scrolls the loupe by parking its cursor on the line
+  -- that should open at the top; a scrolloff would pull that line down
+  vim.wo[win].scrolloff = 0
   return { buf = buf, win = win }
 end
 

@@ -54,6 +54,14 @@ local function inspector_text()
   end
   return table.concat(lines, "\n")
 end
+-- the loupe's first visible line: where the docstring view has scrolled to
+local function loupe_top()
+  local lines, w = inspector()
+  if not lines or vim.api.nvim_win_get_config(w).hide then
+    return ""
+  end
+  return lines[vim.fn.getwininfo(w)[1].topline] or ""
+end
 
 --- Focus the float, put the cursor on the first row matching `pattern`, and
 --- return what the inspector shows for it.
@@ -326,10 +334,8 @@ if lines_l24 then
     end
   end
   vim.api.nvim_feedkeys("d", "x", false)
-  check("runtime docstring rides the hop", table.concat(float_lines(), "\n"):find("Register a sink") ~= nil)
-  local ov_l = vim.api.nvim_win_get_cursor(ov_win)[1]
-  local ov_text = vim.api.nvim_buf_get_lines(ov_buf, ov_l - 1, ov_l, false)[1] or ""
-  check("d on overload param lands on its docstring definition", ov_text:find("sink : file-like", 1, true) ~= nil)
+  check("runtime docstring rides the hop", inspector_text():find("Register a sink") ~= nil)
+  check("d on overload param scrolls to its docstring definition", loupe_top():find("sink : file-like", 1, true) ~= nil)
   vim.api.nvim_feedkeys("d", "x", false)
 end
 require("typescope").close()
@@ -465,33 +471,71 @@ if ulines then
   )
   vim.cmd("normal! gg")
 
-  -- d from a param row jumps to that param's definition in the docstring,
-  -- movement inside it is plain (k = one line, no bounce back to the rows),
-  -- and a second d returns to the row it left
+  -- d swaps the inspector for the docstring view in the loupe; the outline
+  -- stays as it was, with the cursor in it. The view scrolls to the hovered
+  -- param's definition and follows the cursor; <C-d>/<C-u> scroll it from
+  -- the outline. A second d brings the inspector back.
   vim.api.nvim_set_current_win(ts_win)
   local ts_buf2 = vim.api.nvim_win_get_buf(ts_win)
   local function cursor_text()
     local l = vim.api.nvim_win_get_cursor(ts_win)[1]
     return l, vim.api.nvim_buf_get_lines(ts_buf2, l - 1, l, false)[1] or ""
   end
-  for i, l in ipairs(vim.api.nvim_buf_get_lines(ts_buf2, 0, -1, false)) do
-    -- the exact row ("· timeout  float"): plain "timeout" also hits the
-    -- header and config's timeout_ms child
-    if l:find("·%s+timeout%s") then
-      vim.api.nvim_win_set_cursor(ts_win, { i, 0 })
-      break
+  local function row_of(pattern)
+    for i, l in ipairs(vim.api.nvim_buf_get_lines(ts_buf2, 0, -1, false)) do
+      if l:find(pattern) then
+        return i
+      end
     end
   end
+  -- the exact row ("· timeout  float"): plain "timeout" also hits config's
+  -- timeout_ms child
+  local timeout_row = row_of("·%s+timeout%s")
+  vim.api.nvim_win_set_cursor(ts_win, { timeout_row, 0 })
+  vim.cmd("doautocmd CursorMoved")
+  local outline_before = vim.api.nvim_buf_get_lines(ts_buf2, 0, -1, false)
+  local ocfg = vim.api.nvim_win_get_config(ts_win)
+  local _, iwin2 = inspector()
+  local loupe_h = vim.api.nvim_win_get_config(iwin2).height
   vim.api.nvim_feedkeys("d", "x", false)
-  local dl, dtext = cursor_text()
-  check("d jumps to the hovered param's docstring definition", dtext:find("timeout : float", 1, true) ~= nil)
-  vim.api.nvim_feedkeys("k", "x", false)
-  local kl = vim.api.nvim_win_get_cursor(ts_win)[1]
-  check("k inside the doc view moves exactly one line", kl == dl - 1)
+  check("d: the loupe shows the docstring", inspector_text():find("Spin up", 1, true) ~= nil)
+  check(
+    "...the outline is visible and unchanged",
+    vim.deep_equal(vim.api.nvim_buf_get_lines(ts_buf2, 0, -1, false), outline_before)
+      and not vim.api.nvim_win_get_config(ts_win).hide
+      and vim.api.nvim_win_get_config(ts_win).height == ocfg.height
+  )
+  check(
+    "...the cursor stays on its outline row",
+    vim.api.nvim_get_current_win() == ts_win and vim.api.nvim_win_get_cursor(ts_win)[1] == timeout_row
+  )
+  check("...the loupe keeps its size", vim.api.nvim_win_get_config(iwin2).height == loupe_h)
+  check("...scrolled to the hovered param's definition", loupe_top():find("timeout : float", 1, true) ~= nil)
+  check("...the footer is still `? help`", footer_text() == " ? help ─")
+
+  local config_row = row_of("config%s+ServerConfig")
+  vim.api.nvim_win_set_cursor(ts_win, { config_row, 0 })
+  vim.cmd("doautocmd CursorMoved")
+  check("moving to another param scrolls to its definition", loupe_top():find("config : ServerConfig", 1, true) ~= nil)
+
+  local top_before = vim.fn.getwininfo(iwin2)[1].topline
+  vim.api.nvim_feedkeys(vim.keycode("<C-d>"), "x", false)
+  local top_down = vim.fn.getwininfo(iwin2)[1].topline
+  check("<C-d> scrolls the docstring view down", top_down > top_before)
+  check(
+    "...with focus and cursor left in the outline",
+    vim.api.nvim_get_current_win() == ts_win and vim.api.nvim_win_get_cursor(ts_win)[1] == config_row
+  )
+  vim.api.nvim_feedkeys(vim.keycode("<C-u>"), "x", false)
+  check("<C-u> scrolls it back up", vim.fn.getwininfo(iwin2)[1].topline < top_down)
+
+  vim.api.nvim_win_set_cursor(ts_win, { timeout_row, 0 })
+  vim.cmd("doautocmd CursorMoved")
   vim.api.nvim_feedkeys("d", "x", false)
   local _, back = cursor_text()
-  check("d returns to the param row it left", back:find("timeout", 1, true) ~= nil)
-  check("the return trip leaves the docstring", not table.concat(float_lines(), "\n"):find("Seconds to wait"))
+  check("d again: the cursor is still on its row", back:find("timeout", 1, true) ~= nil)
+  check("...and the inspector is back, on that row", inspector_text():find("^timeout") ~= nil)
+  check("...not the docstring", not inspector_text():find("Seconds to wait"))
 
   -- active param (mock always reports 0 → config) renders TypeScopeActive
   local ts_buf = vim.api.nvim_win_get_buf(ts_win)
@@ -964,23 +1008,36 @@ do
     check("2j comes back", row_after({ "2j" }, two) == timeout_row)
     vim.api.nvim_win_set_cursor(lw, { timeout_row, 0 })
 
-    -- d: the whole docstring where the rows were, the inspector folded away; d
-    -- again brings the rows back with the cursor where it was
+    -- d: the docstring view in the loupe, the rows left as they were; d
+    -- again brings the inspector back on the cursor's row
     vim.api.nvim_feedkeys("d", "x", false)
-    local doc = table.concat(float_lines(), "\n")
-    check("d shows the docstring in place of the rows", doc:find("Spin up") ~= nil and not doc:find("= 30%.0"))
-    check("...with the inspector hidden", inspector_text() == "")
+    check("d keeps the rows", vim.deep_equal(float_lines(), llines))
+    check(
+      "...and puts the docstring in the loupe",
+      inspector_text():find("Spin up") ~= nil and not inspector_text():find("= 30%.0")
+    )
     vim.api.nvim_feedkeys("d", "x", false)
-    -- the rules may have stretched: the doc view grew the float, and it
-    -- never shrinks back
-    local function rows(lines)
-      return vim.tbl_filter(function(l)
-        return not vim.startswith(l, "─")
-      end, lines)
-    end
-    check("d again brings the rows back", vim.deep_equal(rows(float_lines()), rows(llines)))
+    check("d again leaves the rows alone", vim.deep_equal(float_lines(), llines))
     check("...on the row it left", cursor_line():find("timeout") ~= nil)
     check("...with the inspector back", inspector_text():find("^timeout") ~= nil)
+
+    -- q and <Esc> close the float from the docstring view
+    for _, key in ipairs({ "q", "<Esc>" }) do
+      vim.api.nvim_feedkeys("d", "x", false)
+      vim.api.nvim_feedkeys(vim.keycode(key), "x", false)
+      check(key .. " closes the float from the docstring view", float_lines() == nil and inspector() == nil)
+      if key == "q" then
+        vim.api.nvim_win_set_cursor(0, { call_line, 12 })
+        require("typescope").open()
+        vim.wait(3000, function()
+          return float_lines() ~= nil
+        end)
+        local _, w = float_lines()
+        if w then
+          vim.api.nvim_set_current_win(w)
+        end
+      end
+    end
     require("typescope").close()
   end
 end
@@ -1179,7 +1236,7 @@ if lines7 then
   local _, cw = float_lines()
   vim.api.nvim_set_current_win(cw)
   vim.api.nvim_feedkeys("d", "x", false)
-  check("class docstring in the doc view", table.concat(float_lines(), "\n"):find("Connection settings") ~= nil)
+  check("class docstring in the doc view", inspector_text():find("Connection settings") ~= nil)
   vim.api.nvim_feedkeys("d", "x", false)
 end
 require("typescope").close()

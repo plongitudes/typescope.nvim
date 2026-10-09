@@ -78,7 +78,8 @@ function M.attach(args)
     -- not move as the cursor goes from a one-line node to a four-line one
     inspector_id = nil, ---@type string?
     inspector_h = 0,
-    show_doc = false, -- the full docstring in place of the rows
+    show_doc = false, -- the docstring view in the loupe, in place of the inspector
+    doc = nil, ---@type typescope.RenderResult? the docstring view, rendered when d opens it
     result = nil, ---@type typescope.RenderResult
   }
   local examples = require("typescope.examples")
@@ -303,6 +304,17 @@ function M.attach(args)
     return { lines = lines, highlights = highlights, ts_injections = injections, height = rows }, r.width
   end
 
+  --- The docstring view's content for the loupe: the whole docstring, in
+  --- the rows the inspector has beside `outline_rows` (the loupe keeps its
+  --- size), so the window scrolls through it.
+  ---@param outline_rows integer
+  ---@return typescope.InspectorUpdate, integer width
+  local function doc_content(outline_rows)
+    local r = st.doc ---@cast r -nil
+    local rows = float.heights(st.handle, outline_rows, math.max(1, st.inspector_h)).inspector.height
+    return { lines = r.lines, highlights = r.highlights, ts_injections = r.ts_injections, height = rows }, r.width
+  end
+
   --- The overload group the node `id` sits in — the index of the root it
   --- descends from — when the header has one per group; nil otherwise.
   ---@param id? string
@@ -345,29 +357,6 @@ function M.attach(args)
       rows = nil
       return
     end
-    -- the doc view (d) is the same trade: the whole docstring where the rows
-    -- were, the float grown to hold it, the inspector folded away
-    if st.show_doc then
-      st.opts.view = "doc"
-      local ok, r = pcall(render.render, st.roots, st.opts)
-      st.opts.view = nil
-      if not ok then
-        error(r)
-      end
-      st.result = r
-      rows = nil
-      st.width = math.max(st.width, math.min(st.opts.max_width, r.width))
-      float.update(st.handle, {
-        lines = r.lines,
-        highlights = r.highlights,
-        ts_injections = r.ts_injections,
-        lang = st.opts.lang,
-        width = st.width,
-        height = #r.lines,
-        footer = footer(),
-      })
-      return
-    end
     -- phase first: the wave's position is a function of the clock, never
     -- accumulated state (a dropped frame skips ahead instead of stretching the
     -- animation), and sync_reveals freezes newly-landed rows AT this value
@@ -391,7 +380,13 @@ function M.attach(args)
     sync_clock()
     local lines = not reuse and vim.list_extend({}, st.result.lines) or nil
     local highlights = st.result.highlights
-    local inspector, inspector_width = inspector_content(#st.result.lines)
+    -- the loupe shows one of the inspector or the docstring view
+    local inspector, inspector_width
+    if st.show_doc then
+      inspector, inspector_width = doc_content(#st.result.lines)
+    else
+      inspector, inspector_width = inspector_content(#st.result.lines)
+    end
     -- expanding deep subtrees produces wider content than the float opened
     -- with — grow the window (never shrink; up to max_width) or lines clip
     local target = st.width -- the width we were already headed for
@@ -549,9 +544,6 @@ function M.attach(args)
   end)
   map(km.help, function()
     local node = node_under_cursor()
-    if st.show_doc then
-      node = nil -- the doc view is what help returns to
-    end
     st.show_help = not st.show_help
     if st.show_help then
       st.help_return_id = node and node.id or nil
@@ -560,12 +552,6 @@ function M.attach(args)
       refresh(st.help_return_id)
     end
   end)
-  ---@param lnum integer
-  local function in_docstring(lnum)
-    local res = st.result
-    return res and res.doc_start ~= nil and lnum >= res.doc_start and lnum <= res.doc_end
-  end
-
   -- Locate a param's definition line inside the rendered docstring section.
   -- Docstring formats vary — numpy/loguru ("name : type"), google
   -- ("name: desc" / "name (type):"), sphinx (":param name:") — so try
@@ -575,8 +561,8 @@ function M.attach(args)
   ---@param name string
   ---@return integer? lnum
   local function find_param_line(name)
-    local res = st.result
-    if not res.doc_start then
+    local res = st.doc
+    if not res or not res.doc_start then
       return nil
     end
     local esc = vim.pesc(name)
@@ -617,14 +603,38 @@ function M.attach(args)
     end
   end
 
+  --- Run `fn` in the loupe's window while the docstring view shows it. The
+  --- loupe is never focused; the cursor stays in the outline.
+  ---@param fn fun()
+  local function in_loupe(fn)
+    local p = st.handle.inspector
+    if st.show_doc and not st.show_help and p and vim.api.nvim_win_is_valid(p.win) then
+      vim.api.nvim_win_call(p.win, fn)
+      return true
+    end
+    return false
+  end
+
+  --- Scroll the docstring view so the docs for `node`'s param open at its
+  --- top. A row with no param section leaves the view where it is.
+  ---@param node typescope.Node?
+  local function scroll_doc(node)
+    local lnum = param_doc_line(node)
+    if lnum then
+      in_loupe(function()
+        vim.fn.winrestview({ topline = lnum, lnum = lnum, col = 0 })
+      end)
+    end
+  end
+
   map(km.docstring, function()
     if st.show_help then
       return
     end
-    -- the doc view and back, landing where you left
+    -- the loupe swaps back to the inspector; the outline never left
     if st.show_doc then
-      st.show_doc = false
-      refresh(st.doc_return_id)
+      st.show_doc, st.doc = false, nil
+      refresh()
       return
     end
     local doc = st.opts.docstring
@@ -636,13 +646,30 @@ function M.attach(args)
       vim.notify("typescope: the docstring is turned off (ui.docstring = false)", vim.log.levels.INFO)
       return
     end
-    local node = node_under_cursor()
-    st.doc_return_id = node and node.id or nil
-    st.show_doc = true
+    st.opts.view = "doc"
+    local ok, r = pcall(render.render, st.roots, st.opts)
+    st.opts.view = nil
+    if not ok then
+      error(r)
+    end
+    st.doc, st.show_doc = r, true
     refresh()
     -- hovering a param opens the docs where they define it
-    vim.api.nvim_win_set_cursor(st.handle.win, { param_doc_line(node) or 1, 0 })
+    scroll_doc(node_under_cursor())
   end)
+
+  -- <C-d>/<C-u> scroll the docstring view from the outline; elsewhere they
+  -- scroll the outline as usual
+  for _, key in ipairs({ "<C-d>", "<C-u>" }) do
+    map(key, function()
+      local keys = vim.keycode(key)
+      if not in_loupe(function()
+        vim.cmd("normal! " .. keys)
+      end) then
+        vim.cmd("normal! " .. keys)
+      end
+    end)
+  end
 
   local function close()
     stop_clock()
@@ -652,9 +679,7 @@ function M.attach(args)
   map("<Esc>", close)
 
   -- j/k jump between rows, skipping display-only lines. Past the last node
-  -- they fall back to plain movement. In the doc
-  -- view it's all plain movement: node-jumping there made k bounce from
-  -- mid-prose back to the rows (every doc line is "skippable").
+  -- they fall back to plain movement.
   local function jump(dir)
     if st.show_help then
       vim.cmd("normal! " .. (dir == 1 and "j" or "k"))
@@ -662,10 +687,6 @@ function M.attach(args)
     end
     local win = st.handle.win
     local lnum = vim.api.nvim_win_get_cursor(win)[1]
-    if in_docstring(lnum) then
-      vim.cmd("normal! " .. (dir == 1 and "j" or "k"))
-      return
-    end
     local cur = st.result.line_to_node[lnum]
     local target
     local i = lnum + dir
@@ -802,18 +823,21 @@ function M.attach(args)
   -- the inspector follows the cursor. The rows never change with it, so a move
   -- repaints only the inspector (float.update skips unchanged lines). A line
   -- that maps to no node leaves the inspector on the last node it showed
-  -- rather than blanking it.
+  -- rather than blanking it. Behind the docstring view it keeps following,
+  -- so d lands back on the cursor's row, and the view scrolls to the row's
+  -- param instead.
   vim.api.nvim_create_autocmd("CursorMoved", {
     buffer = st.handle.buf,
     desc = "TypeScope: the inspector follows the cursor",
     callback = function()
-      if not st.result or st.show_help or st.show_doc or not vim.api.nvim_win_is_valid(st.handle.win) then
+      if not st.result or st.show_help or not vim.api.nvim_win_is_valid(st.handle.win) then
         return
       end
       local id = st.result.line_to_node[vim.api.nvim_win_get_cursor(st.handle.win)[1]]
       if id and id ~= st.inspector_id then
         st.inspector_id = id
         refresh(nil, true)
+        scroll_doc(model.find(st.roots, id))
         follow_examples()
       end
     end,
