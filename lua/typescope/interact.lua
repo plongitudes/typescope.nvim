@@ -303,6 +303,22 @@ function M.attach(args)
     return { lines = lines, highlights = highlights, ts_injections = injections, height = rows }, r.width
   end
 
+  --- The overload group the node `id` sits in — the index of the root it
+  --- descends from — when the header has one per group; nil otherwise.
+  ---@param id? string
+  ---@return integer?
+  local function group_of(id)
+    local hdr = st.handle.header
+    if not id or not hdr or #hdr.groups < 2 then
+      return nil
+    end
+    for i, root in ipairs(st.roots) do
+      if id == root.id or vim.startswith(id, root.id .. ".") then
+        return i
+      end
+    end
+  end
+
   -- the rows as last rendered, and the float width they were laid out for:
   -- reused by frames that change nothing but the inspector (see refresh)
   local rows = nil ---@type { result: typescope.RenderResult, width: integer }?
@@ -403,6 +419,9 @@ function M.attach(args)
       height = #st.result.lines,
       inspector = inspector,
       footer = footer(),
+      -- the header follows the cursor's overload group, as the inspector
+      -- follows its row
+      header = group_of(st.inspector_id),
     })
     if focus_id then
       for lnum, id in pairs(st.result.line_to_node) do

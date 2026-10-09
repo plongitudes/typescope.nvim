@@ -439,7 +439,6 @@ do
     header_at("f(x) -> dict[str, list[tuple[int, int]]]", 20),
     { "f(x)", "  -> dict[str,", "  list[tuple[int,", "  int]]]" }
   )
-  eq_lines("the overload badge rides along", header_at("f(x) -> int [2/3]", 40), { "f(x) -> int [2/3]" })
 end
 
 local doc_view = render.render(section_tree, opts(vim.tbl_extend("force", section_opts, { view = "doc" })))

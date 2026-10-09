@@ -84,6 +84,16 @@ end
 local function header_text()
   return table.concat(header() or {}, "\n")
 end
+-- the header's bottom border: an overload group's `✓ [i/n]` tag
+local function header_tag()
+  local _, w = header()
+  local footer = w and vim.api.nvim_win_get_config(w).footer
+  local text = ""
+  for _, chunk in ipairs(type(footer) == "table" and footer or {}) do
+    text = text .. chunk[1]
+  end
+  return text
+end
 
 --- A window's footer, as text.
 local function footer_of(w)
@@ -299,7 +309,7 @@ if lines_l24 then
   -- client-side matching (h8h): the mock reports activeSignature=0 here
   -- (no commas before the cursor), so the string literal "app.log" picks
   -- the sink: str overload over sink: TextIO
-  check("client pick expands the str overload [2/2]", header_text():find("%[2/2%]") ~= nil)
+  check("client pick expands the str overload [2/2]", header_tag() == " ✓ [2/2] ─")
   check("stub annotations replace Any", all_l24:find("sink") ~= nil and not all_l24:find("Any"))
 
   -- d on an overload group's param (loguru's log.add case, 082): the group
@@ -339,7 +349,42 @@ end)
 local lines_h8h = float_lines()
 check("client-match float opened", lines_h8h ~= nil)
 if lines_h8h then
-  check("string literal disqualifies key: int, picks [2/2]", header_text():find("%[2/2%]") ~= nil)
+  check("string literal disqualifies key: int, picks [2/2]", header_tag() == " ✓ [2/2] ─")
+
+  -- the header follows the overload group the cursor is in; the open-time
+  -- pick is only where it starts, and ✓ stays with the matched overload
+  local _, hwin = header()
+  local hcfg = vim.api.nvim_win_get_config(hwin)
+  check(
+    "header: the matched group's signature, its [i/n] on the border, not in the text",
+    header_text():find("default", 1, true) ~= nil and not header_text():find("[2/2]", 1, true)
+  )
+  check("header: no title", hcfg.title == nil or #hcfg.title == 0)
+  check(
+    "outline group rows keep their own [i/n]",
+    table.concat(lines_h8h, "\n"):find("[1/2]", 1, true) ~= nil
+      and table.concat(lines_h8h, "\n"):find("[2/2]", 1, true) ~= nil
+  )
+  local matched_tag, matched_h = header_tag(), hcfg.height
+  inspector_of("%[1/2%]")
+  check(
+    "cursor into group 1: the header shows its signature",
+    header_text():find("fetch(key", 1, true) ~= nil and not header_text():find("default", 1, true)
+  )
+  check("...and [1/2], with rule where ✓ was", header_tag() == " [1/2] ─")
+  local function bracket_col(tag)
+    return vim.fn.strdisplaywidth(tag:match("%[.*$"))
+  end
+  check(
+    "[i/n] sits at the same column with and without ✓",
+    bracket_col(header_tag()) == bracket_col(matched_tag)
+      and vim.api.nvim_win_get_config(hwin).footer_pos == "right"
+      and vim.api.nvim_win_get_config(hwin).width == hcfg.width
+  )
+  check("the header's height holds across groups", vim.api.nvim_win_get_config(hwin).height == matched_h)
+  inspector_of("default")
+  check("cursor back into group 2: ✓ [2/2] again", header_tag() == " ✓ [2/2] ─")
+  check("...and its signature", header_text():find("default", 1, true) ~= nil)
 end
 require("typescope").close()
 
@@ -1054,7 +1099,7 @@ end
 require("typescope").close()
 
 -- overloads (U4): sibling @overload defs render as stacked groups — active
--- expanded, others collapsed, [n/m] in the header
+-- expanded, others collapsed, [n/m] on the header's border
 for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
   if l:find("fetched = fetch") then
     vim.api.nvim_win_set_cursor(0, { i, 11 })
@@ -1068,7 +1113,7 @@ local lines9, ov_win = float_lines()
 check("overload float opened", lines9 ~= nil)
 if lines9 then
   local all9 = table.concat(lines9, "\n")
-  check("overload header carries [1/2]", header_text():find("%[1/2%]") ~= nil)
+  check("overload header's border carries ✓ [1/2]", header_tag() == " ✓ [1/2] ─")
   check("both overload groups stacked", all9:find("%[1/2%]") ~= nil and all9:find("%[2/2%]") ~= nil)
   check("active overload expanded (key: int visible)", all9:find("int") ~= nil)
   check("inactive overload collapsed (its params hidden)", not all9:find("·%s+default%s"))

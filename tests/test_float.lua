@@ -373,7 +373,7 @@ do
     col = 0,
     border = "rounded",
     frame = { row = 2, col = 4, max_height = 10 },
-    header = { lines = { "f(a, b, c)" }, highlights = {} },
+    headers = { { lines = { "f(a, b, c)" }, highlights = {} } },
   })
   local help = { { " ? help ", "TypeScopeHint" } }
   float.update(h, {
@@ -434,6 +434,93 @@ do
   )
   float.close(h)
   check("closing the frame closes the header too", not vim.api.nvim_win_is_valid(h.header.win))
+end
+
+-- the header follows an overload group: one header per group, the pane as
+-- tall as the tallest for the life of the float, each group's tag on the
+-- header's bottom border
+do
+  local tag2 = { { " ✓", "TypeScopeActive" }, { " [2/2] ", "TypeScopeBadge" } }
+  local h = float.open({
+    lines = { "a", "b", "c" },
+    highlights = {},
+    width = 20,
+    height = 3,
+    relative = "editor",
+    row = 0,
+    col = 0,
+    border = "rounded",
+    frame = { row = 2, col = 4, max_height = 20 },
+    headers = {
+      { lines = { "f(a)" }, highlights = {}, tag = { { " [1/2] ", "TypeScopeBadge" } } },
+      { lines = { "f(a,", "  b,", "  c)" }, highlights = {}, tag = tag2 },
+    },
+    header_shown = 2,
+  })
+  local help = { { " ? help ", "TypeScopeHint" } }
+  local function footer_of(w)
+    local text = ""
+    for _, chunk in ipairs(vim.api.nvim_win_get_config(w).footer or {}) do
+      text = text .. chunk[1]
+    end
+    return text
+  end
+  float.update(h, { highlights = {}, width = 20, height = 3, footer = help })
+  local hcfg = vim.api.nvim_win_get_config(h.header.win)
+  check(
+    "the header opens on the group asked for",
+    vim.deep_equal(vim.api.nvim_buf_get_lines(h.header.buf, 0, -1, false), { "f(a,", "  b,", "  c)" })
+  )
+  check("...its tag on the header's bottom border, ending on a rule glyph", footer_of(h.header.win) == " ✓ [2/2] ─")
+  check("...right-aligned", hcfg.footer_pos == "right")
+  check("the header is as tall as the tallest group", hcfg.height == 3)
+  float.update(h, { highlights = {}, width = 20, height = 3, footer = help, header = 1 })
+  check(
+    "update(header = i) shows group i",
+    vim.deep_equal(vim.api.nvim_buf_get_lines(h.header.buf, 0, -1, false), { "f(a)" })
+  )
+  check("...with its own tag", footer_of(h.header.win) == " [1/2] ─")
+  check("...and the header keeps its height", vim.api.nvim_win_get_config(h.header.win).height == 3)
+  float.update(h, { highlights = {}, width = 20, height = 3, footer = help })
+  check(
+    "an update that names no group leaves the header alone",
+    vim.deep_equal(vim.api.nvim_buf_get_lines(h.header.buf, 0, -1, false), { "f(a)" })
+  )
+  float.close(h)
+end
+
+-- a header taller than its allotment: every group past it is fit to the rows
+do
+  local fitted = {}
+  local function group(name, n)
+    local lines = {}
+    for i = 1, n do
+      lines[i] = name .. i
+    end
+    return {
+      lines = lines,
+      highlights = {},
+      fit = function(rows)
+        fitted[name] = rows
+        return { lines = vim.list_slice(lines, 1, rows), highlights = {} }
+      end,
+    }
+  end
+  local h = float.open({
+    lines = { "a", "b", "c" },
+    highlights = {},
+    width = 20,
+    height = 3,
+    relative = "editor",
+    row = 0,
+    col = 0,
+    border = "rounded",
+    frame = { row = 2, col = 4, max_height = 9, min_height = { header = 1, outline = 5, inspector = 1 } },
+    headers = { group("a", 2), group("b", 8) },
+  })
+  check("a tall header gets what the budget allots", h.header.height == 9 - 3 - 1)
+  check("...only the groups past it are fit", fitted.a == nil and fitted.b == 5)
+  float.close(h)
 end
 
 if fail_count == 0 then

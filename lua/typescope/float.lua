@@ -2,10 +2,18 @@
 ---@field buf integer
 ---@field win integer
 ---@field ns integer
----@field header? { buf: integer, win: integer, height: integer } the frame's header pane, above the outline (the handle's own buf/win are the outline)
+---@field header? typescope.HeaderPane the frame's header pane, above the outline (the handle's own buf/win are the outline)
 ---@field inspector? { buf: integer, win: integer } the frame's loupe, below the outline
 ---@field budget? integer content rows the frame's panes may share; fixed at open so the frame never outgrows its side of the cursor
 ---@field frame? typescope.Frame
+
+---@class typescope.HeaderPane
+---@field buf integer
+---@field win integer
+---@field height integer content rows, fixed at open: the tallest group's
+---@field groups typescope.HeaderContent[] one per overload group, each fit to `height`
+---@field shown? integer the group on display
+---@field lang? string
 
 local M = {}
 
@@ -418,6 +426,7 @@ end
 ---@field highlights typescope.Highlight[]
 ---@field ts_injections? typescope.Injection[]
 ---@field fit? fun(rows: integer): typescope.HeaderContent the header redrawn to fit `rows` (middle-elided)
+---@field tag? { [1]: string, [2]: string }[] chunks for the header's bottom border, right-aligned (an overload group's `✓ [i/n]`)
 
 ---@class typescope.FloatOpts
 ---@field lines string[]
@@ -427,7 +436,8 @@ end
 ---@field title? string
 ---@field footer? string|{ [1]: string, [2]: string }[] text, or chunks with highlight groups
 ---@field frame? { row: integer, col: integer, max_height: integer, min_height?: table<string, integer> } open as the K float's frame (header, outline, inspector); row/col are the source cursor's 0-indexed SCREEN position the frame hangs from, max_height the content rows the panes may share (ui.max_height), min_height each pane's minimum (ui.min_height)
----@field header? typescope.HeaderContent the frame's header pane; nil opens the frame without one
+---@field headers? typescope.HeaderContent[] the frame's header pane, one per overload group (a plain callable has one); nil opens the frame without one
+---@field header_shown? integer the group the header opens on (default 1)
 ---@field row integer
 ---@field col integer
 ---@field relative "editor"|"cursor"|"win"
@@ -463,6 +473,19 @@ local function pane_window(filetype, border)
   })
   vim.wo[win].wrap = false
   return { buf = buf, win = win }
+end
+
+--- Draw overload group `i` into the header pane. Its tag rides the pane's
+--- bottom border, which the next layout places.
+---@param hdr typescope.HeaderPane
+---@param i integer
+local function show_header(hdr, i)
+  local head = hdr.groups[i]
+  if not head or i == hdr.shown then
+    return
+  end
+  hdr.shown = i
+  set_content(hdr.buf, head.lines, head.highlights, head.ts_injections, hdr.lang)
 end
 
 ---@param opts typescope.FloatOpts
@@ -510,11 +533,17 @@ function M.open(opts)
       col = opts.frame.col,
       min_height = opts.frame.min_height,
     }
+    -- the header is as tall as the tallest group, so the outline never
+    -- shifts as the cursor crosses from one group to another
+    local tallest = nil
+    for _, head in ipairs(opts.headers or {}) do
+      tallest = math.max(tallest or 0, #head.lines)
+    end
     -- the side is chosen with every pane shown; the first update decides the rest
     local placed = frame_layout(frame, {
       max_height = opts.frame.max_height,
       width = opts.width,
-      header = opts.header and #opts.header.lines or nil,
+      header = tallest,
       outline = opts.height,
       inspector = 1,
     })
@@ -523,17 +552,20 @@ function M.open(opts)
     handle.budget = placed.budget
     -- not "typescope": what finds the float by filetype means the outline
     handle.inspector = pane_window("typescope_inspector", opts.border)
-    if opts.header then
+    if tallest then
       -- the header's height is fixed here, for the life of the float: as
-      -- many rows as it wraps to, unless the budget allots it fewer, and
-      -- then it is redrawn cut to them
-      local head = opts.header
-      if placed.header.height < #head.lines and head.fit then
-        head = head.fit(placed.header.height)
+      -- many rows as the tallest group wraps to, unless the budget allots it
+      -- fewer, and then every group past them is redrawn cut to them
+      local rows = placed.header.height
+      local groups = {}
+      for i, head in ipairs(opts.headers) do
+        groups[i] = #head.lines > rows and head.fit and vim.tbl_extend("keep", head.fit(rows), head) or head
       end
       handle.header = pane_window("typescope_header", opts.border)
-      handle.header.height = #head.lines
-      set_content(handle.header.buf, head.lines, head.highlights, head.ts_injections, opts.lang)
+      handle.header.height = rows
+      handle.header.groups = groups
+      handle.header.lang = opts.lang
+      show_header(handle.header, opts.header_shown or 1)
     end
   end
   return handle
@@ -600,15 +632,19 @@ local function layout(handle, width, outline_h, inspector, footer, lang)
     outline = outline_h,
     inspector = open and inspector.height or nil,
   })
-  -- right-justified on the frame's bottom edge, ending one rule glyph short
-  -- of the corner: ╰────── ? help ─╯
-  if footer and placed.rule then
-    footer = vim.list_extend(vim.list_extend({}, footer), { placed.rule })
+  -- right-justified on a bottom edge, ending one rule glyph short of the
+  -- corner: ╰────── ? help ─╯
+  local function on_rule(chunks)
+    if chunks and placed.rule then
+      return vim.list_extend(vim.list_extend({}, chunks), { placed.rule })
+    end
   end
-  local fkey = vim.inspect(footer)
+  footer = on_rule(footer)
 
   ---@param pane typescope.PaneLayout
-  local function place(win, pane)
+  ---@param tag? { [1]: string, [2]: string }[] the pane's own bottom-edge chunks (the header's `✓ [i/n]`)
+  local function place(win, pane, tag)
+    local chunks = pane.footer and footer or on_rule(tag)
     local row = placed.top + pane.row
     local cfg = {
       relative = "editor",
@@ -623,15 +659,16 @@ local function layout(handle, width, outline_h, inspector, footer, lang)
     -- it back off the outline when the inspector opens under it. A border-less
     -- frame has no edge to carry one.
     if placed.rule then
-      cfg.footer = pane.footer and footer or ""
+      cfg.footer = chunks or ""
       cfg.footer_pos = "right"
     end
-    configure(win, cfg, table.concat({ row, placed.col, placed.width, pane.height, pane.footer and fkey or "" }, ":"))
+    configure(win, cfg, table.concat({ row, placed.col, placed.width, pane.height, vim.inspect(chunks) }, ":"))
   end
 
   place(handle.win, placed.outline)
   if hdr and placed.header and vim.api.nvim_win_is_valid(hdr.win) then
-    place(hdr.win, placed.header)
+    local shown = hdr.groups[hdr.shown]
+    place(hdr.win, placed.header, shown and shown.tag)
   end
   if not p or not vim.api.nvim_win_is_valid(p.win) then
     return
@@ -647,10 +684,13 @@ end
 --- Swap content and resize in one synchronous block — no scheduling between
 --- buffer and window updates, so expand/collapse never shows a partial frame.
 ---@param handle typescope.FloatHandle
----@param opts { lines?: string[], highlights: typescope.Highlight[], ts_injections?: typescope.Injection[], lang?: string, width?: integer, height?: integer, title?: string, inspector?: typescope.InspectorUpdate, footer?: { [1]: string, [2]: string }[] } lines = nil: the outline's content is unchanged (only the inspector or the frame moved)
+---@param opts { lines?: string[], highlights: typescope.Highlight[], ts_injections?: typescope.Injection[], lang?: string, width?: integer, height?: integer, title?: string, inspector?: typescope.InspectorUpdate, footer?: { [1]: string, [2]: string }[], header?: integer } lines = nil: the outline's content is unchanged (only the inspector or the frame moved); header: the overload group the header shows (nil: unchanged)
 function M.update(handle, opts)
   if opts.lines then
     set_content(handle.buf, opts.lines, opts.highlights, opts.ts_injections, opts.lang)
+  end
+  if opts.header and handle.header then
+    show_header(handle.header, opts.header)
   end
   if handle.frame then
     layout(handle, opts.width, opts.height, opts.inspector, opts.footer, opts.lang)

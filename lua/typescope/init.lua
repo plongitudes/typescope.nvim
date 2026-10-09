@@ -214,24 +214,28 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
   -- matched by name — see lsp.active_param for why not by index. Cached
   -- trees carry the previous open's flag, so clear before setting.
   local active_name = lsp.active_param(sig_result)
-  local header = meta and meta.header or nil
+  -- one header per overload group (a plain callable has one; a class hover
+  -- none: its root row is the header), and the group it opens on
+  local headers = meta and meta.header and { meta.header } or nil
+  local idx, matched = 1, nil
   local active_id = nil -- the cursor (and the outline's inspector) opens on the active param
   if meta and meta.overloads then
     -- overloads (U4): stacked groups — expand the one that matches the
     -- arguments so far, collapse the rest; the active-param flag lives on
-    -- that group's children. Header follows the same choice. The server's
-    -- activeSignature wins when it says something; 0 is ambiguous
-    -- (basedpyright's constant answer), so the written args break the tie
-    -- client-side (h8h).
+    -- that group's children. The header opens on the same choice, then
+    -- follows the cursor. The server's activeSignature wins when it says
+    -- something; 0 is ambiguous (basedpyright's constant answer), so the
+    -- written args break the tie client-side (h8h). With neither, nothing
+    -- is the matched overload and group 1 opens unmarked.
     local server_idx = sig_result and sig_result.activeSignature or 0
-    local idx
     if server_idx > 0 then
-      idx = math.min(server_idx + 1, meta.overloads)
+      matched = math.min(server_idx + 1, meta.overloads)
     else
       local impl = require("typescope.extract").get(vim.bo[srcbuf].filetype)
       local args = impl and impl.call_args and impl.call_args(srcbuf, srccursor[1] - 1, srccursor[2])
-      idx = require("typescope.match").pick(roots, args) or 1
+      matched = require("typescope.match").pick(roots, args)
     end
+    idx = matched or 1
     for i, root in ipairs(roots) do
       root.state.expanded = i == idx
       for _, child in ipairs(root.children) do
@@ -239,7 +243,7 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
         active_id = child.active and child.id or active_id
       end
     end
-    header = meta.headers[idx] .. (" [%d/%d]"):format(idx, meta.overloads)
+    headers = meta.headers
   else
     for _, root in ipairs(roots) do
       root.active = root.kind == "param" and root.name == active_name or false
@@ -254,21 +258,50 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
     show_examples = cfg.show_examples and cfg.example_mode ~= "none",
     example_kind = cfg.example_mode == "llm" and "llm" or "heuristic",
     lang = vim.bo[srcbuf].filetype,
-    -- unified float (U1): call-shape header (its own pane) + docstring view,
-    -- absorbing the retired anchor float's content
-    header = header,
-    header_active = active_name,
+    -- unified float (U1): docstring view, absorbing the retired anchor
+    -- float's content; the call-shape header is drawn per group below
     docstring = meta and meta.docstring or nil,
   }
   local result = render.render(roots, render_opts)
-  -- a class hover has none: its root row is the header
-  local head = nil
-  if header then
-    render_opts.view = "header"
-    head = render.render(roots, render_opts)
-    render_opts.view = nil
+
+  --- Overload group `i`'s header, cut to `rows` (nil: as many as it wraps
+  --- to). Only the group that took the active-param flag lights it.
+  ---@param rows? integer
+  local function render_header(i, rows)
+    render_opts.view, render_opts.header, render_opts.header_rows = "header", headers[i], rows
+    render_opts.header_active = i == idx and active_name or nil
+    local ok, r = pcall(render.render, roots, render_opts)
+    render_opts.view, render_opts.header, render_opts.header_rows, render_opts.header_active = nil, nil, nil, nil
+    if not ok then
+      error(r)
+    end
+    return r
   end
-  local width = math.min(max_width, math.max(result.width, head and head.width or 0, 30))
+  local heads = nil ---@type typescope.HeaderContent[]?
+  local header_width = 0
+  for i = 1, headers and #headers or 0 do
+    local r = render_header(i)
+    header_width = math.max(header_width, r.width)
+    heads = heads or {}
+    heads[i] = {
+      lines = r.lines,
+      highlights = r.highlights,
+      ts_injections = r.ts_injections,
+      -- the budget allots it fewer rows than it wraps to: cut in the middle
+      fit = function(rows)
+        local cut = render_header(i, rows)
+        return { lines = cut.lines, highlights = cut.highlights, ts_injections = cut.ts_injections }
+      end,
+      -- right-aligned on the header's bottom border; ✓ sits left of [i/n]
+      -- so [i/n] never moves, and the border's own rule fills its place on
+      -- every other group
+      tag = meta and meta.overloads and { { (" [%d/%d] "):format(i, meta.overloads), "TypeScopeBadge" } } or nil,
+    }
+    if i == matched then
+      table.insert(heads[i].tag, 1, { " ✓", "TypeScopeActive" })
+    end
+  end
+  local width = math.min(max_width, math.max(result.width, header_width, 30))
   local height = math.min(cfg.ui.max_height, #result.lines)
 
   -- the frame: header, outline, and the inspector under them, hung from the
@@ -293,18 +326,8 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
     border = cfg.ui.border,
     enter = focus,
     frame = frame,
-    header = head and {
-      lines = head.lines,
-      highlights = head.highlights,
-      ts_injections = head.ts_injections,
-      -- the budget allots it fewer rows than it wraps to: cut in the middle
-      fit = function(rows)
-        render_opts.view, render_opts.header_rows = "header", rows
-        local cut = render.render(roots, render_opts)
-        render_opts.view, render_opts.header_rows = nil, nil
-        return { lines = cut.lines, highlights = cut.highlights, ts_injections = cut.ts_injections }
-      end,
-    },
+    headers = heads,
+    header_shown = idx,
   })
 
   -- land on the active param's primary row: with ui.focus the tree keys are

@@ -896,11 +896,10 @@ function M.render(roots, opts)
 
   -- The header's pieces, in units that stay on one row together: the name
   -- with its paren, each param with its comma (the last with the closing
-  -- paren), the return type, the overload badge. `lead` joins a unit to the
-  -- one before it on the same row; a continuation row starts at the hanging
-  -- indent instead.
+  -- paren), the return type. `lead` joins a unit to the one before it on the
+  -- same row; a continuation row starts at the hanging indent instead.
   ---@param params string[] param tokens, "…" where the middle was cut
-  local function header_units(fn_name, params, ret, badge)
+  local function header_units(fn_name, params, ret)
     local units = { { lead = "", pieces = { { fn_name, "TypeScopeHeader" }, { "(", "TypeScopeHeader" } } } }
     for i, tok in ipairs(params) do
       local pieces = {}
@@ -927,9 +926,6 @@ function M.render(roots, opts)
         units,
         { lead = " ", pieces = { { "-> ", "TypeScopeChrome" }, { ret, "TypeScopeType", "replace" } } }
       )
-    end
-    if badge then
-      table.insert(units, { lead = " ", pieces = { { badge, "TypeScopeBadge" } } })
     end
     return units
   end
@@ -995,15 +991,14 @@ function M.render(roots, opts)
     -- outline rows' default marks — superseding the 2026-08-01
     -- dim-at-header-hue call, which assumed a single-hue header.
     local header = opts.header
-    -- we authored the format in resolve (name(tok, tok) -> ret [i/n]), so
-    -- this parse can't miss; the plain fallback is pure defense
-    local badge = header:match("%s(%[%d+/%d+%])$")
-    local sig = badge and header:sub(1, #header - #badge - 1) or header
-    -- non-greedy params: the FIRST `) -> ` closes the call, so a callable
+    -- we authored the format in resolve (name(tok, tok) -> ret), so this
+    -- parse can't miss; the plain fallback is pure defense. An overload
+    -- group's [i/n] is the header pane's border tag, not part of the text.
+    -- Non-greedy params: the FIRST `) -> ` closes the call, so a callable
     -- return like `(int) -> str` stays whole (tokens never contain parens)
-    local fn_name, params, ret = sig:match("^([^(]+)%((.-)%) %-> (.*)$")
+    local fn_name, params, ret = header:match("^([^(]+)%((.-)%) %-> (.*)$")
     if not fn_name then
-      fn_name, params = sig:match("^([^(]+)%((.-)%)$")
+      fn_name, params = header:match("^([^(]+)%((.-)%)$")
     end
     local limit = opts.header_rows or math.huge
     local rows
@@ -1023,7 +1018,7 @@ function M.render(roots, opts)
           table.insert(keep, "…")
           vim.list_extend(keep, toks, #toks - (#toks - cut - head) + 1, #toks)
         end
-        rows = wrap_header(header_units(fn_name, keep, ret, badge))
+        rows = wrap_header(header_units(fn_name, keep, ret))
         if #rows <= limit then
           break
         end
