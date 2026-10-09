@@ -120,6 +120,195 @@ vim.api.nvim_win_close(dismissed.win, true)
 float.close(dismissed)
 check("a user-dismissed float is forgotten too", float._painted_count() == 0)
 
+-- ── frame layout ─────────────────────────────────────────────────────────────
+--
+-- Characterization: these pin how the two-pane frame (main window + docked
+-- inspector) lays out today, so the layout redesign changes it on purpose.
+-- Screen is 40 rows by 100 columns unless a case says otherwise.
+local CUSTOM = { "+", "-", "+", "|", "+", "-", "+", "|" }
+local function spec(over)
+  return vim.tbl_extend("force", {
+    border = "rounded",
+    row = 5,
+    col = 10,
+    lines = 40,
+    columns = 100,
+    max_height = 20,
+    width = 30,
+    main = 8,
+    inspector = 3,
+  }, over or {})
+end
+
+local layout_cases = {
+  -- side of the cursor
+  { "room below for max_height + chrome: below", {}, { below = true, budget = 20, top = 6 } },
+  {
+    "short below but no shorter than above: below",
+    { row = 19, max_height = 30 },
+    { below = true, budget = 20 - 3 },
+  },
+  {
+    "...but one row less room below than above: above",
+    { row = 20, max_height = 30 },
+    { below = false, budget = 20 - 3 },
+  },
+  { "more room above than below: above", { row = 30 }, { below = false, budget = 20, top = 30 - (3 + 8 + 3) } },
+  {
+    "a side fixed at open holds even where the other has more room",
+    { row = 30, below = true },
+    { below = true, budget = 6, top = 31 },
+  },
+  -- budget
+  { "budget is capped at max_height", { max_height = 10 }, { budget = 10 } },
+  { "budget is the room on the chosen side less chrome", { row = 30 }, { budget = 20 } },
+  {
+    "budget never drops below 2",
+    { row = 2, lines = 6, below = true },
+    { budget = 2 },
+  },
+  -- chrome per border style: rounded joins the panes with one tee row
+  {
+    "named border: inspector's top edge is the row under main's content",
+    {},
+    { main_row = 0, inspector_row = 1 + 8, main_border = "open", inspector_border = "tee" },
+  },
+  {
+    "named border above the cursor: frame ends on the row above it",
+    { row = 30 },
+    { top = 30 - (1 + 8 + 1 + 3 + 1) },
+  },
+  -- a custom array stacks two whole boxes: two rows between the contents
+  {
+    "custom border: inspector's own top edge sits under main's bottom edge",
+    { border = CUSTOM },
+    { inspector_row = 1 + 8 + 1, main_border = CUSTOM, inspector_border = CUSTOM },
+  },
+  {
+    "custom border above the cursor counts both boxes' edges",
+    { border = CUSTOM, row = 30 },
+    { top = 30 - (1 + 8 + 2 + 3 + 1) },
+  },
+  { "custom border chrome is 4 rows", { border = CUSTOM, row = 30, max_height = 40 }, { budget = 26 } },
+  {
+    "no border: panes abut, no chrome",
+    { border = "none", row = 30 },
+    { inspector_row = 8, top = 30 - 11, budget = 20, col = 10 },
+  },
+  -- inspector shown / hidden
+  {
+    "inspector shown: it carries the footer, main loses its bottom",
+    {},
+    { main_footer = false, inspector_footer = true, main_border = "open" },
+  },
+  {
+    "inspector hidden: main closes the frame and carries the footer",
+    { inspector = false },
+    { inspector = "none", main_footer = true, main_border = "closed" },
+  },
+  {
+    "inspector hidden above the cursor: frame is main alone",
+    { inspector = false, row = 30 },
+    { top = 30 - (1 + 8 + 1) },
+  },
+  -- columns
+  { "left edge at the cursor column", {}, { col = 10 } },
+  { "slid left only as far as the screen edge needs", { col = 90 }, { col = 100 - 30 - 2 } },
+  { "never slid past column 0", { col = 5, width = 120 }, { col = 0 } },
+  -- heights
+  { "pane heights are the content rows asked for", {}, { main_h = 8, inspector_h = 3 } },
+  { "an empty pane is still a row tall", { main = 0, inspector = 0 }, { main_h = 1, inspector_h = 1 } },
+}
+
+local BORDERS = {
+  open = { "╭", "─", "╮", "│", "", "", "", "│" },
+  closed = { "╭", "─", "╮", "│", "╯", "─", "╰", "│" },
+  tee = { "├", "─", "┤", "│", "╯", "─", "╰", "│" },
+}
+
+for _, case in ipairs(layout_cases) do
+  local name, over, want = case[1], case[2], case[3]
+  local s = spec(over)
+  if over.inspector == false then
+    s.inspector = nil
+  end
+  local got = float.frame_layout(s)
+  local view = {
+    below = got.below,
+    budget = got.budget,
+    top = got.top,
+    col = got.col,
+    main_row = got.main.row,
+    main_h = got.main.height,
+    main_footer = got.main.footer,
+    main_border = got.main.border,
+    inspector = got.inspector and "some" or "none",
+    inspector_row = got.inspector and got.inspector.row,
+    inspector_h = got.inspector and got.inspector.height,
+    inspector_footer = got.inspector and got.inspector.footer,
+    inspector_border = got.inspector and got.inspector.border,
+  }
+  local bad = {}
+  for k, v in pairs(want) do
+    local expect = (k:match("border$") and BORDERS[v]) or v
+    if not vim.deep_equal(view[k], expect) then
+      table.insert(bad, ("%s=%s (want %s)"):format(k, vim.inspect(view[k]), vim.inspect(expect)))
+    end
+  end
+  check("layout: " .. name .. (#bad > 0 and (" — " .. table.concat(bad, ", ")) or ""), #bad == 0)
+end
+
+-- the window code only applies the layout: a float with an inspector puts its
+-- windows exactly where frame_layout says
+do
+  local h = float.open({
+    lines = { "a", "b", "c" },
+    highlights = {},
+    width = 20,
+    height = 3,
+    relative = "editor",
+    row = 0,
+    col = 0,
+    border = "rounded",
+    inspector = { row = 2, col = 4, max_height = 10 },
+  })
+  float.update(h, {
+    highlights = {},
+    width = 20,
+    height = 3,
+    inspector = { lines = { "x", "y" }, highlights = {}, height = 2 },
+    footer = { { " ? help ", "TypeScopeHint" } },
+  })
+  local want = float.frame_layout({
+    border = "rounded",
+    row = 2,
+    col = 4,
+    lines = vim.o.lines - vim.o.cmdheight,
+    columns = vim.o.columns,
+    max_height = 10,
+    width = 20,
+    main = 3,
+    inspector = 2,
+  })
+  local main = vim.api.nvim_win_get_config(h.win)
+  local insp = vim.api.nvim_win_get_config(h.inspector.win)
+  check(
+    "open/update place both windows from frame_layout",
+    main.height == want.main.height
+      and insp.height == want.inspector.height
+      and main.width == want.width
+      and insp.hide == false
+      and insp.footer ~= nil
+      and h.budget == want.budget
+  )
+  float.update(h, { highlights = {}, width = 20, height = 3, footer = { { " back ", "TypeScopeHint" } } })
+  check(
+    "...and hiding the inspector moves the footer onto the main window",
+    vim.api.nvim_win_get_config(h.inspector.win).hide == true and vim.api.nvim_win_get_config(h.win).footer ~= nil
+  )
+  float.close(h)
+end
+
 if fail_count == 0 then
   print("FLOAT ALL PASS")
 else
