@@ -68,15 +68,31 @@ local function inspector_of(pattern)
   return inspector_text()
 end
 
--- the frame's bottom edge: the docstring's first sentence lives there
-local function footer_text()
-  local _, w = inspector()
+-- the header pane: the signature, pinned above the outline
+local function header()
+  for _, w in ipairs(vim.api.nvim_list_wins()) do
+    if vim.bo[vim.api.nvim_win_get_buf(w)].filetype == "typescope_header" then
+      return vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(w), 0, -1, false), w
+    end
+  end
+end
+local function header_text()
+  return table.concat(header() or {}, "\n")
+end
+
+--- A window's footer, as text.
+local function footer_of(w)
   local footer = w and vim.api.nvim_win_get_config(w).footer
   local text = ""
   for _, chunk in ipairs(type(footer) == "table" and footer or {}) do
     text = text .. chunk[1]
   end
   return text
+end
+-- the frame's bottom edge: the loupe draws it while the inspector shows
+local function footer_text()
+  local _, w = inspector()
+  return footer_of(w)
 end
 
 -- open the fixture: setup() attaches the oracle on FileType; the basedpyright
@@ -278,9 +294,8 @@ if lines_l24 then
   -- client-side matching (h8h): the mock reports activeSignature=0 here
   -- (no commas before the cursor), so the string literal "app.log" picks
   -- the sink: str overload over sink: TextIO
-  check("client pick expands the str overload [2/2]", lines_l24[1]:find("%[2/2%]") ~= nil)
+  check("client pick expands the str overload [2/2]", header_text():find("%[2/2%]") ~= nil)
   check("stub annotations replace Any", all_l24:find("sink") ~= nil and not all_l24:find("Any"))
-  check("runtime docstring rides the hop", footer_text():find("Register a sink") ~= nil)
 
   -- d on an overload group's param (loguru's log.add case, 082): the group
   -- root is the callable, not a param, so the jump must resolve one level
@@ -296,6 +311,7 @@ if lines_l24 then
     end
   end
   vim.api.nvim_feedkeys("d", "x", false)
+  check("runtime docstring rides the hop", table.concat(float_lines(), "\n"):find("Register a sink") ~= nil)
   local ov_l = vim.api.nvim_win_get_cursor(ov_win)[1]
   local ov_text = vim.api.nvim_buf_get_lines(ov_buf, ov_l - 1, ov_l, false)[1] or ""
   check("d on overload param lands on its docstring definition", ov_text:find("sink : file-like", 1, true) ~= nil)
@@ -318,12 +334,12 @@ end)
 local lines_h8h = float_lines()
 check("client-match float opened", lines_h8h ~= nil)
 if lines_h8h then
-  check("string literal disqualifies key: int, picks [2/2]", lines_h8h[1]:find("%[2/2%]") ~= nil)
+  check("string literal disqualifies key: int, picks [2/2]", header_text():find("%[2/2%]") ~= nil)
 end
 require("typescope").close()
 
--- unified float (U1): one window with the header over the rows, the inspector
--- docked under it, and the docstring in its own view
+-- the three-pane frame (ADR 0001): header, outline, and the inspector in the
+-- loupe, each its own box; the docstring in its own view
 local function all_floats()
   local out = {}
   for _, w in ipairs(vim.api.nvim_list_wins()) do
@@ -343,21 +359,61 @@ require("typescope").open()
 vim.wait(2000, function()
   return float_lines() ~= nil
 end)
-local inspectors = 0
+local panes = {}
 for _, w in ipairs(all_floats()) do
-  if vim.bo[vim.api.nvim_win_get_buf(w)].filetype == "typescope_inspector" then
-    inspectors = inspectors + 1
-  end
+  local ft = vim.bo[vim.api.nvim_win_get_buf(w)].filetype
+  panes[ft] = (panes[ft] or 0) + 1
 end
-check("exactly one float and its inspector (anchor retired)", #all_floats() == 2 and inspectors == 1)
+check(
+  "three panes: header, outline, inspector (anchor retired)",
+  #all_floats() == 3 and panes.typescope_header == 1 and panes.typescope == 1 and panes.typescope_inspector == 1
+)
 local ulines, ts_win = float_lines()
 if ulines then
-  local all_u = table.concat(ulines, "\n")
+  local hlines, hwin = header()
   check(
     "header: one-line call shape, elided to width, return kept",
-    ulines[1]:find("create_server(config", 1, true) ~= nil and ulines[1]:find("-> Response", 1, true) ~= nil
+    #hlines == 1
+      and hlines[1]:find("create_server(config", 1, true) ~= nil
+      and hlines[1]:find("-> Response", 1, true) ~= nil
   )
-  check("separator rule present", all_u:find("────", 1, true) ~= nil)
+  check(
+    "the outline no longer carries the signature line",
+    not table.concat(ulines, "\n"):find("create_server(", 1, true)
+  )
+
+  -- each seam is the upper pane's whole bottom edge then the lower pane's
+  -- whole top edge, in the user's border style
+  local function full_box(w)
+    local b = vim.api.nvim_win_get_config(w).border
+    if type(b) ~= "table" or #b ~= 8 then
+      return false
+    end
+    for _, cell in ipairs(b) do
+      if (type(cell) == "table" and cell[1] or cell) == "" then
+        return false
+      end
+    end
+    return true
+  end
+  local _, iwin = inspector()
+  check("every pane is a whole box (rounded)", full_box(hwin) and full_box(ts_win) and full_box(iwin))
+  check(
+    "the footer is `? help` and one rule glyph, on the bottom pane only",
+    footer_text() == " ? help ─" and footer_of(hwin) == "" and footer_of(ts_win) == ""
+  )
+
+  -- the header is pinned: the outline scrolls under it, untouched
+  local hcfg = vim.api.nvim_win_get_config(hwin)
+  vim.api.nvim_set_current_win(ts_win)
+  vim.api.nvim_win_set_cursor(ts_win, { #ulines, 0 })
+  vim.cmd("doautocmd CursorMoved")
+  vim.cmd("normal! \5")
+  check(
+    "scrolling the outline leaves the header's buffer and window alone",
+    vim.deep_equal(header(), hlines) and vim.deep_equal(vim.api.nvim_win_get_config(hwin), hcfg)
+  )
+  vim.cmd("normal! gg")
 
   -- d from a param row jumps to that param's definition in the docstring,
   -- movement inside it is plain (k = one line, no bounce back to the rows),
@@ -411,6 +467,38 @@ if ulines then
 
   require("typescope").close()
   check("float closed", #all_floats() == 0)
+end
+
+-- a custom border array: the same whole boxes, drawn in the user's cells
+do
+  local custom = { "+", "-", "+", "|", "+", "-", "+", "|" }
+  require("typescope").setup({ ui = { border = custom } })
+  require("typescope").open()
+  vim.wait(2000, function()
+    return float_lines() ~= nil
+  end)
+  local _, ow = float_lines()
+  local _, hw = header()
+  local _, iw = inspector()
+  local function cells(w)
+    local out = {}
+    for i, cell in ipairs(vim.api.nvim_win_get_config(w).border or {}) do
+      out[i] = type(cell) == "table" and cell[1] or cell
+    end
+    return out
+  end
+  check(
+    "every pane is a whole box (custom array)",
+    ow
+      and hw
+      and iw
+      and vim.deep_equal(cells(hw), custom)
+      and vim.deep_equal(cells(ow), custom)
+      and vim.deep_equal(cells(iw), custom)
+  )
+  check("...and the footer ends on the array's own rule glyph", footer_text() == " ? help -")
+  require("typescope").close()
+  require("typescope").setup({})
 end
 
 -- resolve cache (U2): reopen reuses the tree — the lazily expanded `returns`
@@ -716,7 +804,7 @@ do
     local timeout_row
     for i, l in ipairs(llines) do
       if l:find("timeout") then
-        timeout_row = i -- last match: the header line also says "timeout"
+        timeout_row = i
       end
     end
     check(
@@ -727,7 +815,7 @@ do
     check("the inspector opens with the float", inspector() ~= nil)
     check("...on the first row when no param is active", inspector_text():find("^config") ~= nil)
     check("the outline carries no docstring section", not all:find("Spin up"))
-    check("the footer carries the docstring's first sentence", footer_text():find("Spin up") ~= nil)
+    check("the footer drops the docstring's first sentence", footer_text() == " ? help ─")
 
     -- focus, rest on the timeout row: the inspector shows it, the rows stay put
     vim.api.nvim_set_current_win(lw)
@@ -915,7 +1003,7 @@ local lines9, ov_win = float_lines()
 check("overload float opened", lines9 ~= nil)
 if lines9 then
   local all9 = table.concat(lines9, "\n")
-  check("overload header carries [1/2]", lines9[1]:find("%[1/2%]") ~= nil)
+  check("overload header carries [1/2]", header_text():find("%[1/2%]") ~= nil)
   check("both overload groups stacked", all9:find("%[1/2%]") ~= nil and all9:find("%[2/2%]") ~= nil)
   check("active overload expanded (key: int visible)", all9:find("int") ~= nil)
   check("inactive overload collapsed (its params hidden)", not all9:find("·%s+default%s"))
@@ -977,7 +1065,12 @@ if lines7 then
   )
   check("class fields shown", all7:find("host") and all7:find("retry"))
   check("class inheritance merged", all7:find("env") and inspector_of("·%s+env%s"):find("↑BaseConfig", 1, true))
-  check("class docstring in the footer", footer_text():find("Connection settings") ~= nil)
+  check("a class hover has no header pane (its root row is the header)", header() == nil)
+  local _, cw = float_lines()
+  vim.api.nvim_set_current_win(cw)
+  vim.api.nvim_feedkeys("d", "x", false)
+  check("class docstring in the doc view", table.concat(float_lines(), "\n"):find("Connection settings") ~= nil)
+  vim.api.nvim_feedkeys("d", "x", false)
 end
 require("typescope").close()
 

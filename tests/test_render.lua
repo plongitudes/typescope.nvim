@@ -382,8 +382,9 @@ do
   )
 end
 
--- 9. sections: the header and its rule over the rows; the docstring is the
--- footer's and the doc view's, never a section under the rows (U1)
+-- 9. sections: the header is its own pane (view = "header"), so the rows carry
+-- neither it nor a rule under it; the docstring is the doc view's, never a
+-- section under the rows (U1)
 local section_tree = { model.new({ name = "x", kind = "param", type = { display = "int", category = "builtin" } }) }
 local section_opts = {
   style = styles.get("rounded"),
@@ -393,16 +394,22 @@ local section_opts = {
   docstring = "First line of prose.\n\nSecond paragraph here.",
 }
 local sections = render.render(section_tree, opts(section_opts))
-eq_lines("sections: header over the rows, no docstring", sections.lines, {
-  "f(x, *, y=…) -> str",
-  "───────────────────",
+eq_lines("sections: the rows alone, no header, no docstring", sections.lines, {
   "· x  int",
 })
+eq_lines(
+  "sections: the header view is the signature alone",
+  render.render(section_tree, opts(vim.tbl_extend("force", section_opts, { view = "header" }))).lines,
+  { "f(x, *, y=…) -> str" }
+)
 -- a header past max_width elides to whole params; with only one param there
 -- is no whole one to keep, so it elides to the parens (typescope.nvim-ssu)
 do
   local function header_at(header, width)
-    return render.render(section_tree, opts({ show_examples = false, header = header, max_width = width })).lines[1]
+    return render.render(
+      section_tree,
+      opts({ show_examples = false, header = header, max_width = width, view = "header" })
+    ).lines[1]
   end
   local one = header_at("run_main(comline_list) -> dict[str, _F2PyDict]", 40)
   check("elided header: one param elides to the parens (" .. one .. ")", one == "run_main(…) -> dict[str, _F2PyDict]")
@@ -1157,29 +1164,6 @@ do
   check("...and never as the fragment it looks like", not fragmented)
 end
 
--- The window never shrinks, so the rules inside it must not either: a row that
--- re-flowed narrower on the frame it settled used to drag both section rules
--- in by a dozen columns while the frame around them stayed put.
-do
-  local node = model.new({ name = "x", kind = "param", type = { display = "str", category = "builtin" } })
-  local function rule_width(min)
-    local r = render.render({ node }, opts({ header = "f(x)", max_width = 90, window_width = min }))
-    local widest = 0
-    for _, l in ipairs(r.lines) do
-      -- a rule is a line of nothing but the rule glyph (which is three bytes,
-      -- so a Lua pattern can't say that)
-      if #l > 0 and (l:gsub("─", "")) == "" then
-        widest = math.max(widest, vim.api.nvim_strwidth(l))
-      end
-    end
-    return widest
-  end
-  local natural = rule_width(nil)
-  check("a rule with no floor still fits the content", natural > 0)
-  check("a floor holds it open", rule_width(natural + 20) == natural + 20)
-  check("...and a floor under the content is ignored", rule_width(4) == natural)
-end
-
 -- The pending bar used to be a fixed 28 cells while the landed value's wave
 -- ran the whole row, so the frame that landed a batch stretched every wave
 -- from two-thirds of the way across to the right edge in one step — a jump
@@ -1527,10 +1511,10 @@ do
   -- widths where its cut happens to land mid-character, so a single fixture
   -- width proves almost nothing. This is the check that would have caught all
   -- three sites at once.
-  -- each of the float's three surfaces: the rows (header elision, capped
-  -- names, cut types), the inspector (wrapped types and values) and the doc view
-  -- (wrapped prose)
-  for _, view in ipairs({ "rows", "inspector", "doc" }) do
+  -- each of the float's surfaces: the rows (capped names, cut types), the
+  -- header (elision), the inspector (wrapped types and values) and the doc
+  -- view (wrapped prose)
+  for _, view in ipairs({ "rows", "header", "inspector", "doc" }) do
     local worst = nil
     for w = 20, 80 do
       local roots = uni_roots()
@@ -1551,11 +1535,12 @@ do
         end
       end
     end
-    check(
-      ({ rows = "the rows", inspector = "the inspector's lines", doc = "the doc view's lines" })[view]
-        .. " survive every width from 20 to 80 intact",
-      worst == nil
-    )
+    check(({
+      rows = "the rows",
+      header = "the header",
+      inspector = "the inspector's lines",
+      doc = "the doc view's lines",
+    })[view] .. " survive every width from 20 to 80 intact", worst == nil)
     if worst then
       print("  " .. worst)
     end

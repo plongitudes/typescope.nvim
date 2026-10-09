@@ -73,8 +73,10 @@ function M.attach(args)
     roots = args.roots,
     opts = args.opts,
     width = args.width,
-    -- the frame of a float with an inspector is capped to its side of the cursor at open
+    -- the frame is capped to its side of the cursor at open
     max_height = args.handle.budget or args.max_height,
+    -- the header pane's rows, which come out of the same budget
+    header_h = args.handle.header and args.handle.header.height or 0,
     show_help = false,
     -- the docked inspector shows inspector_id's details, and is only ever as tall as
     -- the tallest it has been (inspector_h) — the rows above it must not move as
@@ -260,47 +262,13 @@ function M.attach(args)
     end
   end
 
-  local strwidth = vim.api.nvim_strwidth
   -- the most the inspector grows to; past it the details cut off with …
   local INSPECTOR_MAX = 5
 
-  ---@param text string
-  ---@param cells integer
-  local function truncate(text, cells)
-    if strwidth(text) <= cells then
-      return text
-    end
-    local n = vim.fn.strchars(text)
-    while n > 0 and strwidth(vim.fn.strcharpart(text, 0, n)) > cells - 1 do
-      n = n - 1
-    end
-    return vim.fn.strcharpart(text, 0, n) .. "…"
-  end
-
-  --- The frame's bottom line. On the rows it carries the docstring's first
-  --- sentence behind the key that opens the rest.
-  ---@param width integer
-  local function footer_for(width)
-    local help = { " " .. config.get().keymaps.help .. " help ", "TypeScopeHint" }
-    local key = " " .. config.get().keymaps.docstring .. " "
-    if st.show_help then
-      return { help }
-    end
-    if st.show_doc then
-      return { { key .. "back ", "TypeScopeHint" }, help }
-    end
-    local doc = st.opts.docstring
-    if not doc or doc == "" or not config.get().ui.docstring then
-      return { help }
-    end
-    doc = vim.trim(doc)
-    local first = (doc:match("^(.-)\n%s*\n") or doc):gsub("%s+", " ")
-    first = first:match("^(.-[.!?])%s") or first
-    local room = width - strwidth(key) - strwidth(help[1]) - 3
-    if room < 8 then
-      return { { key .. "doc ", "TypeScopeHint" }, help }
-    end
-    return { { key, "TypeScopeHint" }, { truncate(first, room) .. " ", "TypeScopeDocstring" }, help }
+  --- The frame's bottom edge: only the key that opens help, the same in
+  --- every view.
+  local function footer()
+    return { { " " .. config.get().keymaps.help .. " help ", "TypeScopeHint" } }
   end
 
   --- The inspector's content for the node it is following, cut to the rows it
@@ -317,7 +285,7 @@ function M.attach(args)
     if not ok then
       error(r)
     end
-    local cap = math.max(1, math.min(INSPECTOR_MAX, st.max_height - 1))
+    local cap = math.max(1, math.min(INSPECTOR_MAX, st.max_height - st.header_h - 1))
     st.inspector_h = math.min(cap, math.max(st.inspector_h, #r.lines))
     local lines, highlights, injections = {}, {}, {}
     for i = 1, st.inspector_h do
@@ -358,8 +326,8 @@ function M.attach(args)
         lines = lines,
         highlights = highlights,
         width = st.width,
-        height = math.min(st.max_height, #lines),
-        footer = footer_for(st.width),
+        height = math.min(st.max_height - st.header_h, #lines),
+        footer = footer(),
       })
       vim.api.nvim_win_set_cursor(st.handle.win, { 1, 0 })
       rows = nil
@@ -383,8 +351,8 @@ function M.attach(args)
         ts_injections = r.ts_injections,
         lang = st.opts.lang,
         width = st.width,
-        height = math.min(st.max_height, #r.lines),
-        footer = footer_for(st.width),
+        height = math.min(st.max_height - st.header_h, #r.lines),
+        footer = footer(),
       })
       return
     end
@@ -393,19 +361,16 @@ function M.attach(args)
     -- animation), and sync_reveals freezes newly-landed rows AT this value
     st.opts.example_phase = (vim.uv.hrtime() / 1e6 % WAVE_PERIOD_MS) / WAVE_PERIOD_MS
     sync_reveals()
-    -- The width the float already has. Two things need it: the rules under the
-    -- header and above the docstring stretch to at least it, so a row that
-    -- re-flows narrower on the frame it settles doesn't drag them in with it;
-    -- and a pending wave runs out to it, so the bar is already as wide as the
-    -- landed value's will be. One frame behind the render it feeds, which is
+    -- The width the float already has: a pending wave runs out to it, so the
+    -- bar is already as wide as the landed value's will be. One frame behind the render it feeds, which is
     -- what keeps it from chasing its own tail — the bar reaching the edge is
     -- what makes the edge stay put.
     st.opts.window_width = st.width
     -- The rows carry no examples — no bars, no reveals — so an
     -- animation frame, or the cursor moving, changes the inspector and nothing
     -- else. Re-rendering every row 60 times a second anyway was most of what
-    -- a big tree cost while a batch was out. Only the rules depend on the
-    -- float's width, so a reuse is keyed on that.
+    -- a big tree cost while a batch was out. The render reads the float's
+    -- width (window_width), so a reuse is keyed on that.
     local reuse = frame and rows ~= nil and rows.width == st.width
     if not reuse then
       rows = { result = render.render(st.roots, st.opts), width = st.width }
@@ -438,9 +403,9 @@ function M.attach(args)
       ts_injections = st.result.ts_injections,
       lang = st.opts.lang,
       width = grown_width(),
-      height = math.min(st.max_height - (inspector and inspector.height or 0), #st.result.lines),
+      height = math.min(st.max_height - st.header_h - (inspector and inspector.height or 0), #st.result.lines),
       inspector = inspector,
-      footer = footer_for(grown_width()),
+      footer = footer(),
     })
     if focus_id then
       for lnum, id in pairs(st.result.line_to_node) do
@@ -670,8 +635,8 @@ function M.attach(args)
   map(km.close, close)
   map("<Esc>", close)
 
-  -- j/k jump between rows, skipping display-only lines (the header and its
-  -- rule). Past the last node they fall back to plain movement. In the doc
+  -- j/k jump between rows, skipping display-only lines. Past the last node
+  -- they fall back to plain movement. In the doc
   -- view it's all plain movement: node-jumping there made k bounce from
   -- mid-prose back to the rows (every doc line is "skippable").
   local function jump(dir)
@@ -820,8 +785,8 @@ function M.attach(args)
 
   -- the inspector follows the cursor. The rows never change with it, so a move
   -- repaints only the inspector (float.update skips unchanged lines). A line
-  -- that maps to no node — the header — leaves the inspector on the last node it
-  -- showed rather than blanking it.
+  -- that maps to no node leaves the inspector on the last node it showed
+  -- rather than blanking it.
   vim.api.nvim_create_autocmd("CursorMoved", {
     buffer = st.handle.buf,
     desc = "TypeScope: the inspector follows the cursor",

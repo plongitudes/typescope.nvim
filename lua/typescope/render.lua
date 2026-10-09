@@ -24,8 +24,8 @@
 ---@class typescope.RenderOpts
 ---@field style typescope.Charset
 ---@field max_width integer resolved columns (callers use config.resolved_max_width)
----@field window_width? integer inner width the float ALREADY has; content is laid out to at least it (rules stretch to it, pending bars reach it)
----@field view? "inspector"|"doc" the float's other two surfaces: the docked inspector for `inspector_node`, or the full docstring alone
+---@field window_width? integer inner width the float ALREADY has; pending bars reach it
+---@field view? "header"|"inspector"|"doc" the float's other surfaces: the header pane's signature, the inspector for `inspector_node`, or the full docstring alone
 ---@field inspector_node? typescope.Node view = "inspector": the node whose details the inspector shows
 ---@field show_examples boolean
 ---@field example_kind "heuristic"|"llm"
@@ -33,7 +33,7 @@
 ---@field example_reveal? fun(node: typescope.Node): number?, number?, integer? 0..1 through the fall, the wave phase it froze at, and the float width it froze at (38c)
 ---@field example_phase? number 0..1 position of the travelling wave through the pending bar (38c)
 ---@field lang? string treesitter language for injected snippet highlighting
----@field header? string one-line call shape shown above the tree
+---@field header? string one-line call shape, drawn by view = "header"
 ---@field header_active? string param name lit as active in the header (matches insert's signature block)
 ---@field docstring? string full docstring text, shown by view = "doc"
 
@@ -797,12 +797,7 @@ function M.render(roots, opts)
     emit(line, node_id)
   end
 
-  -- ── sections: the header over the rows, and the docstring view ─────────
-  local separators = {}
-  local function emit_separator()
-    table.insert(separators, #result.lines + 1)
-    emit(new_line(), nil)
-  end
+  -- ── sections: the header pane, and the docstring view ──────────────────
   -- greedy word-wrap for prose/header text, hanging indent 2 on continuations
   local function emit_prose(text, group)
     local remaining = text
@@ -898,42 +893,10 @@ function M.render(roots, opts)
     end
   end
 
-  -- The outline's other two surfaces. Each is drawn into its own window (the
-  -- inspector) or in place of the rows (the doc view), so neither carries the
-  -- header, the rows, or the other.
-  if opts.view == "inspector" then
-    local node = opts.inspector_node
-    if node then
-      -- the node's name and its WHOLE type, which the row may have cut short
-      local line = new_line()
-      line:add(node.name, name_group_of(node))
-      line:add("  ")
-      local type_text, type_is_evaluation = row_type(node)
-      local segs = {
-        {
-          type_text,
-          type_is_evaluation and "TypeScopeEvaluated" or "TypeScopeType",
-          not type_is_evaluation and type_injectable(node) and "replace" or nil,
-        },
-      }
-      if node.type.category == "unresolved" then
-        table.insert(segs, { " " .. style.unresolved, "TypeScopeUnresolved", nil, true })
-      end
-      if node.badge then
-        table.insert(segs, { " " .. node.badge, "TypeScopeBadge", nil, true })
-      end
-      flow(line, "", 2, segs, node.id)
-      emit_detail(node, "")
+  local function emit_header()
+    if not opts.header then
+      return
     end
-    return result
-  elseif opts.view == "doc" then
-    emit_docstring()
-    return result
-  end
-
-  -- the docstring is a line in the float's footer and a view of its own
-  -- (opts.view = "doc"), never a section under the rows
-  if opts.header then
     -- the header is a one-liner by contract: a 48-param call shape must not
     -- eat the float, so the param list elides at width with the return type
     -- kept visible — run(app, *, host=…, …) -> None
@@ -1006,8 +969,41 @@ function M.render(roots, opts)
     end
     emit(hline, nil)
   end
-  if opts.header then
-    emit_separator()
+
+  -- The outline's other surfaces. Each is drawn into its own pane (the
+  -- header, the inspector) or in place of the rows (the doc view), so none
+  -- carries the rows or another's content.
+  if opts.view == "header" then
+    emit_header()
+    return result
+  elseif opts.view == "inspector" then
+    local node = opts.inspector_node
+    if node then
+      -- the node's name and its WHOLE type, which the row may have cut short
+      local line = new_line()
+      line:add(node.name, name_group_of(node))
+      line:add("  ")
+      local type_text, type_is_evaluation = row_type(node)
+      local segs = {
+        {
+          type_text,
+          type_is_evaluation and "TypeScopeEvaluated" or "TypeScopeType",
+          not type_is_evaluation and type_injectable(node) and "replace" or nil,
+        },
+      }
+      if node.type.category == "unresolved" then
+        table.insert(segs, { " " .. style.unresolved, "TypeScopeUnresolved", nil, true })
+      end
+      if node.badge then
+        table.insert(segs, { " " .. node.badge, "TypeScopeBadge", nil, true })
+      end
+      flow(line, "", 2, segs, node.id)
+      emit_detail(node, "")
+    end
+    return result
+  elseif opts.view == "doc" then
+    emit_docstring()
+    return result
   end
 
   -- ── the outline (U6): one line per node, details in the docked inspector ─────
@@ -1140,19 +1136,6 @@ function M.render(roots, opts)
   end
 
   render_rows()
-
-  -- Separators stretch to the final content width, known only now — but never
-  -- back in from a width they have already reached. The window is monotonic
-  -- (interact keeps st.width at its high-water mark), and a rule that shrank
-  -- while the frame around it stayed put read as the whole float twitching:
-  -- landing a long value re-flowed its row onto two shorter ones, and both
-  -- rules snapped in by a dozen columns on that frame (Tony, reveal.mov).
-  local rule_width = math.max(4, result.width, opts.window_width or 0)
-  for _, lnum in ipairs(separators) do
-    local rule = string.rep(style.rule, rule_width)
-    result.lines[lnum] = rule
-    table.insert(result.highlights, { line = lnum - 1, col_start = 0, col_end = #rule, group = "TypeScopeChrome" })
-  end
 
   return result
 end

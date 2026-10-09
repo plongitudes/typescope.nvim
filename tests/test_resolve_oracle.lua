@@ -295,19 +295,23 @@ do
   vim.api.nvim_set_current_buf(bufnr)
   vim.api.nvim_win_set_cursor(0, { line_of("def takes_config"), 4 })
   require("typescope").open({ focus = false })
-  local float
-  vim.wait(20000, function()
+  -- the frame's panes, by filetype: the outline is "typescope"
+  local function pane(filetype)
     for _, w in ipairs(vim.api.nvim_list_wins()) do
-      if vim.api.nvim_win_get_config(w).relative ~= "" then
-        float = w
+      local b = vim.api.nvim_win_get_buf(w)
+      if vim.api.nvim_win_get_config(w).relative ~= "" and vim.bo[b].filetype == filetype then
+        return table.concat(vim.api.nvim_buf_get_lines(b, 0, -1, false), "\n")
       end
     end
-    return float ~= nil
+  end
+  vim.wait(20000, function()
+    return pane("typescope") ~= nil
   end, 20)
-  check(float ~= nil, "float opened through typescope.open()")
-  if float then
-    local text = table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(float), 0, -1, false), "\n")
-    check(text:find("takes_config(config, timeout=…) -> User", 1, true) ~= nil, "float shows the header")
+  local text = pane("typescope")
+  check(text ~= nil, "float opened through typescope.open()")
+  if text then
+    local head = pane("typescope_header") or ""
+    check(head:find("takes_config(config, timeout=…) -> User", 1, true) ~= nil, "float shows the header")
     check(text:find("host", 1, true) and text:find("8000", 1, true), "float shows config's fields and a default")
     check(text:find("returns", 1, true) ~= nil, "float shows returns")
   end

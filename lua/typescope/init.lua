@@ -254,27 +254,32 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
     show_examples = cfg.show_examples and cfg.example_mode ~= "none",
     example_kind = cfg.example_mode == "llm" and "llm" or "heuristic",
     lang = vim.bo[srcbuf].filetype,
-    -- unified float (U1): call-shape header + docstring view, absorbing the
-    -- retired anchor float's content
+    -- unified float (U1): call-shape header (its own pane) + docstring view,
+    -- absorbing the retired anchor float's content
     header = header,
     header_active = active_name,
     docstring = meta and meta.docstring or nil,
   }
   local result = render.render(roots, render_opts)
-  local width = math.min(max_width, math.max(result.width, 30))
+  -- a class hover has none: its root row is the header
+  local head = nil
+  if header then
+    render_opts.view = "header"
+    head = render.render(roots, render_opts)
+    render_opts.view = nil
+  end
+  local width = math.min(max_width, math.max(result.width, head and head.width or 0, 30))
   local height = math.min(cfg.ui.max_height, #result.lines)
 
-  -- the rows and a docked inspector under them, hung from the cursor's screen
-  -- position (float.lua places both windows itself)
+  -- the frame: header, outline, and the inspector under them, hung from the
+  -- cursor's screen position (float.lua places every pane itself)
   local pos = vim.fn.screenpos(0, srccursor[1], srccursor[2] + 1)
-  local inspector = { row = math.max(0, pos.row - 1), col = math.max(0, pos.col - 1), max_height = cfg.ui.max_height }
+  local frame = { row = math.max(0, pos.row - 1), col = math.max(0, pos.col - 1), max_height = cfg.ui.max_height }
   local handle = float.open({
     lines = result.lines,
     highlights = result.highlights,
     ts_injections = result.ts_injections,
     lang = render_opts.lang,
-    title = " typescope ",
-    footer = " ? help ",
     relative = "cursor",
     row = 1,
     col = 0,
@@ -282,13 +287,14 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
     height = height,
     border = cfg.ui.border,
     enter = focus,
-    inspector = inspector,
+    frame = frame,
+    header = head and { lines = head.lines, highlights = head.highlights, ts_injections = head.ts_injections },
   })
 
   -- land on the active param's primary row: with ui.focus the tree keys are
   -- live immediately, so the cursor should start where the user is typing.
   -- The inspector shows the cursor's row, so with no active param it
-  -- starts on the first one rather than the header.
+  -- starts on the first one.
   for lnum = 1, #result.lines do
     local id = result.line_to_node[lnum]
     if id and (id == active_id or not active_id) then

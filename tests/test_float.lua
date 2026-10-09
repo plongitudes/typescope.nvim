@@ -122,8 +122,8 @@ check("a user-dismissed float is forgotten too", float._painted_count() == 0)
 
 -- ── frame layout ─────────────────────────────────────────────────────────────
 --
--- Characterization: these pin how the two-pane frame (main window + docked
--- inspector) lays out today, so the layout redesign changes it on purpose.
+-- The three-pane frame (ADR 0001): header, outline, loupe, each a whole box in
+-- the user's border style, so every seam is a bottom border then a top border.
 -- Screen is 40 rows by 100 columns unless a case says otherwise.
 local CUSTOM = { "+", "-", "+", "|", "+", "-", "+", "|" }
 local function spec(over)
@@ -135,102 +135,136 @@ local function spec(over)
     columns = 100,
     max_height = 20,
     width = 30,
-    main = 8,
+    header = 1,
+    outline = 8,
     inspector = 3,
   }, over or {})
 end
 
+-- rounded, all three panes: 2 rows of edge per pane
 local layout_cases = {
   -- side of the cursor
   { "room below for max_height + chrome: below", {}, { below = true, budget = 20, top = 6 } },
   {
     "short below but no shorter than above: below",
     { row = 19, max_height = 30 },
-    { below = true, budget = 20 - 3 },
+    { below = true, budget = 20 - 6 },
   },
   {
     "...but one row less room below than above: above",
     { row = 20, max_height = 30 },
-    { below = false, budget = 20 - 3 },
+    { below = false, budget = 20 - 6 },
   },
-  { "more room above than below: above", { row = 30 }, { below = false, budget = 20, top = 30 - (3 + 8 + 3) } },
+  {
+    "more room above than below: above",
+    { row = 30 },
+    { below = false, budget = 20, top = 30 - (3 + 10 + 5) },
+  },
   {
     "a side fixed at open holds even where the other has more room",
     { row = 30, below = true },
-    { below = true, budget = 6, top = 31 },
+    { below = true, budget = 3, top = 31 },
   },
   -- budget
   { "budget is capped at max_height", { max_height = 10 }, { budget = 10 } },
-  { "budget is the room on the chosen side less chrome", { row = 30 }, { budget = 20 } },
+  { "budget is the room on the chosen side less chrome", { row = 30, max_height = 40 }, { budget = 30 - 6 } },
   {
-    "budget never drops below 2",
+    "budget never drops below 3",
     { row = 2, lines = 6, below = true },
-    { budget = 2 },
+    { budget = 3 },
   },
-  -- chrome per border style: rounded joins the panes with one tee row
+  -- seams: every pane is a whole box, so a seam is two rows
   {
-    "named border: inspector's top edge is the row under main's content",
+    "named border: each pane's top edge sits under the last one's bottom edge",
     {},
-    { main_row = 0, inspector_row = 1 + 8, main_border = "open", inspector_border = "tee" },
+    {
+      header_row = 0,
+      outline_row = 1 + 1 + 1,
+      inspector_row = 3 + 1 + 8 + 1,
+      header_border = "rounded",
+      outline_border = "rounded",
+      inspector_border = "rounded",
+    },
   },
   {
     "named border above the cursor: frame ends on the row above it",
     { row = 30 },
-    { top = 30 - (1 + 8 + 1 + 3 + 1) },
+    { top = 30 - (3 + 10 + 5) },
   },
-  -- a custom array stacks two whole boxes: two rows between the contents
   {
-    "custom border: inspector's own top edge sits under main's bottom edge",
+    "custom border: the same stacked boxes, in the user's array",
     { border = CUSTOM },
-    { inspector_row = 1 + 8 + 1, main_border = CUSTOM, inspector_border = CUSTOM },
+    {
+      outline_row = 3,
+      inspector_row = 13,
+      header_border = CUSTOM,
+      outline_border = CUSTOM,
+      inspector_border = CUSTOM,
+    },
   },
   {
-    "custom border above the cursor counts both boxes' edges",
+    "custom border above the cursor counts every pane's edges",
     { border = CUSTOM, row = 30 },
-    { top = 30 - (1 + 8 + 2 + 3 + 1) },
+    { top = 30 - (3 + 10 + 5) },
   },
-  { "custom border chrome is 4 rows", { border = CUSTOM, row = 30, max_height = 40 }, { budget = 26 } },
+  { "custom border chrome is 6 rows", { border = CUSTOM, row = 30, max_height = 40 }, { budget = 24 } },
   {
     "no border: panes abut, no chrome",
     { border = "none", row = 30 },
-    { inspector_row = 8, top = 30 - 11, budget = 20, col = 10 },
+    { outline_row = 1, inspector_row = 9, top = 30 - 12, budget = 20, col = 10 },
   },
-  -- inspector shown / hidden
+  -- the footer: on the bottom pane only, with the border's own rule glyph
   {
-    "inspector shown: it carries the footer, main loses its bottom",
+    "inspector shown: it carries the footer",
     {},
-    { main_footer = false, inspector_footer = true, main_border = "open" },
+    { header_footer = false, outline_footer = false, inspector_footer = true },
   },
   {
-    "inspector hidden: main closes the frame and carries the footer",
+    "inspector hidden: the outline closes the frame and carries the footer",
     { inspector = false },
-    { inspector = "none", main_footer = true, main_border = "closed" },
+    { inspector = "none", outline_footer = true, header_footer = false },
   },
   {
-    "inspector hidden above the cursor: frame is main alone",
+    "inspector hidden above the cursor: frame is header + outline",
     { inspector = false, row = 30 },
-    { top = 30 - (1 + 8 + 1) },
+    { top = 30 - (3 + 10) },
   },
+  { "the footer's rule is the bottom edge's glyph", {}, { rule = { "─", "FloatBorder" } } },
+  { "...double's is its own", { border = "double" }, { rule = { "═", "FloatBorder" } } },
+  { "...and a custom array's its sixth", { border = CUSTOM }, { rule = { "-", "FloatBorder" } } },
+  {
+    "...keeping a custom edge's highlight",
+    { border = { "+", { "=", "MyEdge" }, "+", "|" } },
+    { rule = { "=", "MyEdge" } },
+  },
+  { "no border, no rule", { border = "none" }, { rule = "none" } },
+  -- no header (a class hover: its root row is the header)
+  {
+    "no header: the outline opens the frame",
+    { header = false },
+    { header = "none", outline_row = 0, inspector_row = 10 },
+  },
+  { "no header above the cursor", { header = false, row = 30 }, { top = 30 - (10 + 5) } },
   -- columns
   { "left edge at the cursor column", {}, { col = 10 } },
   { "slid left only as far as the screen edge needs", { col = 90 }, { col = 100 - 30 - 2 } },
   { "never slid past column 0", { col = 5, width = 120 }, { col = 0 } },
   -- heights
-  { "pane heights are the content rows asked for", {}, { main_h = 8, inspector_h = 3 } },
-  { "an empty pane is still a row tall", { main = 0, inspector = 0 }, { main_h = 1, inspector_h = 1 } },
-}
-
-local BORDERS = {
-  open = { "╭", "─", "╮", "│", "", "", "", "│" },
-  closed = { "╭", "─", "╮", "│", "╯", "─", "╰", "│" },
-  tee = { "├", "─", "┤", "│", "╯", "─", "╰", "│" },
+  { "pane heights are the content rows asked for", {}, { header_h = 1, outline_h = 8, inspector_h = 3 } },
+  {
+    "an empty pane is still a row tall",
+    { header = 0, outline = 0, inspector = 0 },
+    { header_h = 1, outline_h = 1, inspector_h = 1 },
+  },
 }
 
 for _, case in ipairs(layout_cases) do
   local name, over, want = case[1], case[2], case[3]
   local s = spec(over)
-  if over.inspector == false then
-    s.inspector = nil
+  for _, pane in ipairs({ "header", "inspector" }) do
+    if over[pane] == false then
+      s[pane] = nil
+    end
   end
   local got = float.frame_layout(s)
   local view = {
@@ -238,28 +272,27 @@ for _, case in ipairs(layout_cases) do
     budget = got.budget,
     top = got.top,
     col = got.col,
-    main_row = got.main.row,
-    main_h = got.main.height,
-    main_footer = got.main.footer,
-    main_border = got.main.border,
-    inspector = got.inspector and "some" or "none",
-    inspector_row = got.inspector and got.inspector.row,
-    inspector_h = got.inspector and got.inspector.height,
-    inspector_footer = got.inspector and got.inspector.footer,
-    inspector_border = got.inspector and got.inspector.border,
+    rule = got.rule or "none",
   }
+  for _, pane in ipairs({ "header", "outline", "inspector" }) do
+    local p = got[pane]
+    view[pane] = p and "some" or "none"
+    view[pane .. "_row"] = p and p.row
+    view[pane .. "_h"] = p and p.height
+    view[pane .. "_footer"] = p and p.footer
+    view[pane .. "_border"] = p and p.border
+  end
   local bad = {}
   for k, v in pairs(want) do
-    local expect = (k:match("border$") and BORDERS[v]) or v
-    if not vim.deep_equal(view[k], expect) then
-      table.insert(bad, ("%s=%s (want %s)"):format(k, vim.inspect(view[k]), vim.inspect(expect)))
+    if not vim.deep_equal(view[k], v) then
+      table.insert(bad, ("%s=%s (want %s)"):format(k, vim.inspect(view[k]), vim.inspect(v)))
     end
   end
   check("layout: " .. name .. (#bad > 0 and (" — " .. table.concat(bad, ", ")) or ""), #bad == 0)
 end
 
--- the window code only applies the layout: a float with an inspector puts its
--- windows exactly where frame_layout says
+-- the window code only applies the layout: a frame puts its three panes
+-- exactly where frame_layout says, findable by filetype
 do
   local h = float.open({
     lines = { "a", "b", "c" },
@@ -270,14 +303,16 @@ do
     row = 0,
     col = 0,
     border = "rounded",
-    inspector = { row = 2, col = 4, max_height = 10 },
+    frame = { row = 2, col = 4, max_height = 10 },
+    header = { lines = { "f(a, b, c)" }, highlights = {} },
   })
+  local help = { { " ? help ", "TypeScopeHint" } }
   float.update(h, {
     highlights = {},
     width = 20,
     height = 3,
     inspector = { lines = { "x", "y" }, highlights = {}, height = 2 },
-    footer = { { " ? help ", "TypeScopeHint" } },
+    footer = help,
   })
   local want = float.frame_layout({
     border = "rounded",
@@ -287,26 +322,49 @@ do
     columns = vim.o.columns,
     max_height = 10,
     width = 20,
-    main = 3,
+    header = 1,
+    outline = 3,
     inspector = 2,
   })
+  local hdr = vim.api.nvim_win_get_config(h.header.win)
   local main = vim.api.nvim_win_get_config(h.win)
   local insp = vim.api.nvim_win_get_config(h.inspector.win)
+  check("the header is its own window", vim.bo[h.header.buf].filetype == "typescope_header")
   check(
-    "open/update place both windows from frame_layout",
-    main.height == want.main.height
+    "...holding the signature",
+    vim.deep_equal(vim.api.nvim_buf_get_lines(h.header.buf, 0, -1, false), { "f(a, b, c)" })
+  )
+  check(
+    "open/update place all three panes from frame_layout",
+    hdr.height == want.header.height
+      and main.height == want.outline.height
       and insp.height == want.inspector.height
+      and hdr.row == want.top + want.header.row
+      and main.row == want.top + want.outline.row
+      and insp.row == want.top + want.inspector.row
       and main.width == want.width
       and insp.hide == false
-      and insp.footer ~= nil
       and h.budget == want.budget
   )
-  float.update(h, { highlights = {}, width = 20, height = 3, footer = { { " back ", "TypeScopeHint" } } })
+  local function footer_of(cfg)
+    local text = ""
+    for _, chunk in ipairs(type(cfg.footer) == "table" and cfg.footer or {}) do
+      text = text .. chunk[1]
+    end
+    return text
+  end
   check(
-    "...and hiding the inspector moves the footer onto the main window",
-    vim.api.nvim_win_get_config(h.inspector.win).hide == true and vim.api.nvim_win_get_config(h.win).footer ~= nil
+    "the footer is `? help` and one rule glyph, right-justified, on the loupe only",
+    footer_of(insp) == " ? help ─" and insp.footer_pos == "right" and footer_of(main) == "" and footer_of(hdr) == ""
+  )
+  float.update(h, { highlights = {}, width = 20, height = 3, footer = help })
+  check(
+    "...and hiding the inspector moves the footer onto the outline",
+    vim.api.nvim_win_get_config(h.inspector.win).hide == true
+      and footer_of(vim.api.nvim_win_get_config(h.win)) == " ? help ─"
   )
   float.close(h)
+  check("closing the frame closes the header too", not vim.api.nvim_win_is_valid(h.header.win))
 end
 
 if fail_count == 0 then
