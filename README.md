@@ -15,9 +15,9 @@ TypeScope _(like 'periscope'! Get it? ... wow, tough crowd.)_ asks a type checke
 
 The checker is [pyrefly](https://github.com/facebook/pyrefly) wrapped in a small binary. We call this the `oracle` (it really kind of needs a name change, doesn't it), and it runs alongside your Python LSP. I use basedpyright, this repo assumes you're using that or vanilla pyright. If you're using another type checker in your nvim setup, the results from pyrefly _might_ be a bit different from your own typechecker, but I believe that most results should be satisfactory. The `oracle` is downloaded for your platform the first time you open a Python buffer (see [Requirements](#requirements)). The patch to Pyrefly is a small change that takes a function pyrefly already uses internally for attribute completion and makes it public. With that patch in place, `oracle` can ask for every attribute of a type (its own and inherited ones), each with its type filled in. It adds no type-checking logic of its own, and if pyrefly eventually makes this a public feature, oracle could be dropped in favor of vanilla pyrefly.
 
-<img src="https://raw.githubusercontent.com/plongitudes/typescope.nvim/assets/intro.png" width="470" alt="TypeScope on create_server(config, timeout=…) -> Response: config expanded to host, port and debug, then timeout and returns, over a panel for the config row">
+<img src="https://raw.githubusercontent.com/plongitudes/typescope.nvim/assets/intro.png" width="470" alt="TypeScope on create_server(config, timeout=…) -> Response: config expanded to host, port and debug, then timeout and returns, over an inspector for the config row">
 
-One compact line per parameter, and a panel docked under the rows shows everything about the row your cursor is on. See [The ledger](#the-ledger).
+One compact line per parameter, and an inspector docked under the rows shows everything about the row your cursor is on. See [The outline](#the-outline).
 
 ## Requirements
 
@@ -184,13 +184,13 @@ Bad values are rejected at `setup()` time with a message.
 
 The `trigger = "hover"` auto-open never steals focus in either mode.
 
-## The ledger
+## The outline
 
-One compact line per parameter, and a small subpanel is docked at the bottom of the float, showing details of the row the cursor is on: its whole type (the row truncates ones that are too long), the evaluated shape, the full default, an example, and where it was inherited from. The detail panel changes as you move the cursor from row to row. The frame's bottom edge carries the docstring's first sentence for a little extra info, and `d` swaps the floating window's contents for the full docstring (it's a toggle). Below, the cursor is on `host`:
+One compact line per parameter, and a small inspector is docked at the bottom of the float, showing details of the row the cursor is on: its whole type (the row truncates ones that are too long), the evaluated shape, the full default, an example, and where it was inherited from. The inspector changes as you move the cursor from row to row. The frame's bottom edge carries the docstring's first sentence for a little extra info, and `d` swaps the floating window's contents for the full docstring (it's a toggle). Below, the cursor is on `host`:
 
-<img src="https://raw.githubusercontent.com/plongitudes/typescope.nvim/assets/ledger.png" width="470" alt="TypeScope on create_server(config, timeout=…) -> Response, with the cursor on host: the panel under the rows shows host str, e.g. "localhost"">
+<img src="https://raw.githubusercontent.com/plongitudes/typescope.nvim/assets/ledger.png" width="470" alt="TypeScope on create_server(config, timeout=…) -> Response, with the cursor on host: the inspector under the rows shows host str, e.g. "localhost"">
 
-The panel grows to fit the tallest node it has shown (up to five lines) and doesn't shrink back, so the rows above it stay put. The frame opens below the cursor, or above it when there is more room there.
+The inspector grows to fit the tallest node it has shown (up to five lines) and doesn't shrink back, so the rows above it stay put. The frame opens below the cursor, or above it when there is more room there.
 
 ## Insert mode
 
@@ -204,10 +204,10 @@ Off by default while it bakes.
 
 ## Examples
 
-The panel shows a plausible example value for each leaf.
+The inspector shows a plausible example value for each leaf.
 
 - `example_mode = "heuristic"` (default) — pattern-table values, matched on name and type. No network, no model, instant. Press `e` on a row to ask the model for its example (and its nearest neighbours') on demand.
-- `example_mode = "llm"` — generate through ollama automatically, as you move: the row the panel is on and its nearest neighbours, one batch at a time. Heuristics show until the real values land, then swap in place. `e` on a row asks again, including rows the model had no answer for.
+- `example_mode = "llm"` — generate through ollama automatically, as you move: the row the inspector is on and its nearest neighbours, one batch at a time. Heuristics show until the real values land, then swap in place. `e` on a row asks again, including rows the model had no answer for.
 - `example_mode = "none"` — no examples at all.
 
 ### The RAM cost of ollama
@@ -222,7 +222,7 @@ The panel shows a plausible example value for each leaf.
 
 ## Styles
 
-`ui.style` picks the charset: `rounded`, `unicode`, `ascii`, `minimal`. All four are plain Unicode or ASCII — no Nerd Font glyphs — so any font works. The same ledger, in each:
+`ui.style` picks the charset: `rounded`, `unicode`, `ascii`, `minimal`. All four are plain Unicode or ASCII — no Nerd Font glyphs — so any font works. The same outline, in each:
 
 <table>
 <tr><th align="left"><code>rounded</code> (default)</th><th align="left"><code>unicode</code></th></tr>

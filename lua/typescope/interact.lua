@@ -40,7 +40,7 @@ end
 ---@field on_close fun()
 ---@field on_recurse? fun(node: typescope.Node, done: fun()) lazily resolve a beyond-depth node
 ---@field on_llm_nodes? fun(nodes: typescope.Node[], done: fun(ok: boolean, err: string?)) generate LLM examples for these leaves
----@field auto_examples? boolean generate the panel node's sibling group as the cursor reaches it
+---@field auto_examples? boolean generate the inspector node's sibling group as the cursor reaches it
 ---@field on_llm_error? fun(err: string) an automatic generation failed
 
 ---@param width integer
@@ -73,14 +73,14 @@ function M.attach(args)
     roots = args.roots,
     opts = args.opts,
     width = args.width,
-    -- a panel float's frame is capped to its side of the cursor at open
+    -- the frame of a float with an inspector is capped to its side of the cursor at open
     max_height = args.handle.budget or args.max_height,
     show_help = false,
-    -- the docked panel shows panel_id's details, and is only ever as tall as
-    -- the tallest it has been (panel_h) — the rows above it must not move as
+    -- the docked inspector shows inspector_id's details, and is only ever as tall as
+    -- the tallest it has been (inspector_h) — the rows above it must not move as
     -- the cursor goes from a one-line node to a four-line one
-    panel_id = nil, ---@type string?
-    panel_h = 0,
+    inspector_id = nil, ---@type string?
+    inspector_h = 0,
     show_doc = false, -- the full docstring in place of the rows
     result = nil, ---@type typescope.RenderResult
   }
@@ -98,7 +98,7 @@ function M.attach(args)
 
   -- ONE frame clock for every animation (jit). Measured cost of a full frame
   -- — render + float.update + treesitter injections + forced redraw, on a
-  -- 14-param ledger — is 1.18ms, so 60fps spends ~7% of the budget. The old
+  -- 14-param outline — is 1.18ms, so 60fps spends ~7% of the budget. The old
   -- shape (a timer per effect, each calling refresh()) both doubled that work
   -- and let two animations tear against each other; one clock, one repaint
   -- per frame, and every animation is a pure function of wall-clock time.
@@ -261,8 +261,8 @@ function M.attach(args)
   end
 
   local strwidth = vim.api.nvim_strwidth
-  -- the most the panel grows to; past it the details cut off with …
-  local PANEL_MAX = 5
+  -- the most the inspector grows to; past it the details cut off with …
+  local INSPECTOR_MAX = 5
 
   ---@param text string
   ---@param cells integer
@@ -303,51 +303,51 @@ function M.attach(args)
     return { { key, "TypeScopeHint" }, { truncate(first, room) .. " ", "TypeScopeDocstring" }, help }
   end
 
-  --- The panel's content for the node it is following, cut to the rows it
-  --- may have. Grows panel_h, never shrinks it.
-  ---@return typescope.PanelUpdate?, integer width
-  local function panel_content()
-    local node = st.panel_id and model.find(st.roots, st.panel_id)
+  --- The inspector's content for the node it is following, cut to the rows it
+  --- may have. Grows inspector_h, never shrinks it.
+  ---@return typescope.InspectorUpdate?, integer width
+  local function inspector_content()
+    local node = st.inspector_id and model.find(st.roots, st.inspector_id)
     if not node then
       return nil, 0
     end
-    st.opts.view, st.opts.panel_node = "panel", node
+    st.opts.view, st.opts.inspector_node = "inspector", node
     local ok, r = pcall(render.render, st.roots, st.opts)
-    st.opts.view, st.opts.panel_node = nil, nil
+    st.opts.view, st.opts.inspector_node = nil, nil
     if not ok then
       error(r)
     end
-    local cap = math.max(1, math.min(PANEL_MAX, st.max_height - 1))
-    st.panel_h = math.min(cap, math.max(st.panel_h, #r.lines))
+    local cap = math.max(1, math.min(INSPECTOR_MAX, st.max_height - 1))
+    st.inspector_h = math.min(cap, math.max(st.inspector_h, #r.lines))
     local lines, highlights, injections = {}, {}, {}
-    for i = 1, st.panel_h do
+    for i = 1, st.inspector_h do
       lines[i] = r.lines[i] or ""
     end
-    if #r.lines > st.panel_h then
-      lines[st.panel_h] = lines[st.panel_h] .. " …"
+    if #r.lines > st.inspector_h then
+      lines[st.inspector_h] = lines[st.inspector_h] .. " …"
     end
     for _, hl in ipairs(r.highlights) do
-      if hl.line < st.panel_h then
+      if hl.line < st.inspector_h then
         table.insert(highlights, hl)
       end
     end
     for _, inj in ipairs(r.ts_injections) do
-      if inj.line < st.panel_h then
+      if inj.line < st.inspector_h then
         table.insert(injections, inj)
       end
     end
-    return { lines = lines, highlights = highlights, ts_injections = injections, height = st.panel_h }, r.width
+    return { lines = lines, highlights = highlights, ts_injections = injections, height = st.inspector_h }, r.width
   end
 
   -- the rows as last rendered, and the float width they were laid out for:
-  -- reused by frames that change nothing but the panel (see refresh)
+  -- reused by frames that change nothing but the inspector (see refresh)
   local rows = nil ---@type { result: typescope.RenderResult, width: integer }?
 
   ---@param focus_id? string park the cursor on this node's row
   ---@param frame? boolean nothing but the clock or the cursor moved
   function refresh(focus_id, frame)
     -- help (?) replaces the view entirely: content routinely exceeds
-    -- max_height, so an appended panel lands below the fold and is never seen
+    -- max_height, so an appended inspector lands below the fold and is never seen
     if st.show_help then
       local lines = help_lines(st.width)
       local highlights = {}
@@ -366,7 +366,7 @@ function M.attach(args)
       return
     end
     -- the doc view (d) is the same trade: the whole docstring where the rows
-    -- were, the float grown to hold it, the panel folded away
+    -- were, the float grown to hold it, the inspector folded away
     if st.show_doc then
       st.opts.view = "doc"
       local ok, r = pcall(render.render, st.roots, st.opts)
@@ -402,7 +402,7 @@ function M.attach(args)
     -- what makes the edge stay put.
     st.opts.window_width = st.width
     -- The rows carry no examples — no bars, no reveals — so an
-    -- animation frame, or the cursor moving, changes the panel and nothing
+    -- animation frame, or the cursor moving, changes the inspector and nothing
     -- else. Re-rendering every row 60 times a second anyway was most of what
     -- a big tree cost while a batch was out. Only the rules depend on the
     -- float's width, so a reuse is keyed on that.
@@ -414,12 +414,12 @@ function M.attach(args)
     sync_clock()
     local lines = not reuse and vim.list_extend({}, st.result.lines) or nil
     local highlights = st.result.highlights
-    local panel, panel_width = panel_content()
+    local inspector, inspector_width = inspector_content()
     -- expanding deep subtrees produces wider content than the float opened
     -- with — grow the window (never shrink; up to max_width) or lines clip
     local target = st.width -- the width we were already headed for
     local shown = grown_width() -- ...and the one actually on screen, mid-grow
-    st.width = math.max(st.width, math.min(st.opts.max_width, math.max(st.result.width, panel_width)))
+    st.width = math.max(st.width, math.min(st.opts.max_width, math.max(st.result.width, inspector_width)))
     -- Only a reveal animates the growth. Everywhere else — <CR> to expand, the
     -- first paint — the new width is what the user asked for and should be
     -- there on the next frame, and outside a reveal there is no clock running
@@ -438,8 +438,8 @@ function M.attach(args)
       ts_injections = st.result.ts_injections,
       lang = st.opts.lang,
       width = grown_width(),
-      height = math.min(st.max_height - (panel and panel.height or 0), #st.result.lines),
-      panel = panel,
+      height = math.min(st.max_height - (inspector and inspector.height or 0), #st.result.lines),
+      inspector = inspector,
       footer = footer_for(grown_width()),
     })
     if focus_id then
@@ -723,12 +723,12 @@ function M.attach(args)
   end)
 
   -- Examples come a sibling group at a time (examples.group_for): the
-  -- panel's node as the cursor reaches it (example_mode = "llm"),
+  -- inspector's node as the cursor reaches it (example_mode = "llm"),
   -- or the cursor's node on e. One batch in flight and never a queue — a
   -- slow local model answers one request at a time anyway, and a backlog
   -- only puts the node you are looking at behind ones you have left. What
   -- arrives meanwhile takes the single `st.ask_next` slot, latest wins, and
-  -- runs when the batch lands; with nothing there, the panel's node then is
+  -- runs when the batch lands; with nothing there, the inspector's node then is
   -- what the auto-follow asks about.
   local ask, follow_examples
   ---@param node typescope.Node
@@ -785,7 +785,7 @@ function M.attach(args)
     if not st.auto_examples then
       return
     end
-    local node = st.panel_id and model.find(st.roots, st.panel_id)
+    local node = st.inspector_id and model.find(st.roots, st.inspector_id)
     if node and examples.why_not(node) == nil and not node.example.llm and not examples.awaiting(node) then
       ask(node)
     end
@@ -804,7 +804,7 @@ function M.attach(args)
     -- and heuristics stand wherever the model has nothing
     st.opts.example_kind = "llm"
     st.opts.show_examples = true
-    local node = node_under_cursor() or (st.panel_id and model.find(st.roots, st.panel_id))
+    local node = node_under_cursor() or (st.inspector_id and model.find(st.roots, st.inspector_id))
     if not node then
       return
     end
@@ -818,20 +818,20 @@ function M.attach(args)
 
   st.auto_examples = args.auto_examples
 
-  -- the panel follows the cursor. The rows never change with it, so a move
-  -- repaints only the panel (float.update skips unchanged lines). A line
-  -- that maps to no node — the header — leaves the panel on the last node it
+  -- the inspector follows the cursor. The rows never change with it, so a move
+  -- repaints only the inspector (float.update skips unchanged lines). A line
+  -- that maps to no node — the header — leaves the inspector on the last node it
   -- showed rather than blanking it.
   vim.api.nvim_create_autocmd("CursorMoved", {
     buffer = st.handle.buf,
-    desc = "TypeScope: the panel follows the cursor",
+    desc = "TypeScope: the inspector follows the cursor",
     callback = function()
       if not st.result or st.show_help or st.show_doc or not vim.api.nvim_win_is_valid(st.handle.win) then
         return
       end
       local id = st.result.line_to_node[vim.api.nvim_win_get_cursor(st.handle.win)[1]]
-      if id and id ~= st.panel_id then
-        st.panel_id = id
+      if id and id ~= st.inspector_id then
+        st.inspector_id = id
         refresh(nil, true)
         follow_examples()
       end
@@ -839,14 +839,14 @@ function M.attach(args)
   })
 
   st.result = render.render(st.roots, st.opts)
-  -- the panel opens on the cursor's row (the active param, or the first)
+  -- the inspector opens on the cursor's row (the active param, or the first)
   local lnum = vim.api.nvim_win_get_cursor(st.handle.win)[1]
-  st.panel_id = st.result.line_to_node[lnum]
+  st.inspector_id = st.result.line_to_node[lnum]
   for i = 1, #st.result.lines do
-    if st.panel_id then
+    if st.inspector_id then
       break
     end
-    st.panel_id = st.result.line_to_node[i]
+    st.inspector_id = st.result.line_to_node[i]
   end
   refresh()
   follow_examples()

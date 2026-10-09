@@ -91,7 +91,7 @@ sent = send(None)
 
 def greet(label: str, loud: bool = False) -> str:
     """Say hello. Its first row is a leaf the model can be asked about, so the
-    ledger's panel opens on a row that generates the moment the float opens."""
+    outline's inspector opens on a row that generates the moment the float opens."""
     return label
 
 

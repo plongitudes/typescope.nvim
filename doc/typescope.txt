@@ -15,7 +15,7 @@ CONTENTS                                                 *typescope-contents*
     5. Mappings ........................... |typescope-mappings|
     6. Inside the float ................... |typescope-float-keys|
     7. Configuration ...................... |typescope-config|
-    8. The ledger ......................... |typescope-ledger|
+    8. The outline ........................ |typescope-outline|
     9. Insert mode ........................ |typescope-insert-mode|
    10. Examples ........................... |typescope-examples|
    11. Styles ............................. |typescope-styles|
@@ -287,14 +287,14 @@ ui.hint ~
 
 ==============================================================================
                                                         *typescope-layouts*
-8. THE LEDGER                                              *typescope-ledger*
+8. THE OUTLINE                                            *typescope-outline*
 
-One compact line per parameter (name, type, short default), and a panel
+One compact line per parameter (name, type, short default), and an inspector
 docked under the rows showing everything about the row the cursor is on: its
 whole type, evaluated shape, full default, example, origin. The rows never
-move with the cursor; only the panel changes. The panel grows to the tallest
-node it has shown (up to five lines) and does not shrink back. The frame
-opens below the cursor, or above it when there is more room.
+move with the cursor; only the inspector changes. The inspector grows to the
+tallest node it has shown (up to five lines) and does not shrink back. The
+frame opens below the cursor, or above it when there is more room.
 
                                                       *typescope-docstring*
 ui.docstring ~
@@ -337,14 +337,14 @@ insert_mode.max_detail_lines ~
 ==============================================================================
 10. EXAMPLES                                             *typescope-examples*
 
-The panel shows a plausible example value for each leaf.
+The inspector shows a plausible example value for each leaf.
 
                                                      *typescope-example-mode*
 example_mode ~
     "heuristic"   Pattern-table values matched on name and type. No network,
                   no model, instant. Press e on a row to ask the model
                   for its example on demand. The default.
-    "llm"         Generate through ollama automatically, for the panel's
+    "llm"         Generate through ollama automatically, for the inspector's
                   row and its nearest neighbours as the cursor reaches them,
                   one batch at a time. Heuristics show until the real values
                   land, then swap in place.

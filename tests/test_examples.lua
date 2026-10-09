@@ -645,7 +645,7 @@ do
   vim.system = real_system
 end
 
--- group_for: the ledger's unit of generation. The panel's node first, then
+-- group_for: the outline's unit of generation. The inspector's node first, then
 -- its nearest siblings outward, one batch at most, skipping what a model
 -- would not be asked about (a real default is already the example).
 do

@@ -24,12 +24,12 @@ local function setup(opts)
 end
 
 local cfg = setup({ ui = { layout = "tree" } })
-check("ui.layout = tree warns", #warnings == 1 and warnings[1]:find("ledger is the only layout") ~= nil)
+check("ui.layout = tree warns", #warnings == 1 and warnings[1]:find("outline is the only layout") ~= nil)
 check("...and is dropped", cfg.ui.layout == nil)
 setup({ ui = { layout = "table" } })
 check("so does the long-gone table", #warnings == 1)
-cfg = setup({ ui = { layout = "ledger" } })
-check("naming the ledger is already what you get: no warning", #warnings == 0 and cfg.ui.layout == nil)
+cfg = setup({ ui = { layout = "outline" } })
+check("any layout warns now that there is only one", #warnings == 1 and cfg.ui.layout == nil)
 
 cfg = setup({ ui = { align = "right" } })
 check("ui.align warns", #warnings == 1 and warnings[1]:find("ui.align") ~= nil)

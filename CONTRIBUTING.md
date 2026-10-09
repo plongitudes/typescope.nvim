@@ -35,7 +35,7 @@ Some things this suite learned the hard way:
 
 - **New renderer fixtures should carry non-ASCII.** Every fixture in `test_render.lua` was ASCII once, which is how three separate byte-versus-cell truncation bugs passed 1278 lines of golden tests.
 - **Prefer invariants to goldens for anything positional.** `check_injections` asserts that every emitted injection describes a slice that fits its line, across every result. A golden asserting the text would not have caught the bug it was written for.
-- **Sweep widths rather than picking one.** A truncation only misbehaves at the widths where its cut lands mid-character. Section 14 sweeps the rows, the panel and the doc view across widths 20..80 for this reason.
+- **Sweep widths rather than picking one.** A truncation only misbehaves at the widths where its cut lands mid-character. Section 14 sweeps the rows, the inspector and the doc view across widths 20..80 for this reason.
 - **Headless float geometry is not real geometry.** With no UI attached there is no anchor to measure against, so assert on `nvim_win_get_config` rather than on positions a headless probe reports.
 - **`tests/fixtures/shapes.py` is the capability sheet.** It records every class shape the oracle draws, as `typescope:` marker comments that `cargo test` in `oracle/` asserts against. A marker is a statement of policy (`design/oracle.md` §4), not a test expectation to be edited into passing: change one only with the rule that justifies it in the commit message. Add a marker whenever you teach the oracle a new shape.
 
@@ -58,7 +58,8 @@ The vocabulary is settled and worth keeping straight, since several of these wor
 | rung | one step of the ramp |
 | bar | the drawn row of cells a wave travels through |
 | segment | a `{text, group}` run, the renderer's primitive |
-| ledger | the reading float: one line per node over a panel docked under the rows, showing the cursor's row |
+| outline | the float's rows: one line per node, expandable into fields and members |
+| inspector | the view docked under the outline that shows the cursor's row in full |
 
 ## Releasing
 

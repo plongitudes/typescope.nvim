@@ -2,6 +2,12 @@
 
 Notable changes to TypeScope, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [Semantic Versioning](https://semver.org/), with the usual 0.x caveat that a minor bump may break something. Each release is an annotated git tag carrying the same notes.
 
+## [Unreleased]
+
+### Changed
+
+- **The ledger is now the outline, and its panel the inspector**, in the docs, the help tags (`:help typescope-outline`) and the code. The inspector's buffer filetype is `typescope_inspector`; anything that looked for `typescope_panel` needs the new name. `ui.layout` now warns whatever it is set to, since `"ledger"` is no longer the name of the only layout.
+
 ## [0.4.0] — 2026-10-03
 
 The ledger is the only layout. With the details in a docked panel there was nothing left that `tree` did better, and keeping two layouts meant two render paths, two `d` behaviours and two ways of generating examples.

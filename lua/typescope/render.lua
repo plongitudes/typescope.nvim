@@ -25,8 +25,8 @@
 ---@field style typescope.Charset
 ---@field max_width integer resolved columns (callers use config.resolved_max_width)
 ---@field window_width? integer inner width the float ALREADY has; content is laid out to at least it (rules stretch to it, pending bars reach it)
----@field view? "panel"|"doc" the float's other two surfaces: the docked panel for `panel_node`, or the full docstring alone
----@field panel_node? typescope.Node view = "panel": the node whose details the panel shows
+---@field view? "inspector"|"doc" the float's other two surfaces: the docked inspector for `inspector_node`, or the full docstring alone
+---@field inspector_node? typescope.Node view = "inspector": the node whose details the inspector shows
 ---@field show_examples boolean
 ---@field example_kind "heuristic"|"llm"
 ---@field example_pending? fun(node: typescope.Node): boolean leaves whose LLM value is still coming (38c); injected so render stays pure
@@ -195,7 +195,7 @@ local function fit_prefix(text, cells)
 end
 
 --- Byte index at which the last `cells` columns of `text` begin — fit_prefix
---- read from the other end. Needed by the ledger's middle-ellipsis, which has
+--- read from the other end. Needed by the outline's middle-ellipsis, which has
 --- to keep a tail as well as a head: identifiers discriminate at both ends,
 --- and counting the tail in bytes gives a short one on multibyte names and
 --- can start it inside a character.
@@ -280,7 +280,7 @@ local DEFAULT_RAMP = { "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█" }
 local CLIP = { clip = true }
 
 -- extract/python.lua normalises a stub's `= ...` to this. Not a value: it means
--- "has a default, unspecified", which is why the panel never repeats it.
+-- "has a default, unspecified", which is why the inspector never repeats it.
 local STUB_DEFAULT = "…"
 
 ---@param opts typescope.RenderOpts|typescope.TypingOpts
@@ -378,7 +378,7 @@ end
 --- the value's real end, so those cells rise a few rungs on the landing frame.
 --- That surge is the deliberate cost of keeping the wavelength — the
 --- alternative, pinning the taper to the window edge as it slides, tripled the
---- highlight runs per frame (817 -> 2767 on a 48-leaf ledger) for a subtler
+--- highlight runs per frame (817 -> 2767 on a 48-leaf outline) for a subtler
 --- join. It also lands where the window is about to open, which is the least
 --- conspicuous place on the row for it to happen.
 ---@param phase number
@@ -839,7 +839,7 @@ function M.render(roots, opts)
 
   -- The type a row shows, and whether it is really the evaluation standing
   -- in for it: an unannotated param's declared type is only implicit Any, so
-  -- the inferred view is shown as the type itself (and the panel's ≈ line
+  -- the inferred view is shown as the type itself (and the inspector's ≈ line
   -- then has nothing to add).
   ---@return string text, boolean is_evaluation
   local function row_type(node)
@@ -852,7 +852,7 @@ function M.render(roots, opts)
   end
 
   -- The facts read one node at a time — ≈ evaluation, full default, example,
-  -- origin — under a line prefix (the panel's is empty). Nothing emitted
+  -- origin — under a line prefix (the inspector's is empty). Nothing emitted
   -- when there is nothing to say.
   ---@param node typescope.Node
   ---@param dprefix string chrome carried at the start of every line
@@ -898,11 +898,11 @@ function M.render(roots, opts)
     end
   end
 
-  -- The ledger's other two surfaces. Each is drawn into its own window (the
-  -- panel) or in place of the rows (the doc view), so neither carries the
+  -- The outline's other two surfaces. Each is drawn into its own window (the
+  -- inspector) or in place of the rows (the doc view), so neither carries the
   -- header, the rows, or the other.
-  if opts.view == "panel" then
-    local node = opts.panel_node
+  if opts.view == "inspector" then
+    local node = opts.inspector_node
     if node then
       -- the node's name and its WHOLE type, which the row may have cut short
       local line = new_line()
@@ -959,7 +959,7 @@ function M.render(roots, opts)
     -- 2026-08-06): yellow reserved for the callable + parens, params in
     -- param color with the active one lit, the return as a real type with
     -- syntax injection. Elision marks (`=…`, trailing `…`) render as chrome
-    -- — same as ledger rows' default marks — superseding the 2026-08-01
+    -- — same as outline rows' default marks — superseding the 2026-08-01
     -- dim-at-header-hue call, which assumed a single-hue header.
     local hline = new_line()
     -- we authored the format in resolve (name(tok, tok) -> ret [i/n]), so
@@ -1010,10 +1010,10 @@ function M.render(roots, opts)
     emit_separator()
   end
 
-  -- ── the ledger (U6): one line per node, details in the docked panel ─────
+  -- ── the outline (U6): one line per node, details in the docked inspector ─────
   -- Rows carry identity + discriminators only (name, pass mode, type, short
   -- default); everything read one-at-a-time (full type, ≈ evaluation,
-  -- example, origin, long defaults) lives in the panel (opts.view = "panel").
+  -- example, origin, long defaults) lives in the inspector (opts.view = "inspector").
   -- Rows NEVER wrap — the single-line invariant is what keeps the float
   -- narrow and scanning cheap.
   local function render_rows()
@@ -1104,8 +1104,8 @@ function M.render(roots, opts)
       end
 
       -- Every row carries its default: long ones elide to `= …` rather than
-      -- widening every row, and the panel holds the full value. The rows
-      -- never change as the cursor moves — that is what the panel is for.
+      -- widening every row, and the inspector holds the full value. The rows
+      -- never change as the cursor moves — that is what the inspector is for.
       local default_inline = node.default ~= nil
       local default_text = nil
       if default_inline then

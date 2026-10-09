@@ -25,7 +25,7 @@ Hide
 Type "cd demo && mkdir -p shots && export TYPESCOPE_SHOT=1 && alias nvim='nvim --clean -u init.lua'"
 Enter
 
-# README intro: the default ledger, cursor on the first row
+# README intro: the default outline, cursor on the first row
 Hide
 Type "nvim shots.py"
 Enter
@@ -42,7 +42,7 @@ Hide
 Type "qZQ"
 Sleep 300ms
 
-# The ledger, cursor on host
+# The outline, cursor on host
 Hide
 Type "nvim shots.py"
 Enter

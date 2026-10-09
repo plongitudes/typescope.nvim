@@ -215,7 +215,7 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
   -- trees carry the previous open's flag, so clear before setting.
   local active_name = lsp.active_param(sig_result)
   local header = meta and meta.header or nil
-  local active_id = nil -- the cursor (and the ledger's panel) opens on the active param
+  local active_id = nil -- the cursor (and the outline's inspector) opens on the active param
   if meta and meta.overloads then
     -- overloads (U4): stacked groups — expand the one that matches the
     -- arguments so far, collapse the rest; the active-param flag lives on
@@ -264,10 +264,10 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
   local width = math.min(max_width, math.max(result.width, 30))
   local height = math.min(cfg.ui.max_height, #result.lines)
 
-  -- the rows and a docked panel under them, hung from the cursor's screen
+  -- the rows and a docked inspector under them, hung from the cursor's screen
   -- position (float.lua places both windows itself)
   local pos = vim.fn.screenpos(0, srccursor[1], srccursor[2] + 1)
-  local panel = { row = math.max(0, pos.row - 1), col = math.max(0, pos.col - 1), max_height = cfg.ui.max_height }
+  local inspector = { row = math.max(0, pos.row - 1), col = math.max(0, pos.col - 1), max_height = cfg.ui.max_height }
   local handle = float.open({
     lines = result.lines,
     highlights = result.highlights,
@@ -282,12 +282,12 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
     height = height,
     border = cfg.ui.border,
     enter = focus,
-    panel = panel,
+    inspector = inspector,
   })
 
   -- land on the active param's primary row: with ui.focus the tree keys are
   -- live immediately, so the cursor should start where the user is typing.
-  -- The panel shows the cursor's row, so with no active param it
+  -- The inspector shows the cursor's row, so with no active param it
   -- starts on the first one rather than the header.
   for lnum = 1, #result.lines do
     local id = result.line_to_node[lnum]
@@ -309,14 +309,14 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
         require("typescope.resolve").recurse(session.client, node, session.token, done)
       end
     end,
-    -- not through `session`: the ledger's first ask runs inside attach(),
+    -- not through `session`: the outline's first ask runs inside attach(),
     -- before `session` exists, and a dropped call never calls `done` —
     -- which left interact waiting on a batch that was never sent, and every
     -- later ask (e included) parked behind it
     on_llm_nodes = function(nodes, done)
       require("typescope.examples").llm_nodes(nodes, token, done)
     end,
-    -- the panel's sibling group, generated as the cursor gets there
+    -- the inspector's sibling group, generated as the cursor gets there
     auto_examples = cfg.ollama.enabled and cfg.example_mode == "llm",
     on_llm_error = function(err)
       if not llm_auto_warned then

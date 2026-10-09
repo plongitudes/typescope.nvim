@@ -34,16 +34,16 @@ local function float_lines()
 end
 
 -- The rows carry one line per node; an example, an origin tag and a ≈
--- evaluation are the docked panel's, which shows the cursor's row.
-local function panel()
+-- evaluation are the docked inspector's, which shows the cursor's row.
+local function inspector()
   for _, w in ipairs(vim.api.nvim_list_wins()) do
-    if vim.bo[vim.api.nvim_win_get_buf(w)].filetype == "typescope_panel" then
+    if vim.bo[vim.api.nvim_win_get_buf(w)].filetype == "typescope_inspector" then
       return vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(w), 0, -1, false), w
     end
   end
 end
-local function panel_text()
-  local lines, w = panel()
+local function inspector_text()
+  local lines, w = inspector()
   if not lines or vim.api.nvim_win_get_config(w).hide then
     return ""
   end
@@ -51,8 +51,8 @@ local function panel_text()
 end
 
 --- Focus the float, put the cursor on the first row matching `pattern`, and
---- return what the panel shows for it.
-local function panel_of(pattern)
+--- return what the inspector shows for it.
+local function inspector_of(pattern)
   local lines, w = float_lines()
   if not lines then
     return ""
@@ -65,12 +65,12 @@ local function panel_of(pattern)
       break
     end
   end
-  return panel_text()
+  return inspector_text()
 end
 
 -- the frame's bottom edge: the docstring's first sentence lives there
 local function footer_text()
-  local _, w = panel()
+  local _, w = inspector()
   local footer = w and vim.api.nvim_win_get_config(w).footer
   local text = ""
   for _, chunk in ipairs(type(footer) == "table" and footer or {}) do
@@ -120,10 +120,10 @@ if lines then
   check("union annotation intact", all:find("int | None", 1, true) ~= nil)
   check("param timeout with default", all:find("timeout") and all:find("30%.0"))
   check("returns Response present, collapsed", all:find("returns") and not all:find("status"))
-  check("heuristic examples rendered (host -> localhost)", panel_of("·%s+host%s"):find("localhost") ~= nil)
-  check("inherited field with origin tag", panel_of("·%s+env%s"):find("↑BaseConfig", 1, true) ~= nil)
+  check("heuristic examples rendered (host -> localhost)", inspector_of("·%s+host%s"):find("localhost") ~= nil)
+  check("inherited field with origin tag", inspector_of("·%s+env%s"):find("↑BaseConfig", 1, true) ~= nil)
   local _, override_count = all:gsub("verbose", "")
-  local verbose_badged = panel_of("·%s+verbose%s"):find("↑", 1, true) ~= nil
+  local verbose_badged = inspector_of("·%s+verbose%s"):find("↑", 1, true) ~= nil
   check("child override wins (verbose appears once, unbadged)", override_count == 1 and not verbose_badged)
 
   -- expand retry (depth 2 resolved its fields inline)
@@ -322,7 +322,7 @@ if lines_h8h then
 end
 require("typescope").close()
 
--- unified float (U1): one window with the header over the rows, the panel
+-- unified float (U1): one window with the header over the rows, the inspector
 -- docked under it, and the docstring in its own view
 local function all_floats()
   local out = {}
@@ -343,13 +343,13 @@ require("typescope").open()
 vim.wait(2000, function()
   return float_lines() ~= nil
 end)
-local panels = 0
+local inspectors = 0
 for _, w in ipairs(all_floats()) do
-  if vim.bo[vim.api.nvim_win_get_buf(w)].filetype == "typescope_panel" then
-    panels = panels + 1
+  if vim.bo[vim.api.nvim_win_get_buf(w)].filetype == "typescope_inspector" then
+    inspectors = inspectors + 1
   end
 end
-check("exactly one float and its panel (anchor retired)", #all_floats() == 2 and panels == 1)
+check("exactly one float and its inspector (anchor retired)", #all_floats() == 2 and inspectors == 1)
 local ulines, ts_win = float_lines()
 if ulines then
   local all_u = table.concat(ulines, "\n")
@@ -701,8 +701,8 @@ do
   require("typescope").setup({}) -- back to defaults for the remaining tests
 end
 
--- K ledger layout (U6): one-line rows — name | type | short default — with a
--- docked panel under them that follows the cursor once the float is focused
+-- K outline layout (U6): one-line rows — name | type | short default — with a
+-- docked inspector under them that follows the cursor once the float is focused
 do
   vim.api.nvim_win_set_cursor(0, { call_line, 12 })
   require("typescope").open()
@@ -710,7 +710,7 @@ do
     return float_lines() ~= nil
   end)
   local llines, lw = float_lines()
-  check("ledger float opened", llines ~= nil)
+  check("outline float opened", llines ~= nil)
   if llines then
     local all = table.concat(llines, "\n")
     local timeout_row
@@ -720,23 +720,23 @@ do
       end
     end
     check(
-      "ledger rows are single lines (timeout: type + inline default)",
+      "outline rows are single lines (timeout: type + inline default)",
       timeout_row ~= nil and llines[timeout_row]:find("float") ~= nil and llines[timeout_row]:find("= 30%.0") ~= nil
     )
-    check("ledger rows carry no expand hints or examples", not all:find("<CR>") and not all:find("localhost"))
-    check("the panel opens with the float", panel() ~= nil)
-    check("...on the first row when no param is active", panel_text():find("^config") ~= nil)
-    check("the ledger carries no docstring section", not all:find("Spin up"))
+    check("outline rows carry no expand hints or examples", not all:find("<CR>") and not all:find("localhost"))
+    check("the inspector opens with the float", inspector() ~= nil)
+    check("...on the first row when no param is active", inspector_text():find("^config") ~= nil)
+    check("the outline carries no docstring section", not all:find("Spin up"))
     check("the footer carries the docstring's first sentence", footer_text():find("Spin up") ~= nil)
 
-    -- focus, rest on the timeout row: the panel shows it, the rows stay put
+    -- focus, rest on the timeout row: the inspector shows it, the rows stay put
     vim.api.nvim_set_current_win(lw)
     vim.api.nvim_win_set_cursor(lw, { timeout_row, 0 })
     vim.cmd("doautocmd CursorMoved")
     local followed = vim.wait(1000, function()
-      return panel_text():find("^timeout") ~= nil and panel_text():find("= 30%.0") ~= nil
+      return inspector_text():find("^timeout") ~= nil and inspector_text():find("= 30%.0") ~= nil
     end, 50)
-    check("the panel follows the cursor (timeout default)", followed)
+    check("the inspector follows the cursor (timeout default)", followed)
     check("moving the cursor leaves the rows alone", table.concat(float_lines(), "\n") == all)
 
     local function cursor_line()
@@ -766,12 +766,12 @@ do
     check("2j comes back", row_after({ "2j" }, two) == timeout_row)
     vim.api.nvim_win_set_cursor(lw, { timeout_row, 0 })
 
-    -- d: the whole docstring where the rows were, the panel folded away; d
+    -- d: the whole docstring where the rows were, the inspector folded away; d
     -- again brings the rows back with the cursor where it was
     vim.api.nvim_feedkeys("d", "x", false)
     local doc = table.concat(float_lines(), "\n")
     check("d shows the docstring in place of the rows", doc:find("Spin up") ~= nil and not doc:find("= 30%.0"))
-    check("...with the panel hidden", panel_text() == "")
+    check("...with the inspector hidden", inspector_text() == "")
     vim.api.nvim_feedkeys("d", "x", false)
     -- the rules may have stretched: the doc view grew the float, and it
     -- never shrinks back
@@ -782,7 +782,7 @@ do
     end
     check("d again brings the rows back", vim.deep_equal(rows(float_lines()), rows(llines)))
     check("...on the row it left", cursor_line():find("timeout") ~= nil)
-    check("...with the panel back", panel_text():find("^timeout") ~= nil)
+    check("...with the inspector back", inspector_text():find("^timeout") ~= nil)
     require("typescope").close()
   end
 end
@@ -863,12 +863,12 @@ check("evaluated-leaf float opened", lines6 ~= nil)
 if lines6 then
   local all6 = table.concat(lines6, "\n")
   check("alias leaf keeps declared name", all6:find("LoopMode") ~= nil)
-  local mode_panel = panel_of("·%s+mode%s")
+  local mode_inspector = inspector_of("·%s+mode%s")
   check(
     "alias leaf decorated with evaluated type",
-    mode_panel:find("≈", 1, true) ~= nil and mode_panel:find("Literal") ~= nil
+    mode_inspector:find("≈", 1, true) ~= nil and mode_inspector:find("Literal") ~= nil
   )
-  -- the row shows the inference as the type itself; the panel has no ≈ to add
+  -- the row shows the inference as the type itself; the inspector has no ≈ to add
   local count_ok = false
   for _, l in ipairs(lines6) do
     if l:find("·%s+count%s") and l:find("int", 1, true) and not l:find("Any") then
@@ -951,7 +951,7 @@ if lines9 then
   -- resolution from the first paint: the oracle answers `resolved` inline,
   -- so there is no evaluation-only expansion to fold (that mechanic went
   -- with the treesitter resolver, design/oracle.md §7)
-  check("alias leaf shows its resolution ≈ from the first paint", panel_of("·%s+mode%s"):find("Literal") ~= nil)
+  check("alias leaf shows its resolution ≈ from the first paint", inspector_of("·%s+mode%s"):find("Literal") ~= nil)
 end
 require("typescope").close()
 
@@ -970,13 +970,13 @@ local lines7 = float_lines()
 check("class-hover float opened", lines7 ~= nil)
 if lines7 then
   local all7 = table.concat(lines7, "\n")
-  -- the row may cut the category short at this width; the panel has it whole
+  -- the row may cut the category short at this width; the inspector has it whole
   check(
     "class root with category + ancestry header",
-    lines7[1]:find("ServerConfig") and panel_of("ServerConfig"):find("(dataclass ← BaseConfig)", 1, true)
+    lines7[1]:find("ServerConfig") and inspector_of("ServerConfig"):find("(dataclass ← BaseConfig)", 1, true)
   )
   check("class fields shown", all7:find("host") and all7:find("retry"))
-  check("class inheritance merged", all7:find("env") and panel_of("·%s+env%s"):find("↑BaseConfig", 1, true))
+  check("class inheritance merged", all7:find("env") and inspector_of("·%s+env%s"):find("↑BaseConfig", 1, true))
   check("class docstring in the footer", footer_text():find("Connection settings") ~= nil)
 end
 require("typescope").close()
@@ -1045,7 +1045,7 @@ do
 end
 
 -- ui.max_width is a FRACTION of editor width, and a headless 80-column
--- editor caps the float at 40 — which is what the ledger already needs, so
+-- editor caps the float at 40 — which is what the outline already needs, so
 -- the float opens pinned at its ceiling and nothing can grow. Widen the
 -- editor so the landing frame has somewhere to go; restored below.
 local prev_columns = vim.o.columns
@@ -1067,7 +1067,7 @@ check("float for LLM test opened", llm_win ~= nil)
 if llm_win then
   vim.api.nvim_set_current_win(llm_win)
   -- e asks about the cursor's row and its siblings: park on config.host
-  panel_of("·%s+host%s")
+  inspector_of("·%s+host%s")
   vim.api.nvim_feedkeys("e", "x", false)
   -- wait for BOTH: values uncover progressively as the reveal's blocks fall
   -- (38c), so the first one on screen doesn't mean the row has settled
@@ -1079,7 +1079,7 @@ if llm_win then
   end
   vim.wait(4000, function()
     sample()
-    return panel_text():find("llm%-host") ~= nil
+    return inspector_text():find("llm%-host") ~= nil
   end, 20)
   -- values become legible partway through the grow, so keep sampling past the
   -- predicate or the tail of the ease is never seen
@@ -1087,9 +1087,9 @@ if llm_win then
     sample()
     return false
   end, 20)
-  check("LLM values rendered after e", panel_text():find("llm%-host") ~= nil)
+  check("LLM values rendered after e", inspector_text():find("llm%-host") ~= nil)
   -- one ask covers the row's siblings: port's value came back in the same batch
-  check("...and its siblings' with it", panel_of("·%s+port%s"):find("8443") ~= nil)
+  check("...and its siblings' with it", inspector_of("·%s+port%s"):find("8443") ~= nil)
   -- >2 distinct widths means it eased; exactly 2 (old width, new width) is the
   -- single-frame snap this replaced
   local lo, hi = math.huge, 0
@@ -1140,7 +1140,7 @@ if slow_win then
   end
   vim.api.nvim_set_current_win(slow_win)
   -- e asks about the cursor's row and its siblings: park on config.host
-  panel_of("·%s+host%s")
+  inspector_of("·%s+host%s")
   vim.api.nvim_feedkeys("e", "x", false)
   -- Generous on purpose: ~1s warmup probe, then 4.1s + 4.1s across the retry,
   -- and the whole thing shifts under load. A tight window here fails by
@@ -1172,13 +1172,13 @@ check("float for fallback test opened", dead_win ~= nil)
 if dead_win then
   vim.api.nvim_set_current_win(dead_win)
   -- e asks about the cursor's row and its siblings: park on config.host
-  panel_of("·%s+host%s")
+  inspector_of("·%s+host%s")
   vim.api.nvim_feedkeys("e", "x", false)
-  -- the panel is a bar while the ask is out; the failure takes it down
+  -- the inspector is a bar while the ask is out; the failure takes it down
   vim.wait(5000, function()
-    return panel_text():find("localhost") ~= nil
+    return inspector_text():find("localhost") ~= nil
   end)
-  check("heuristics survive unreachable ollama", panel_text():find("localhost") ~= nil)
+  check("heuristics survive unreachable ollama", inspector_text():find("localhost") ~= nil)
 end
 require("typescope").close()
 
@@ -1203,12 +1203,12 @@ require("typescope").open()
 vim.wait(2000, function()
   return float_lines() ~= nil
 end)
-panel_of("·%s+host%s")
+inspector_of("·%s+host%s")
 vim.wait(6000, function()
-  return panel_text():find("llm%-host") ~= nil
+  return inspector_text():find("llm%-host") ~= nil
 end)
 vim.notify = auto_orig_notify
-local auto = panel_text()
+local auto = inspector_text()
 check("auto LLM values render without pressing e", auto:find("llm%-host") ~= nil)
 if not auto:find("llm%-host") then
   print("  DEBUG float:\n" .. auto)
@@ -1216,8 +1216,8 @@ if not auto:find("llm%-host") then
 end
 require("typescope").close()
 
--- The ledger's first ask happens while the float is still being built: the
--- panel opens on greet's `label`, a leaf with no answer yet, and asks for it
+-- The outline's first ask happens while the float is still being built: the
+-- inspector opens on greet's `label`, a leaf with no answer yet, and asks for it
 -- from inside attach(). That ask once went through a session that did not
 -- exist yet, was dropped without a word, and left every later ask (e
 -- included) parked behind a batch that was never sent.
@@ -1236,11 +1236,11 @@ do
   vim.wait(2000, function()
     return float_lines() ~= nil
   end)
-  check("the ledger opens on greet's first row", panel_text():find("^label") ~= nil)
+  check("the outline opens on greet's first row", inspector_text():find("^label") ~= nil)
   local landed = vim.wait(5000, function()
-    return panel_text():find("fixture%-label") ~= nil
+    return inspector_text():find("fixture%-label") ~= nil
   end, 20)
-  check("the ask made while the float opens is sent, and lands in the panel", landed)
+  check("the ask made while the float opens is sent, and lands in the inspector", landed)
   require("typescope").close()
 end
 require("typescope").setup({})

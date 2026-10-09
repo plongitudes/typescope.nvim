@@ -178,15 +178,18 @@ local function opts(over)
   }, over or {})
 end
 
--- the panel for one node; an example is on its last line
-local function panel(node, over)
-  return render.render({ node }, opts(vim.tbl_extend("force", { view = "panel", panel_node = node }, over or {})))
+-- the inspector for one node; an example is on its last line
+local function inspector(node, over)
+  return render.render(
+    { node },
+    opts(vim.tbl_extend("force", { view = "inspector", inspector_node = node }, over or {}))
+  )
 end
 local function last(r)
   return r.lines[#r.lines]
 end
 
--- 1. unicode: one line per node, examples left to the panel
+-- 1. unicode: one line per node, examples left to the inspector
 eq_lines("unicode rows", render.render(tree(), opts()).lines, {
   "▾ config               ServerConfig",
   "  ├─ · host            str",
@@ -244,14 +247,14 @@ check(
 )
 
 -- 7. injection spans: types/defaults replace on the rows, examples overlay
--- in the panel (the rows carry none)
+-- in the inspector (the rows carry none)
 local kinds = {}
 for _, ij in ipairs(r.ts_injections) do
   kinds[ij.text] = ij.mode
 end
 do
   local roots = tree()
-  local host = render.render(roots, opts({ view = "panel", panel_node = model.find(roots, "config.host") }))
+  local host = render.render(roots, opts({ view = "inspector", inspector_node = model.find(roots, "config.host") }))
   for _, ij in ipairs(host.ts_injections) do
     kinds[ij.text] = ij.mode
   end
@@ -264,7 +267,7 @@ check(
 -- its snippet and the byte slice of it that landed on that line, so a
 -- continuation reading `Awaitable[Response | None]]]` is painted from the
 -- colors the full type parses to rather than dropping to the base group.
--- The row cuts a long type short, so this is the panel, which wraps it.
+-- The row cuts a long type short, so this is the inspector, which wraps it.
 local handlers = {
   model.new({
     name = "handlers",
@@ -276,8 +279,10 @@ local handlers = {
     default = "None",
   }),
 }
-local wide =
-  render.render(handlers, opts({ max_width = 40, show_examples = false, view = "panel", panel_node = handlers[1] }))
+local wide = render.render(
+  handlers,
+  opts({ max_width = 40, show_examples = false, view = "inspector", inspector_node = handlers[1] })
+)
 local annotation = "dict[str, Callable[[Request, Session], Awaitable[Response | None]]]"
 local pieces, default_injected, slices_sound = {}, false, true
 for _, ij in ipairs(wide.ts_injections) do
@@ -312,7 +317,7 @@ check("a split annotation injects as slices of the whole", #pieces > 1 and cover
 check("an unsplit default still injects", default_injected)
 
 -- 8b. atomic segments (origin/badges) never split mid-word when wrapping:
--- the panel's origin tag jumps whole to a line of its own
+-- the inspector's origin tag jumps whole to a line of its own
 do
   local px = {
     model.new({
@@ -325,7 +330,7 @@ do
   }
   eq_lines(
     "atomic origin tag jumps whole to continuation",
-    render.render(px, opts({ max_width = 40, show_examples = false, view = "panel", panel_node = px[1] })).lines,
+    render.render(px, opts({ max_width = 40, show_examples = false, view = "inspector", inspector_node = px[1] })).lines,
     {
       "proxy  dict",
       "= weakref.WeakValueDictionary()",
@@ -335,7 +340,7 @@ do
 end
 
 -- 8c. evaluated decorations: an alias keeps its declared name on the row and
--- shows its ≈ evaluation in the panel; an unannotated param (implicit Any)
+-- shows its ≈ evaluation in the inspector; an unannotated param (implicit Any)
 -- shows only the inferred type, drawn as an evaluation
 do
   local ev = {
@@ -367,8 +372,8 @@ do
   end
   check("an inferred type stands in for Any, drawn as an evaluation", int_group == "TypeScopeEvaluated")
   eq_lines(
-    "the alias's evaluation is in its panel",
-    render.render(ev, opts({ show_examples = false, view = "panel", panel_node = ev[1] })).lines,
+    "the alias's evaluation is in its inspector",
+    render.render(ev, opts({ show_examples = false, view = "inspector", inspector_node = ev[1] })).lines,
     {
       "mode  LoopMode",
       "≈ Literal['auto', 'manual']",
@@ -423,11 +428,11 @@ end
 
 -- 10. (the table layout's golden went with the layout in 0.2.0)
 
--- 11. the ledger (U6): one line per node — name | type | short default —
+-- 11. the outline (U6): one line per node — name | type | short default —
 -- with the details (full type, ≈ owner, full default, example, origin) in
--- the docked panel, rendered as view = "panel" for one node
+-- the docked inspector, rendered as view = "inspector" for one node
 do
-  local function ledger_tree()
+  local function outline_tree()
     local t = {
       model.new({
         name = "config",
@@ -481,8 +486,8 @@ do
     return t
   end
   local lopts = opts({ style = styles.get("rounded"), max_width = 60 })
-  local lr = render.render(ledger_tree(), lopts)
-  eq_lines("ledger golden (no detail)", lr.lines, {
+  local lr = render.render(outline_tree(), lopts)
+  eq_lines("outline golden (no detail)", lr.lines, {
     "▾   config     ServerConfig",
     "  ├─ ·   host  str",
     "  ├─ ·   port  int  = 8000",
@@ -494,35 +499,35 @@ do
   -- rows carry no examples, no origins, no ≈, no expand hints — detail's job
   local all = table.concat(lr.lines, "\n")
   check(
-    "ledger rows stay lean",
+    "outline rows stay lean",
     not all:find("localhost") and not all:find("BaseConfig") and not all:find("≈") and not all:find("<CR>")
   )
 
-  local function panel_for(roots, id, over)
+  local function inspector_for(roots, id, over)
     return render.render(
       roots,
       opts(vim.tbl_extend("force", {
         style = styles.get("rounded"),
         max_width = 60,
-        view = "panel",
-        panel_node = model.find(roots, id),
+        view = "inspector",
+        inspector_node = model.find(roots, id),
       }, over or {}))
     )
   end
 
-  -- the panel for ws: name and whole type, then the ≈ line naming the union
+  -- the inspector for ws: name and whole type, then the ≈ line naming the union
   -- member that answered (evaluated_owner, not the whole annotation), then
   -- the full default and the example
-  local dr = panel_for(ledger_tree(), "ws")
-  eq_lines("ledger panel golden", dr.lines, {
+  local dr = inspector_for(outline_tree(), "ws")
+  eq_lines("outline inspector golden", dr.lines, {
     "ws  type[Protocol] | WSProtocolType",
     '≈ WSProtocolType = Literal["auto", "none"]',
     '= "auto"   e.g. "none"',
   })
-  check("panel lines map to its node", dr.line_to_node[1] == "ws" and dr.line_to_node[3] == "ws")
-  check("the panel draws no rows and no header", not table.concat(dr.lines, "\n"):find("returns"))
+  check("inspector lines map to its node", dr.line_to_node[1] == "ws" and dr.line_to_node[3] == "ws")
+  check("the inspector draws no rows and no header", not table.concat(dr.lines, "\n"):find("returns"))
 
-  -- A stub placeholder default stays on the ROW, and the panel does not repeat
+  -- A stub placeholder default stays on the ROW, and the inspector does not repeat
   -- it: `…` is one cell and always fit inline, so echoing it says nothing.
   do
     local ph = {
@@ -548,21 +553,21 @@ do
     }
     local rows = table.concat(render.render(ph, opts({ max_width = 62 })).lines, "\n")
     check("a placeholder default shows inline", rows:find("level.*= …") ~= nil)
-    local function panel_text(id)
-      return table.concat(panel_for(ph, id, { max_width = 62 }).lines, "\n")
+    local function inspector_text(id)
+      return table.concat(inspector_for(ph, id, { max_width = 62 }).lines, "\n")
     end
-    check("...the panel carries the example", panel_text("level"):find("e%.g%.") ~= nil)
-    check("...and not the placeholder", not panel_text("level"):find("= …"))
-    check("a placeholder-only node's panel is just its name and type", #panel_for(ph, "exception").lines == 1)
-    check("a real long default is in the panel", panel_text("fmt"):find('= "{time} {level} {message}"') ~= nil)
+    check("...the inspector carries the example", inspector_text("level"):find("e%.g%.") ~= nil)
+    check("...and not the placeholder", not inspector_text("level"):find("= …"))
+    check("a placeholder-only node's inspector is just its name and type", #inspector_for(ph, "exception").lines == 1)
+    check("a real long default is in the inspector", inspector_text("fmt"):find('= "{time} {level} {message}"') ~= nil)
   end
 
   check(
-    "the panel shows an inherited field's origin",
-    table.concat(panel_for(ledger_tree(), "config.env").lines, "\n"):find("↑BaseConfig") ~= nil
+    "the inspector shows an inherited field's origin",
+    table.concat(inspector_for(outline_tree(), "config.env").lines, "\n"):find("↑BaseConfig") ~= nil
   )
 
-  -- the row cuts a long type short; the panel is where it is whole
+  -- the row cuts a long type short; the inspector is where it is whole
   do
     local wide = {
       model.new({
@@ -572,9 +577,9 @@ do
       }),
     }
     local row = render.render(wide, opts({ max_width = 40 })).lines[1]
-    local whole = table.concat(panel_for(wide, "app", { max_width = 40 }).lines, " ")
+    local whole = table.concat(inspector_for(wide, "app", { max_width = 40 }).lines, " ")
     check("a long type is cut on its row", row:find("…") ~= nil)
-    check("...and whole in the panel", whole:find("ASGI2Protocol]", 1, true) ~= nil)
+    check("...and whole in the inspector", whole:find("ASGI2Protocol]", 1, true) ~= nil)
   end
 
   -- long identifiers middle-ellipsize at the 24-cell cap
@@ -586,7 +591,7 @@ do
     }),
   }, lopts)
   check(
-    "ledger caps long names with middle ellipsis",
+    "outline caps long names with middle ellipsis",
     long.lines[1]:find("…") ~= nil and long.lines[1]:find("bool") ~= nil
   )
 end
@@ -771,7 +776,7 @@ do
     -- while it waits, and what a MISS leaves behind
     node.example.heuristic = '"localhost"'
     node.example.llm = llm
-    local r = panel(node, over)
+    local r = inspector(node, over)
     local found = {}
     for _, h in ipairs(r.highlights) do
       found[h.group] = true
@@ -815,17 +820,17 @@ do
   check("no predicate renders normally", groups_for({ example_kind = "llm" })["TypeScopeExample"] == true)
 
   -- a leaf no heuristic matches has no example line at all; while its value
-  -- is coming, a bar holds the line open so the panel doesn't grow one later
+  -- is coming, a bar holds the line open so the inspector doesn't grow one later
   do
     local bare = model.new({ name = "object", kind = "param", type = { display = "_T", category = "typevar" } })
-    local waiting = panel(bare, { example_kind = "llm", example_pending = pending })
-    local settled = panel(bare, { example_kind = "llm" })
+    local waiting = inspector(bare, { example_kind = "llm", example_pending = pending })
+    local settled = inspector(bare, { example_kind = "llm" })
     -- one full wavelength, so every rung of the ramp is on screen at once
     check(
       "pending leaf with no heuristic shows the wave bar",
       last(waiting):find("▁") and last(waiting):find("▇") and last(waiting):find("▅")
     )
-    local ascii = last(panel(bare, {
+    local ascii = last(inspector(bare, {
       style = styles.get("ascii"),
       example_kind = "llm",
       example_pending = pending,
@@ -851,7 +856,7 @@ do
     node.example.llm = value
     local progress
     local function frame(over)
-      return panel(
+      return inspector(
         node,
         vim.tbl_extend("force", {
           example_kind = "llm",
@@ -907,7 +912,7 @@ do
     -- disappearing between two frames
     local missed = model.new({ name = "kwargs", kind = "param", type = { display = "T", category = "builtin" } })
     local function miss_frame(pr)
-      return last(panel(missed, {
+      return last(inspector(missed, {
         example_kind = "llm",
         example_pending = function()
           return false
@@ -959,7 +964,7 @@ do
     -- a pending node has no value yet, so a stale reveal must not fire
     progress = 0.5
     local bare = model.new({ name = "x", kind = "param", type = { display = "_T", category = "typevar" } })
-    local waiting = panel(bare, {
+    local waiting = inspector(bare, {
       example_kind = "llm",
       example_pending = function()
         return true
@@ -1006,7 +1011,7 @@ do
   -- so its columns are the last PENDING_CELLS characters of the line
   local WIDTH = 28
   local function bar_at(phase)
-    local line = last(panel(bare, {
+    local line = last(inspector(bare, {
       example_kind = "llm",
       example_pending = function()
         return true
@@ -1067,8 +1072,8 @@ do
     return render.render(
       { node },
       opts(vim.tbl_extend("force", {
-        view = "panel",
-        panel_node = node,
+        view = "inspector",
+        inspector_node = node,
         max_width = 40,
         example_kind = "llm",
       }, over))
@@ -1122,7 +1127,7 @@ do
   local value = '"https://api.example.com/data"'
   local node = model.new({ name = "url", kind = "param", type = { display = "str", category = "builtin" } })
   node.example.llm = value
-  local mid = panel(node, {
+  local mid = inspector(node, {
     example_kind = "llm",
     example_pending = function()
       return false
@@ -1189,8 +1194,8 @@ do
     return render.render(
       { short },
       opts(vim.tbl_extend("force", {
-        view = "panel",
-        panel_node = short,
+        view = "inspector",
+        inspector_node = short,
         max_width = 90,
         window_width = W,
         example_kind = "llm",
@@ -1257,8 +1262,8 @@ do
     local r = render.render(
       { node },
       opts({
-        view = "panel",
-        panel_node = node,
+        view = "inspector",
+        inspector_node = node,
         max_width = 90,
         window_width = window,
         example_kind = "llm",
@@ -1309,7 +1314,7 @@ do
   local wide = model.new({ name = "host", kind = "param", type = { display = "str", category = "builtin" } })
   wide.example.heuristic = '"llm-host.example.io/gateway/v2/ingest?region=us-west-2"'
   wide.origin = "typescope.transport.gateway.RegionalIngestClientConfiguration"
-  local narrow = render.render({ wide }, opts({ view = "panel", panel_node = wide, max_width = 40 }))
+  local narrow = render.render({ wide }, opts({ view = "inspector", inspector_node = wide, max_width = 40 }))
   check("an example wider than the float wraps instead of hanging", #narrow.lines >= 2)
   local widest = 0
   for _, l in ipairs(narrow.lines) do
@@ -1326,7 +1331,7 @@ end
 do
   local node = model.new({ name = "returns", kind = "return", type = { display = "R", category = "class" } })
   node.example.heuristic = "Response(status_code=200, content=b\"{'data': [{'id': 1, 'name': 'Item 1'}]}\")"
-  local r = render.render({ node }, opts({ view = "panel", panel_node = node, max_width = 64 }))
+  local r = render.render({ node }, opts({ view = "inspector", inspector_node = node, max_width = 64 }))
   local label
   for _, l in ipairs(r.lines) do
     if l:find("e.g.", 1, true) then
@@ -1363,7 +1368,7 @@ do
   check("a zero-length grow is not a divide-by-anything", ease(50, 50, 0.5) == 50)
 end
 
--- The ledger's rows carry no examples at all — they live in the panel, one
+-- The outline's rows carry no examples at all — they live in the inspector, one
 -- node at a time — so the rows never change as the cursor moves.
 do
   local roots = {
@@ -1380,8 +1385,8 @@ do
     end
     return n
   end
-  check("ledger rows show no examples", example_lines({}) == 0)
-  check("the panel shows its node's", example_lines({ view = "panel", panel_node = roots[2] }) == 1)
+  check("outline rows show no examples", example_lines({}) == 0)
+  check("the inspector shows its node's", example_lines({ view = "inspector", inspector_node = roots[2] }) == 1)
 end
 
 -- model.frontier: the next level l opens. Shallowest collapsed expandable
@@ -1419,7 +1424,7 @@ end
 
 -- 13. find_break_point: the wrap decision every surface goes through
 --
--- Four call sites depend on it — the panel's flow, docstring prose, header
+-- Four call sites depend on it — the inspector's flow, docstring prose, header
 -- elision, the typing surface's detail — and until now none of them tested it
 -- directly.
 -- Its contract is easy to get wrong from the outside, so pin it here: `limit`
@@ -1496,8 +1501,8 @@ end
 -- 14. truncation counts cells, not bytes
 --
 -- Four places took a cell budget and used it as a byte index: the wrap point
--- (covered in 13), the ledger's type truncation, elide_members' no-separator
--- fallback, and the ledger's middle-ellipsis name cap. Each produced a broken
+-- (covered in 13), the outline's type truncation, elide_members' no-separator
+-- fallback, and the outline's middle-ellipsis name cap. Each produced a broken
 -- character on non-ASCII input, and every one of them passed the golden tests
 -- above, because every fixture in this file is ASCII.
 do
@@ -1523,9 +1528,9 @@ do
   -- width proves almost nothing. This is the check that would have caught all
   -- three sites at once.
   -- each of the float's three surfaces: the rows (header elision, capped
-  -- names, cut types), the panel (wrapped types and values) and the doc view
+  -- names, cut types), the inspector (wrapped types and values) and the doc view
   -- (wrapped prose)
-  for _, view in ipairs({ "rows", "panel", "doc" }) do
+  for _, view in ipairs({ "rows", "inspector", "doc" }) do
     local worst = nil
     for w = 20, 80 do
       local roots = uni_roots()
@@ -1533,7 +1538,7 @@ do
         style = styles.get("rounded"),
         max_width = w,
         view = view ~= "rows" and view or nil,
-        panel_node = roots[1],
+        inspector_node = roots[1],
         show_examples = false,
         example_kind = "heuristic",
         lang = "python",
@@ -1547,7 +1552,7 @@ do
       end
     end
     check(
-      ({ rows = "the rows", panel = "the panel's lines", doc = "the doc view's lines" })[view]
+      ({ rows = "the rows", inspector = "the inspector's lines", doc = "the doc view's lines" })[view]
         .. " survive every width from 20 to 80 intact",
       worst == nil
     )
@@ -1556,20 +1561,20 @@ do
     end
   end
 
-  -- the ledger's middle-ellipsis keeps both ends of an identifier, and both
+  -- the outline's middle-ellipsis keeps both ends of an identifier, and both
   -- ends are now measured in columns — so a unicode name spends its whole
   -- 24-cell cap instead of stopping around 13
-  local ledger = render.render(uni_roots(), {
+  local outline = render.render(uni_roots(), {
     style = styles.get("rounded"),
     max_width = 70,
     show_examples = false,
     example_kind = "heuristic",
     lang = "python",
   })
-  check_utf8("ledger with a long unicode name", ledger)
+  check_utf8("outline with a long unicode name", outline)
   -- startswith/endswith, not :sub(1, 3) — a byte slice of "ünïcödé" yields
   -- "ün", which is how this assertion got written wrong the first time
-  local shown = ledger.lines[1]:match("^· (%S+)")
+  local shown = outline.lines[1]:match("^· (%S+)")
   check("the capped name keeps both ends", vim.startswith(shown, "ünïcödé") and vim.endswith(shown, "nöm_ïcï"))
   check("...and spends its cell budget, not its byte budget", vim.api.nvim_strwidth(shown) == 24)
 

@@ -239,8 +239,8 @@ end
 ---@param opts? table
 ---@return typescope.Config
 function M.setup(opts)
-  -- removed in 0.3.0: in the ledger, l opens a subtree a level at a time and
-  -- the panel shows one node, so "open everything under here" mostly cost a
+  -- removed in 0.3.0: in the outline, l opens a subtree a level at a time and
+  -- the inspector shows one node, so "open everything under here" mostly cost a
   -- slow local model and a pinned oracle. Carried keys are harmless; say so
   -- once rather than failing the whole setup over it.
   if opts and type(opts.keymaps) == "table" then
@@ -259,12 +259,12 @@ function M.setup(opts)
       )
     end
   end
-  -- removed in 0.4.0: the ledger is the only layout. A setup naming it is
-  -- already what it gets, so only a different layout is worth a word.
+  -- removed in 0.4.0: the outline is the only layout, so any ui.layout is a
+  -- leftover worth a word.
   if opts and type(opts.ui) == "table" then
-    if opts.ui.layout ~= nil and opts.ui.layout ~= "ledger" then
+    if opts.ui.layout ~= nil then
       vim.notify(
-        ("typescope: ui.layout = %q was removed in 0.4.0; the ledger is the only layout"):format(
+        ("typescope: ui.layout = %q was removed in 0.4.0; the outline is the only layout"):format(
           tostring(opts.ui.layout)
         ),
         vim.log.levels.WARN
