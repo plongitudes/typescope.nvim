@@ -494,22 +494,29 @@ if ulines then
   vim.api.nvim_win_set_cursor(ts_win, { timeout_row, 0 })
   vim.cmd("doautocmd CursorMoved")
   local outline_before = vim.api.nvim_buf_get_lines(ts_buf2, 0, -1, false)
-  local ocfg = vim.api.nvim_win_get_config(ts_win)
   local _, iwin2 = inspector()
   local loupe_h = vim.api.nvim_win_get_config(iwin2).height
+  local function pane_heights()
+    return {
+      vim.api.nvim_win_get_config(hwin).height,
+      vim.api.nvim_win_get_config(ts_win).height,
+      vim.api.nvim_win_get_config(iwin2).height,
+    }
+  end
+  local heights_before = pane_heights()
   vim.api.nvim_feedkeys("d", "x", false)
   check("d: the loupe shows the docstring", inspector_text():find("Spin up", 1, true) ~= nil)
   check(
     "...the outline is visible and unchanged",
     vim.deep_equal(vim.api.nvim_buf_get_lines(ts_buf2, 0, -1, false), outline_before)
       and not vim.api.nvim_win_get_config(ts_win).hide
-      and vim.api.nvim_win_get_config(ts_win).height == ocfg.height
+      and vim.api.nvim_win_get_config(ts_win).height >= math.min(5, #outline_before)
   )
   check(
     "...the cursor stays on its outline row",
     vim.api.nvim_get_current_win() == ts_win and vim.api.nvim_win_get_cursor(ts_win)[1] == timeout_row
   )
-  check("...the loupe keeps its size", vim.api.nvim_win_get_config(iwin2).height == loupe_h)
+  check("...the loupe grows toward the docstring", vim.api.nvim_win_get_config(iwin2).height > loupe_h)
   check("...scrolled to the hovered param's definition", loupe_top():find("timeout : float", 1, true) ~= nil)
   check("...the footer is still `? help`", footer_text() == " ? help ─")
 
@@ -518,6 +525,10 @@ if ulines then
   vim.cmd("doautocmd CursorMoved")
   check("moving to another param scrolls to its definition", loupe_top():find("config : ServerConfig", 1, true) ~= nil)
 
+  -- from the docstring's top: the grown loupe may already show its tail
+  vim.api.nvim_win_call(iwin2, function()
+    vim.fn.winrestview({ topline = 1, lnum = 1 })
+  end)
   local top_before = vim.fn.getwininfo(iwin2)[1].topline
   vim.api.nvim_feedkeys(vim.keycode("<C-d>"), "x", false)
   local top_down = vim.fn.getwininfo(iwin2)[1].topline
@@ -536,6 +547,7 @@ if ulines then
   check("d again: the cursor is still on its row", back:find("timeout", 1, true) ~= nil)
   check("...and the inspector is back, on that row", inspector_text():find("^timeout") ~= nil)
   check("...not the docstring", not inspector_text():find("Seconds to wait"))
+  check("...and every pane back at its prior height", vim.deep_equal(pane_heights(), heights_before))
 
   -- active param (mock always reports 0 → config) renders TypeScopeActive
   local ts_buf = vim.api.nvim_win_get_buf(ts_win)
@@ -650,6 +662,51 @@ do
       and head[1]:find("…", 1, true)
       and head[1]:find("Response$")
   )
+  require("typescope").close()
+
+  -- the docstring view grows the frame to max_height, then squashes the
+  -- outline and then the header to their minimums (the header cut in the
+  -- middle, not just its first rows), keeping the outline's cursor row in
+  -- view; d again puts every pane back
+  require("typescope").setup({
+    ui = { max_width = 30, max_height = 10, min_height = { header = 1, outline = 2, inspector = 1 } },
+  })
+  require("typescope").open()
+  vim.wait(2000, function()
+    return float_lines() ~= nil
+  end)
+  local orows
+  orows, ow = float_lines()
+  head, hw = header()
+  local _, iw = inspector()
+  local function heights()
+    return {
+      vim.api.nvim_win_get_config(hw).height,
+      vim.api.nvim_win_get_config(ow).height,
+      vim.api.nvim_win_get_config(iw).height,
+    }
+  end
+  vim.api.nvim_set_current_win(ow)
+  vim.api.nvim_win_set_cursor(ow, { #orows, 0 })
+  vim.cmd("doautocmd CursorMoved")
+  local before, head_before = heights(), header()
+  vim.api.nvim_feedkeys("d", "x", false)
+  local during = heights()
+  check(
+    "docstring view at max_height squashes the outline and the header to their minimums",
+    #head > 1 and during[1] == 1 and during[2] == 2 and during[1] + during[2] + during[3] == 10
+  )
+  local hcut = header() or {}
+  check(
+    "...the squashed header is cut in the middle, start and end visible",
+    #hcut == 1 and hcut[1]:find("^create_server%(") ~= nil and hcut[1]:find("Response$") ~= nil
+  )
+  local info = vim.fn.getwininfo(ow)[1]
+  local cur = vim.api.nvim_win_get_cursor(ow)[1]
+  check("...the outline keeps its cursor row in view", cur == #orows and cur >= info.topline and cur <= info.botline)
+  vim.api.nvim_feedkeys("d", "x", false)
+  check("d again: every pane is back at its prior height", vim.deep_equal(heights(), before))
+  check("...and the header is whole again", vim.deep_equal(header(), head_before))
   require("typescope").close()
   require("typescope").setup({})
   vim.fn.winrestview(view)

@@ -319,6 +319,66 @@ local layout_cases = {
     { max_height = 10, header = 6, outline = 8, inspector = 4, row = 30 },
     { content = 10, top = 30 - 16 },
   },
+  -- the docstring view grows the loupe toward max_height, away from the
+  -- cursor's code line; header and outline keep the sizes the inspector left
+  -- them until the budget runs out, then the outline and then the header are
+  -- squashed to their minimums
+  {
+    "docstring below the cursor: the loupe grows down, the top stays put",
+    { docstring = 6 },
+    { top = 6, header_row = 0, header_h = 1, outline_h = 8, inspector_h = 6 },
+  },
+  {
+    "...up to max_height",
+    { docstring = 6, max_height = 15 },
+    { top = 6, header_h = 1, outline_h = 8, inspector_h = 15 - 9 },
+  },
+  {
+    "...then squashes the outline, then the header",
+    { docstring = 30, header = 4 },
+    { top = 6, header_row = 0, header_h = 1, outline_h = 5, inspector_h = 20 - 6, outline_row = 3 },
+  },
+  {
+    "...stopping at the screen edge",
+    {
+      docstring = 30,
+      row = 25,
+      below = true,
+      max_height = 30,
+      min_height = { header = 1, outline = 2, inspector = 1 },
+    },
+    { top = 26, budget = 8, header_h = 1, outline_h = 2, inspector_h = 5 },
+  },
+  {
+    "...never below a pane's minimum",
+    { docstring = 30, header = 4, min_height = { header = 2, outline = 6, inspector = 1 } },
+    { header_h = 2, outline_h = 6, inspector_h = 20 - 8 },
+  },
+  {
+    "...nor below a pane's content when that is less",
+    { docstring = 30, outline = 3 },
+    { outline_h = 3, inspector_h = 20 - 4 },
+  },
+  {
+    "a docstring shorter than the loupe leaves it its size",
+    { docstring = 1 },
+    { header_h = 1, outline_h = 8, inspector_h = 3 },
+  },
+  {
+    "docstring above the cursor: the panes above are pushed up unresized",
+    { docstring = 6, row = 30 },
+    { below = false, header_h = 1, outline_h = 8, inspector_h = 6, top = 30 - (3 + 10 + 8) },
+  },
+  {
+    "...until max_height, then the outline and the header are squashed",
+    { docstring = 30, header = 4, row = 30 },
+    { below = false, header_h = 1, outline_h = 5, inspector_h = 14, top = 30 - (3 + 7 + 16) },
+  },
+  {
+    "...and the frame still ends on the row above the cursor",
+    { docstring = 30, row = 30 },
+    { content = 20, extent = 26, top = 30 - 26 },
+  },
 }
 
 for _, case in ipairs(layout_cases) do

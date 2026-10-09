@@ -304,15 +304,24 @@ function M.attach(args)
     return { lines = lines, highlights = highlights, ts_injections = injections, height = rows }, r.width
   end
 
-  --- The docstring view's content for the loupe: the whole docstring, in
-  --- the rows the inspector has beside `outline_rows` (the loupe keeps its
-  --- size), so the window scrolls through it.
+  --- The docstring view's content for the loupe: the whole docstring. The
+  --- frame grows the loupe from the rows the inspector had beside
+  --- `outline_rows` toward the docstring's (float.frame_layout); whatever
+  --- doesn't fit, the window scrolls through. Growing from the inspector's
+  --- own rows is what puts every pane back where it was on `d` again.
   ---@param outline_rows integer
   ---@return typescope.InspectorUpdate, integer width
   local function doc_content(outline_rows)
     local r = st.doc ---@cast r -nil
     local rows = float.heights(st.handle, outline_rows, math.max(1, st.inspector_h)).inspector.height
-    return { lines = r.lines, highlights = r.highlights, ts_injections = r.ts_injections, height = rows }, r.width
+    return {
+      lines = r.lines,
+      highlights = r.highlights,
+      ts_injections = r.ts_injections,
+      height = rows,
+      docstring = true,
+    },
+      r.width
   end
 
   --- The overload group the node `id` sits in — the index of the root it

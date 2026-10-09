@@ -13,6 +13,8 @@
 ---@field height integer content rows, fixed at open: the tallest group's
 ---@field groups typescope.HeaderContent[] one per overload group, each fit to `height`
 ---@field shown? integer the group on display
+---@field rows? integer the rows it is drawn to: `height`, or fewer while the docstring view squashes it
+---@field cuts table<integer, table<integer, typescope.HeaderContent>> rows -> group -> that group cut to those rows
 ---@field lang? string
 
 local M = {}
@@ -328,6 +330,31 @@ local function allot(stack, min_height, budget)
   return got
 end
 
+--- Grow the loupe toward `want` rows for the docstring view. It first takes
+--- the budget the inspector left unused, which leaves the header and outline
+--- their sizes; then it squashes the outline and then the header, never below
+--- the row each kept before leftovers were shared (allot's minimum).
+---@param stack { name: string, rows: integer }[]
+---@param got table<string, integer> allot's heights, grown in place
+---@param min_height table<string, integer>
+---@param budget integer
+---@param want integer the docstring's rows
+local function grow_loupe(stack, got, min_height, budget, want)
+  local used, floor = 0, {}
+  for _, pane in ipairs(stack) do
+    used = used + got[pane.name]
+    floor[pane.name] = math.min(math.max(1, pane.rows), math.max(1, min_height[pane.name] or 1))
+  end
+  local take = math.max(0, math.min(want - got.inspector, budget - used))
+  got.inspector = got.inspector + take
+  for _, name in ipairs({ "outline", "header" }) do
+    if got[name] and want > got.inspector then
+      local give = math.max(0, math.min(got[name] - floor[name], want - got.inspector))
+      got[name], got.inspector = got[name] - give, got.inspector + give
+    end
+  end
+end
+
 ---@class typescope.FrameSpec
 ---@field border any the float's border option
 ---@field row integer source cursor's screen row, 0-indexed
@@ -340,7 +367,8 @@ end
 ---@field width integer content width
 ---@field header? integer the header's content rows; nil: no header (a class hover's root row is its own)
 ---@field outline integer the outline's content rows
----@field inspector? integer the inspector's content rows; nil hides it (help, doc view) and the outline closes the frame
+---@field inspector? integer the inspector's content rows; nil hides the loupe (help) and the outline closes the frame
+---@field docstring? integer the docstring view's rows: the loupe shows it, grown from the inspector's rows toward the budget (needs `inspector`)
 
 ---@class typescope.PaneLayout
 ---@field row integer the pane's outer top edge, as an offset from the frame's top
@@ -383,6 +411,9 @@ function M.frame_layout(spec)
   local room = (below and below_room or above_room) - chrome
   local budget = math.max(3, math.min(spec.max_height, room))
   local heights = allot(stack, spec.min_height or {}, budget)
+  if spec.docstring and heights.inspector then
+    grow_loupe(stack, heights, spec.min_height or {}, budget, spec.docstring)
+  end
 
   local layout = {
     below = below,
@@ -478,16 +509,26 @@ local function pane_window(filetype, border)
   return { buf = buf, win = win }
 end
 
---- Draw overload group `i` into the header pane. Its tag rides the pane's
---- bottom border, which the next layout places.
+--- Draw overload group `i` into the header pane, fit to `rows` (default: its
+--- height). The docstring view can squash the header below its height, and
+--- then the group is redrawn cut in the middle rather than showing only its
+--- first rows; each cut is kept, since the frame redraws 60 times a second.
+--- Its tag rides the pane's bottom border, which the next layout places.
 ---@param hdr typescope.HeaderPane
 ---@param i integer
-local function show_header(hdr, i)
+---@param rows? integer
+local function show_header(hdr, i, rows)
   local head = hdr.groups[i]
-  if not head or i == hdr.shown then
+  rows = rows or hdr.rows or hdr.height
+  if not head or (i == hdr.shown and rows == hdr.rows) then
     return
   end
-  hdr.shown = i
+  if rows < #head.lines and head.fit then
+    hdr.cuts[rows] = hdr.cuts[rows] or {}
+    hdr.cuts[rows][i] = hdr.cuts[rows][i] or vim.tbl_extend("keep", head.fit(rows), head)
+    head = hdr.cuts[rows][i]
+  end
+  hdr.shown, hdr.rows = i, rows
   set_content(hdr.buf, head.lines, head.highlights, head.ts_injections, hdr.lang)
 end
 
@@ -567,6 +608,7 @@ function M.open(opts)
       handle.header = pane_window("typescope_header", opts.border)
       handle.header.height = rows
       handle.header.groups = groups
+      handle.header.cuts = {}
       handle.header.lang = opts.lang
       show_header(handle.header, opts.header_shown or 1)
     end
@@ -612,12 +654,13 @@ end
 ---@field lines string[]
 ---@field highlights typescope.Highlight[]
 ---@field ts_injections? typescope.Injection[]
----@field height integer
+---@field height integer the inspector's rows (in the docstring view, the rows the loupe grows from)
+---@field docstring? boolean the lines are the docstring view: the loupe grows toward them, away from the cursor
 
 --- Lay out the frame: the header, the outline, and, when `inspector` is
---- given, the inspector under them, on the side of the cursor chosen at open.
---- `inspector = nil` hides it (help, doc view) and the outline closes the
---- frame instead.
+--- given, the loupe under them, on the side of the cursor chosen at open.
+--- `inspector = nil` hides it (help) and the outline closes the frame
+--- instead.
 ---@param handle typescope.FloatHandle
 ---@param width integer
 ---@param outline_h integer
@@ -634,6 +677,7 @@ local function layout(handle, width, outline_h, inspector, footer, lang)
     header = hdr and hdr.height or nil,
     outline = outline_h,
     inspector = open and inspector.height or nil,
+    docstring = open and inspector.docstring and #inspector.lines or nil,
   })
   -- right-justified on a bottom edge, ending one rule glyph short of the
   -- corner: ╰────── ? help ─╯
@@ -670,6 +714,7 @@ local function layout(handle, width, outline_h, inspector, footer, lang)
 
   place(handle.win, placed.outline)
   if hdr and placed.header and vim.api.nvim_win_is_valid(hdr.win) then
+    show_header(hdr, hdr.shown, placed.header.height)
     local shown = hdr.groups[hdr.shown]
     place(hdr.win, placed.header, shown and shown.tag)
   end
