@@ -1038,7 +1038,7 @@ function M.render(roots, opts)
   end
 
   -- The outline's other surfaces. Each is drawn into its own pane (the
-  -- header, the inspector) or in place of the rows (the doc view), so none
+  -- header, the inspector, the docstring view in the loupe), so none
   -- carries the rows or another's content.
   if opts.view == "header" then
     emit_header()

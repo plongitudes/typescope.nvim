@@ -28,7 +28,8 @@ CONTENTS                                                 *typescope-contents*
 
 TypeScope asks a type checker what the symbol under the cursor is — a
 function's parameters and return, a class's shape, a variable's type — and
-draws the answer as a tree in a floating window.
+draws the answer as an outline in a floating window, under the signature and
+over an inspector for the row the cursor is on (|typescope-outline|).
 
 Where a parameter is a dataclass, a Pydantic model, a TypedDict, a NamedTuple,
 an Enum, a Protocol or a plain class with annotated attributes, you get its
@@ -184,14 +185,24 @@ through `keymaps` (|typescope-config|); the defaults are shown.
     k           Move to the previous node
     e           Ask the model for this row's example, and its neighbours'
                 (needs ollama)
-    d           Docstring: show all of it in place of the rows, or go back
-    q           Close
-    <Esc>       Close
-    ?           Toggle the help overlay
+    d           Docstring: show it in the loupe in place of the inspector,
+                or go back to the inspector
+    <C-d>       Scroll the docstring view down (in the outline otherwise)
+    <C-u>       Scroll the docstring view up (in the outline otherwise)
+    q           Close, from any view
+    <Esc>       Close, from any view
+    ?           Open the help view, or close it
 
-The `?` overlay is generated from your own `keymaps` table, so it stays
-correct when you rebind anything. It replaces the view rather than appending
-to it, because appended help routinely fell below the fold.
+                                                       *typescope-help-view*
+The help view is generated from your own `keymaps` table, so it stays correct
+when you rebind anything. It is drawn over the frame, titled
+`typescope help`, and the panes under it keep their sizes. It grows away from
+the line of code at the cursor: when the frame sits below the cursor it grows
+up to the frame's top and then down past its bottom; when the frame sits
+above, it grows up past the frame's top. While it shows, the row keys
+(<CR>, l, h, H, e, j, k, <C-d>, <C-u>) do nothing, so the outline cannot move
+under it. `?` again returns to whatever the loupe showed before; `d` goes
+straight to the docstring view.
 
 ==============================================================================
 7. CONFIGURATION                                           *typescope-config*
@@ -230,6 +241,7 @@ Defaults in full: >lua
         animations = true,
         max_width = 0.5,
         max_height = 20,
+        min_height = { header = 1, outline = 5, inspector = 1 },
         border = "rounded",
         docstring = true,
         hint = true,
@@ -280,6 +292,22 @@ ui.max_width ~
     are absolute columns. `insert_mode.max_width` uses the same units and
     sizes only the typing surface, inheriting this when nil.
 
+                                                   *typescope-ui-max-height*
+ui.max_height ~
+    The content rows the frame's panes share. Borders and seams are extra,
+    so the float on screen is taller than this by its chrome.
+
+                                                   *typescope-ui-min-height*
+ui.min_height ~
+    Default `{ header = 1, outline = 5, inspector = 1 }`. The rows each pane
+    of the frame keeps before the rest of `ui.max_height` is shared out. A
+    pane with less content than its minimum shrinks to fit it, so a
+    one-parameter function does not get five outline rows. Leftover rows go
+    to the header until its signature is fully wrapped, then to the
+    inspector up to five rows, then to the outline. On a screen too short for
+    the minimums, the outline, then the header, then the inspector give way,
+    down to a row each; the float still opens with as few as three rows.
+
                                                           *typescope-ui-hint*
 ui.hint ~
     A virtual-text "▸ typescope" marker on call lines that resolved, so you
@@ -289,18 +317,50 @@ ui.hint ~
                                                         *typescope-layouts*
 8. THE OUTLINE                                            *typescope-outline*
 
-One compact line per parameter (name, type, short default), and an inspector
-docked under the rows showing everything about the row the cursor is on: its
-whole type, evaluated shape, full default, example, origin. The rows never
-move with the cursor; only the inspector changes. The inspector grows to the
-tallest node it has shown (up to five lines) and does not shrink back. The
-frame opens below the cursor, or above it when there is more room.
+The float is a frame of three panes stacked on one side of the cursor: the
+header, the outline, and the loupe. Each seam between two panes is drawn as
+the upper pane's full bottom border followed by the lower pane's full top
+border, in your `ui.border` style, because the panes do separate jobs. The
+frame opens below the cursor, or above it when there is more room there, and
+keeps that side until it closes. Its left edge sits at the cursor's column,
+slid left only as far as the screen edge requires. The frame's bottom border
+carries `? help` at its right end, whichever view is showing.
+
+                                                       *typescope-header*
+The header is the signature, wrapped onto as many rows as it needs. It stays
+put while the outline scrolls. On an overloaded callable it shows the overload
+group the cursor is in, and its bottom border carries that group's `[i/n]`,
+with `✓` beside it when the group is the matched overload (the one the call at
+the cursor resolves to). `[i/n]` keeps its column whether or not `✓` shows.
+The header's height is fixed at the tallest group's wrapped signature, so the
+outline never shifts as you cross groups; a signature that cannot fit is cut
+from the middle, keeping its start and its return type.
+
+                                                      *typescope-outline-rows*
+The outline is one compact row per parameter (name, type, short default),
+with fields, members and the return type beneath. An overload group's row
+keeps its own `[i/n]`, so group boundaries show as you scroll.
+
+                                                         *typescope-loupe*
+The loupe, the bottom pane, shows one of two views:
+
+    inspector       Everything about the outline row under the cursor: its
+                    whole type, evaluated shape, full default, example,
+                    origin. The rows never move with the cursor; only the
+                    inspector changes.
+    docstring view  The callable's whole docstring, shown in place of the
+                    inspector by d (d again goes back). The cursor stays in
+                    the outline, and the view scrolls to the hovered
+                    parameter's `:param` section as you move; <C-d> and <C-u>
+                    scroll it by hand. It grows the frame toward
+                    `ui.max_height`, away from the line of code at the
+                    cursor, then squashes the outline and then the header to
+                    their minimums (the outline keeps its cursor row in
+                    view). Going back restores every pane's size.
 
                                                       *typescope-docstring*
 ui.docstring ~
-    true (the default): the frame's bottom edge carries the docstring's
-    first sentence, and d shows the whole docstring in place of the rows.
-    false turns both off.
+    true (the default): d shows the docstring view. false turns it off.
 
 It used to be one of several layouts. "table" was removed in 0.2.0 and
 "tree" in 0.4.0; a `ui.layout` or `ui.align` left in your setup is ignored

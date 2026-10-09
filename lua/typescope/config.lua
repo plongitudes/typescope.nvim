@@ -19,7 +19,7 @@
 ---@field max_height integer content rows the frame's panes share; borders are extra
 ---@field min_height { header: integer, outline: integer, inspector: integer } rows each pane keeps before leftovers are shared out (a pane with less content shrinks to fit)
 ---@field border string|string[] any nvim float border value
----@field docstring boolean the footer carries the docstring's first sentence and d shows the whole of it
+---@field docstring boolean d shows the docstring view in the loupe
 ---@field hint boolean virtual-text "▸ typescope" marker on resolved call lines
 ---@field focus boolean explicit opens enter the float; false = momentary hover convention (second K focuses)
 
@@ -120,8 +120,8 @@ local defaults = {
     -- with less content than its minimum shrinks to fit
     min_height = { header = 1, outline = 5, inspector = 1 },
     border = "rounded",
-    -- the footer carries the docstring's first sentence and d swaps the
-    -- whole of it in for the rows; false turns both off
+    -- d shows the whole docstring in the loupe in place of the inspector;
+    -- false turns it off
     docstring = true,
     hint = true,
     -- true: an explicit open (K / :TypeScope) enters the float — cursor

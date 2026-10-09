@@ -4,8 +4,24 @@ Notable changes to TypeScope, newest first. The format follows [Keep a Changelog
 
 ## [Unreleased]
 
+The float becomes a frame of three panes, the header, the outline and the loupe, so the signature stays put while you scroll and the docstring sits beside the rows instead of replacing them. This reverses 0.3.0's two-window frame joined by `├─┤` and its docstring footer: those saved rows, but the signature scrolled away with the rows and the outline and docstring could never be read together.
+
+### Upgrading
+
+`ui.max_height` now counts content rows only, so with the same setting the float is taller on screen by its borders and seams. The new `ui.min_height` (default `{ header = 1, outline = 5, inspector = 1 }`) sets what each pane keeps before leftover rows are shared out.
+
+### Added
+
+- **`ui.min_height`.** The rows each pane keeps before the rest of `ui.max_height` is shared out: to the header until the signature is fully wrapped, then the inspector up to five rows, then the outline. A pane with less content shrinks to fit it.
+- **`<C-d>` / `<C-u>` scroll the docstring view** from the outline.
+
 ### Changed
 
+- **The float is three panes with visible seams.** Header, outline and loupe are stacked on one side of the cursor, chosen when the float opens, and each seam is a full bottom border then a full top border in your `ui.border` style. The `├─┤` join is gone, and so is the float's ` typescope ` title.
+- **The header is its own pane, pinned above the outline.** It wraps the whole signature (cut from the middle only when it can't fit), stays put as the outline scrolls, and follows the overload group the cursor is in. Its bottom border carries the group's `[i/n]`, with `✓` beside it on the matched overload. Its height is fixed at the tallest group's, so the outline never shifts. Its filetype is `typescope_header`.
+- **`d` shows the docstring in the loupe, in place of the inspector.** The outline stays visible and keeps the cursor, and the docstring view scrolls to the hovered parameter's `:param` section. It grows the frame away from your code line, squashing the outline and header to their minimums if it must, and `d` again restores every pane's size.
+- **`?` opens the help view over the frame.** It's titled `typescope help`, grows away from your code line, and leaves the panes under it their sizes. Row keys do nothing while it shows; `?` again returns to the inspector or docstring view underneath, and `d` goes to the docstring view. Its `? toggle this help` row is gone.
+- **The footer is just `? help`**, right-aligned on the frame's bottom border, in every view. The docstring's first sentence is no longer in it; `ui.docstring = false` now only turns off `d`.
 - **The ledger is now the outline, and its panel the inspector**, in the docs, the help tags (`:help typescope-outline`) and the code. The inspector's buffer filetype is `typescope_inspector`; anything that looked for `typescope_panel` needs the new name. `ui.layout` now warns whatever it is set to, since `"ledger"` is no longer the name of the only layout.
 
 ## [0.4.0] — 2026-10-03

@@ -17,7 +17,7 @@ The checker is [pyrefly](https://github.com/facebook/pyrefly) wrapped in a small
 
 <img src="https://raw.githubusercontent.com/plongitudes/typescope.nvim/assets/intro.png" width="470" alt="TypeScope on create_server(config, timeout=…) -> Response: config expanded to host, port and debug, then timeout and returns, over an inspector for the config row">
 
-One compact line per parameter, and an inspector docked under the rows shows everything about the row your cursor is on. See [The outline](#the-outline).
+The signature stays pinned at the top, one compact row per parameter scrolls beneath it, and an inspector at the bottom shows everything about the row your cursor is on. See [The float](#the-float).
 
 ## Requirements
 
@@ -111,11 +111,12 @@ Bind these rather than writing Lua callbacks:
 | `H` | Collapse all |
 | `j` / `k` | Move by node, not by line |
 | `e` | Ask the model for this row's example, and its neighbours' (needs ollama) |
-| `d` | Docstring: show all of it in place of the rows, or go back |
-| `q` / `<Esc>` | Close |
-| `?` | Toggle the help overlay |
+| `d` | Docstring: show it in the loupe in place of the inspector, or go back |
+| `<C-d>` / `<C-u>` | Scroll the docstring view (the outline otherwise) |
+| `q` / `<Esc>` | Close, from any view |
+| `?` | Open the help view, or close it |
 
-The `?` overlay is generated from your actual `keymaps` config, so it stays correct if you rebind anything.
+The help view is generated from your actual `keymaps` config, so it stays correct if you rebind anything. It's drawn over the frame, titled `typescope help`, and the panes under it keep their sizes. It grows away from the line you're editing: up to the frame's top and then down past its bottom when the frame is below the cursor, up past the frame's top when it's above. The row keys do nothing while it's up, so the outline can't move underneath it. `?` again goes back to whatever was showing; `d` goes straight to the docstring view.
 
 ## Configuration
 
@@ -154,9 +155,10 @@ require("typescope").setup({
     style = "rounded",       -- "unicode" | "ascii" | "minimal" | "rounded"
     animations = true,
     max_width = 0.5,         -- <=1: fraction of editor width; >1: absolute columns
-    max_height = 20,
+    max_height = 20,         -- content rows the panes share; borders are extra
+    min_height = { header = 1, outline = 5, inspector = 1 }, -- rows each pane keeps before leftovers are shared
     border = "rounded",      -- any nvim float border value
-    docstring = true,        -- first sentence in the footer, d for the rest; false turns both off
+    docstring = true,        -- d shows the docstring view; false turns it off
     hint = true,             -- virtual-text "▸ typescope" marker on resolved call lines
     focus = true,            -- explicit opens enter the float; false = momentary hover
   },
@@ -184,13 +186,23 @@ Bad values are rejected at `setup()` time with a message.
 
 The `trigger = "hover"` auto-open never steals focus in either mode.
 
-## The outline
+### `ui.max_height` and `ui.min_height`
 
-One compact line per parameter, and a small inspector is docked at the bottom of the float, showing details of the row the cursor is on: its whole type (the row truncates ones that are too long), the evaluated shape, the full default, an example, and where it was inherited from. The inspector changes as you move the cursor from row to row. The frame's bottom edge carries the docstring's first sentence for a little extra info, and `d` swaps the floating window's contents for the full docstring (it's a toggle). Below, the cursor is on `host`:
+`max_height` counts the content rows the frame's panes share; borders and seams come on top. `min_height` is what each pane keeps before the rest is shared out. A pane with less content than its minimum shrinks to fit it, so a one-parameter function doesn't get five empty outline rows. Leftover rows go to the header until its signature is fully wrapped, then to the inspector up to five rows, then to the outline. On a screen too short for the minimums, the outline, then the header, then the inspector give way, down to a row each; the float still opens with as few as three rows.
+
+## The float
+
+The float is a frame of three panes stacked on one side of your cursor: the **header**, the **outline**, and the **loupe**. Each seam between two panes is a full bottom border followed by a full top border, in your `ui.border` style, because the panes do different jobs. The frame opens below the cursor, or above it when there's more room there, and stays on that side until it closes. Its bottom border carries `? help` at the right end, whatever view is showing.
+
+The **header** is the signature, wrapped onto as many rows as it needs, and it stays put while the outline scrolls. On an overloaded callable it follows the overload group your cursor is in, and its bottom border carries that group's `[i/n]`, with a `✓` beside it when the group is the matched overload (the one your call actually resolves to). `[i/n]` keeps its column whether or not the `✓` is there. The header's height is fixed at the tallest group's signature, so the outline doesn't jump as you cross groups; a signature that can't fit is cut from the middle, keeping its start and its return type.
+
+The **outline** is one compact row per parameter, with fields, members and the return type beneath. Overload group rows keep their own `[i/n]`, so you can still see where groups begin as you scroll.
+
+The **loupe** shows one of two views. The **inspector** shows details of the outline row the cursor is on: its whole type (the row truncates ones that are too long), the evaluated shape, the full default, an example, and where it was inherited from. It changes as you move from row to row, while the rows themselves stay put. Below, the cursor is on `host`:
 
 <img src="https://raw.githubusercontent.com/plongitudes/typescope.nvim/assets/ledger.png" width="470" alt="TypeScope on create_server(config, timeout=…) -> Response, with the cursor on host: the inspector under the rows shows host str, e.g. "localhost"">
 
-The inspector grows to fit the tallest node it has shown (up to five lines) and doesn't shrink back, so the rows above it stay put. The frame opens below the cursor, or above it when there is more room there.
+`d` swaps the inspector for the **docstring view**, the callable's whole docstring, and `d` again swaps it back. The outline stays visible and keeps the cursor, so you can read a parameter's row and its prose together: the docstring view scrolls to the hovered parameter's `:param` section as you move, and `<C-d>` / `<C-u>` scroll it by hand. It grows the frame toward `max_height`, away from the line you're editing, then squashes the outline and then the header to their minimums (the outline keeps your row in view). Going back puts every pane back at its old size.
 
 ## Insert mode
 
