@@ -15,6 +15,11 @@ if vim.fn.executable(oracle_bin) ~= 1 then
 end
 
 require("typescope").setup({})
+-- headless nvim is 24 rows. The frame's minimums (header 1, outline 5,
+-- inspector 1) overrun the 5 rows that fit under a cursor mid-screen, which
+-- leaves the inspector its one-row minimum and nothing to read; a taller
+-- screen gives every pane the rows these checks read.
+vim.o.lines = 40
 
 local failures = 0
 local function check(desc, cond)
@@ -372,10 +377,10 @@ local ulines, ts_win = float_lines()
 if ulines then
   local hlines, hwin = header()
   check(
-    "header: one-line call shape, elided to width, return kept",
-    #hlines == 1
-      and hlines[1]:find("create_server(config", 1, true) ~= nil
-      and hlines[1]:find("-> Response", 1, true) ~= nil
+    "header: the call shape, wrapped to width, return kept, the pane as tall as it",
+    table.concat(hlines, "\n"):find("create_server(config", 1, true) ~= nil
+      and hlines[#hlines]:find("-> Response", 1, true) ~= nil
+      and vim.api.nvim_win_get_config(hwin).height == #hlines
   )
   check(
     "the outline no longer carries the signature line",
@@ -499,6 +504,66 @@ do
   check("...and the footer ends on the array's own rule glyph", footer_text() == " ? help -")
   require("typescope").close()
   require("typescope").setup({})
+end
+
+-- ui.min_height: a pane under its minimum shrinks to fit, so a
+-- one-parameter function's outline is as tall as its rows, not padded to 5
+do
+  local shout_line
+  for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+    if l:find("shouted = shout") then
+      shout_line = i
+    end
+  end
+  vim.api.nvim_set_current_win(vim.fn.bufwinid(bufnr))
+  -- the fixture's end scrolls the window; later checks read winline()
+  local view = vim.fn.winsaveview()
+  vim.api.nvim_win_set_cursor(0, { shout_line, 12 })
+  require("typescope").open()
+  vim.wait(2000, function()
+    return float_lines() ~= nil
+  end)
+  local rows, ow = float_lines()
+  check(
+    "a one-parameter outline is as tall as its rows, not the minimum of 5",
+    rows ~= nil and #rows < 5 and vim.api.nvim_win_get_config(ow).height == #rows
+  )
+  require("typescope").close()
+
+  -- the header wraps instead of eliding at the float's width...
+  vim.api.nvim_win_set_cursor(0, { call_line, 12 })
+  require("typescope").setup({ ui = { max_width = 30 } })
+  require("typescope").open()
+  vim.wait(2000, function()
+    return float_lines() ~= nil
+  end)
+  local head, hw = header()
+  check(
+    "a header wider than the float wraps onto as many rows as it needs",
+    head ~= nil and #head > 1 and vim.api.nvim_win_get_config(hw).height == #head
+  )
+  check("...keeping every param", header_text():find("timeout", 1, true) ~= nil)
+  require("typescope").close()
+
+  -- ...and a budget too small for it cuts it in the middle
+  require("typescope").setup({ ui = { max_width = 30, max_height = 3 } })
+  require("typescope").open()
+  vim.wait(2000, function()
+    return float_lines() ~= nil
+  end)
+  head, hw = header()
+  check(
+    "a header that can't fit its rows is cut to them, start and end visible",
+    head ~= nil
+      and #head == 1
+      and vim.api.nvim_win_get_config(hw).height == 1
+      and head[1]:find("^create_server%(")
+      and head[1]:find("…", 1, true)
+      and head[1]:find("Response$")
+  )
+  require("typescope").close()
+  require("typescope").setup({})
+  vim.fn.winrestview(view)
 end
 
 -- resolve cache (U2): reopen reuses the tree — the lazily expanded `returns`

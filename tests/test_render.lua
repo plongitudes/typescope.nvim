@@ -402,19 +402,44 @@ eq_lines(
   render.render(section_tree, opts(vim.tbl_extend("force", section_opts, { view = "header" }))).lines,
   { "f(x, *, y=…) -> str" }
 )
--- a header past max_width elides to whole params; with only one param there
--- is no whole one to keep, so it elides to the parens (typescope.nvim-ssu)
+-- the header wraps at whole params, without a row limit: its pane is as tall
+-- as it needs. header_rows caps it, and a header past its rows is cut in the
+-- middle, so the start and the end of the signature both stay visible.
 do
-  local function header_at(header, width)
+  local function header_at(header, width, rows)
     return render.render(
       section_tree,
-      opts({ show_examples = false, header = header, max_width = width, view = "header" })
-    ).lines[1]
+      opts({ show_examples = false, header = header, max_width = width, view = "header", header_rows = rows })
+    ).lines
   end
-  local one = header_at("run_main(comline_list) -> dict[str, _F2PyDict]", 40)
-  check("elided header: one param elides to the parens (" .. one .. ")", one == "run_main(…) -> dict[str, _F2PyDict]")
-  local some = header_at("connect(hôte, port=…, timeout=…) -> Conn", 34)
-  check("elided header: whole params survive (" .. some .. ")", some == "connect(hôte, port=…, …) -> Conn")
+  local long = "connect(host, port=…, timeout=…, retries=…) -> Connection"
+  eq_lines("a long header wraps at whole params, with a hanging indent", header_at(long, 30), {
+    "connect(host, port=…,",
+    "  timeout=…, retries=…)",
+    "  -> Connection",
+  })
+  eq_lines("...and is cut in the middle when it gets fewer rows", header_at(long, 30, 2), {
+    "connect(host, port=…, …,",
+    "  retries=…) -> Connection",
+  })
+  eq_lines("...down to one row, keeping both ends", header_at(long, 30, 1), { "connect(host, …) -> Connection" })
+  eq_lines("...and left whole when it fits its rows", header_at(long, 30, 3), header_at(long, 30))
+  eq_lines(
+    "one param elides to the parens (typescope.nvim-ssu)",
+    header_at("run_main(comline_list) -> dict[str, _F2PyDict]", 40, 1),
+    { "run_main(…) -> dict[str, _F2PyDict]" }
+  )
+  eq_lines(
+    "whole params survive the cut",
+    header_at("connect(hôte, port=…, timeout=…) -> Conn", 34, 1),
+    { "connect(hôte, …) -> Conn" }
+  )
+  eq_lines(
+    "a return type too long for a row of its own splits at a comma",
+    header_at("f(x) -> dict[str, list[tuple[int, int]]]", 20),
+    { "f(x)", "  -> dict[str,", "  list[tuple[int,", "  int]]]" }
+  )
+  eq_lines("the overload badge rides along", header_at("f(x) -> int [2/3]", 40), { "f(x) -> int [2/3]" })
 end
 
 local doc_view = render.render(section_tree, opts(vim.tbl_extend("force", section_opts, { view = "doc" })))
@@ -1514,14 +1539,15 @@ do
   -- each of the float's surfaces: the rows (capped names, cut types), the
   -- header (elision), the inspector (wrapped types and values) and the doc
   -- view (wrapped prose)
-  for _, view in ipairs({ "rows", "header", "inspector", "doc" }) do
+  for _, view in ipairs({ "rows", "header", "header1", "inspector", "doc" }) do
     local worst = nil
     for w = 20, 80 do
       local roots = uni_roots()
       local res = render.render(roots, {
         style = styles.get("rounded"),
         max_width = w,
-        view = view ~= "rows" and view or nil,
+        view = view == "header1" and "header" or view ~= "rows" and view or nil,
+        header_rows = view == "header1" and 1 or nil,
         inspector_node = roots[1],
         show_examples = false,
         example_kind = "heuristic",
@@ -1538,6 +1564,7 @@ do
     check(({
       rows = "the rows",
       header = "the header",
+      header1 = "the header cut to one row",
       inspector = "the inspector's lines",
       doc = "the doc view's lines",
     })[view] .. " survive every width from 20 to 80 intact", worst == nil)

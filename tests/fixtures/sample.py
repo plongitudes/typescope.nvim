@@ -96,3 +96,10 @@ def greet(label: str, loud: bool = False) -> str:
 
 
 greeted = greet("x")
+
+
+def shout(text: str) -> str:
+    return text
+
+
+shouted = shout("x")

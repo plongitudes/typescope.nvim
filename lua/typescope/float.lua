@@ -258,6 +258,7 @@ local RULES = { single = "─", rounded = "─", double = "═", bold = "━", s
 ---@field below boolean the frame hangs under the cursor (else sits above it); chosen at open
 ---@field row integer source cursor's screen row, 0-indexed
 ---@field col integer source cursor's screen column, 0-indexed
+---@field min_height? table<string, integer> ui.min_height
 
 --- Rows a pane's border adds above and below its content, and the chunk its
 --- bottom edge is drawn with (nil: no edge, so no footer).
@@ -278,13 +279,55 @@ local function chrome_of(border)
   return 1, { cell, "FloatBorder" }
 end
 
+-- the most rows the inspector takes from the leftovers; a minimum above it
+-- still holds
+local INSPECTOR_CAP = 5
+
+--- Share `budget` content rows among the shown panes. Each pane first gets
+--- its minimum, or its content if that is less (an empty pane is still a
+--- row). Rows left over go to the header until it is fully wrapped, then to
+--- the inspector up to INSPECTOR_CAP, then to the outline. Minimums that
+--- overrun the budget give way outline first, then header, then inspector,
+--- never below a row each — which the budget floor of 3 guarantees.
+---@param stack { name: string, rows: integer }[]
+---@param min_height table<string, integer> per pane; missing = 1
+---@param budget integer
+---@return table<string, integer>
+local function allot(stack, min_height, budget)
+  local want, got, used = {}, {}, 0
+  for _, pane in ipairs(stack) do
+    want[pane.name] = math.max(1, pane.rows)
+    got[pane.name] = math.min(want[pane.name], math.max(1, min_height[pane.name] or 1))
+    used = used + got[pane.name]
+  end
+  for _, name in ipairs({ "outline", "header", "inspector" }) do
+    if got[name] and used > budget then
+      local give = math.min(got[name] - 1, used - budget)
+      got[name], used = got[name] - give, used - give
+    end
+  end
+  local upto = {
+    header = want.header,
+    inspector = want.inspector and math.max(got.inspector, math.min(want.inspector, INSPECTOR_CAP)),
+    outline = want.outline,
+  }
+  for _, name in ipairs({ "header", "inspector", "outline" }) do
+    if got[name] and used < budget then
+      local take = math.max(0, math.min(upto[name] - got[name], budget - used))
+      got[name], used = got[name] + take, used + take
+    end
+  end
+  return got
+end
+
 ---@class typescope.FrameSpec
 ---@field border any the float's border option
 ---@field row integer source cursor's screen row, 0-indexed
 ---@field col integer source cursor's screen column, 0-indexed
 ---@field lines integer screen rows floats may use (lines - cmdheight)
 ---@field columns integer screen columns
----@field max_height integer content rows the panes may share (ui.max_height)
+---@field max_height integer content rows the panes may share (ui.max_height); borders are extra
+---@field min_height? table<string, integer> rows each pane keeps before leftovers are shared (ui.min_height); missing = 1
 ---@field below? boolean the side chosen at open; nil chooses it
 ---@field width integer content width
 ---@field header? integer the header's content rows; nil: no header (a class hover's root row is its own)
@@ -331,8 +374,8 @@ function M.frame_layout(spec)
   end
   local room = (below and below_room or above_room) - chrome
   local budget = math.max(3, math.min(spec.max_height, room))
+  local heights = allot(stack, spec.min_height or {}, budget)
 
-  -- raw rows feed the offsets, max(1, …) only the window sizes
   local layout = {
     below = below,
     budget = budget,
@@ -344,11 +387,11 @@ function M.frame_layout(spec)
   for i, pane in ipairs(stack) do
     layout[pane.name] = {
       row = offset,
-      height = math.max(1, pane.rows),
+      height = heights[pane.name],
       border = spec.border,
       footer = i == #stack,
     }
-    offset = offset + 2 * edge + pane.rows
+    offset = offset + 2 * edge + heights[pane.name]
   end
   layout.top = below and (spec.row + 1) or (spec.row - offset)
   return layout
@@ -364,10 +407,17 @@ local function frame_layout(frame, fields)
     row = frame.row,
     col = frame.col,
     below = frame.below,
+    min_height = frame.min_height,
     lines = vim.o.lines - vim.o.cmdheight,
     columns = vim.o.columns,
   }, fields))
 end
+
+---@class typescope.HeaderContent
+---@field lines string[] the header wrapped to as many rows as it needs
+---@field highlights typescope.Highlight[]
+---@field ts_injections? typescope.Injection[]
+---@field fit? fun(rows: integer): typescope.HeaderContent the header redrawn to fit `rows` (middle-elided)
 
 ---@class typescope.FloatOpts
 ---@field lines string[]
@@ -376,8 +426,8 @@ end
 ---@field lang? string treesitter language for injected snippet highlighting
 ---@field title? string
 ---@field footer? string|{ [1]: string, [2]: string }[] text, or chunks with highlight groups
----@field frame? { row: integer, col: integer, max_height: integer } open as the K float's frame (header, outline, inspector); row/col are the source cursor's 0-indexed SCREEN position the frame hangs from, max_height the content rows the panes may share (ui.max_height)
----@field header? { lines: string[], highlights: typescope.Highlight[], ts_injections?: typescope.Injection[] } the frame's header pane; nil opens the frame without one
+---@field frame? { row: integer, col: integer, max_height: integer, min_height?: table<string, integer> } open as the K float's frame (header, outline, inspector); row/col are the source cursor's 0-indexed SCREEN position the frame hangs from, max_height the content rows the panes may share (ui.max_height), min_height each pane's minimum (ui.min_height)
+---@field header? typescope.HeaderContent the frame's header pane; nil opens the frame without one
 ---@field row integer
 ---@field col integer
 ---@field relative "editor"|"cursor"|"win"
@@ -454,7 +504,12 @@ function M.open(opts)
 
   local handle = { buf = buf, win = win, ns = ns } ---@type typescope.FloatHandle
   if opts.frame then
-    local frame = { border = opts.border, row = opts.frame.row, col = opts.frame.col } ---@type typescope.Frame
+    local frame = { ---@type typescope.Frame
+      border = opts.border,
+      row = opts.frame.row,
+      col = opts.frame.col,
+      min_height = opts.frame.min_height,
+    }
     -- the side is chosen with every pane shown; the first update decides the rest
     local placed = frame_layout(frame, {
       max_height = opts.frame.max_height,
@@ -469,12 +524,36 @@ function M.open(opts)
     -- not "typescope": what finds the float by filetype means the outline
     handle.inspector = pane_window("typescope_inspector", opts.border)
     if opts.header then
+      -- the header's height is fixed here, for the life of the float: as
+      -- many rows as it wraps to, unless the budget allots it fewer, and
+      -- then it is redrawn cut to them
+      local head = opts.header
+      if placed.header.height < #head.lines and head.fit then
+        head = head.fit(placed.header.height)
+      end
       handle.header = pane_window("typescope_header", opts.border)
-      handle.header.height = #opts.header.lines
-      set_content(handle.header.buf, opts.header.lines, opts.header.highlights, opts.header.ts_injections, opts.lang)
+      handle.header.height = #head.lines
+      set_content(handle.header.buf, head.lines, head.highlights, head.ts_injections, opts.lang)
     end
   end
   return handle
+end
+
+--- The rows the frame's panes get for this content, on the side and budget
+--- fixed at open — what the next update will lay out, for callers that cut
+--- content to fit before handing it over (the inspector's `…`).
+---@param handle typescope.FloatHandle a frame
+---@param outline integer the outline's content rows
+---@param inspector? integer the inspector's content rows; nil: hidden
+---@return typescope.FrameLayout
+function M.heights(handle, outline, inspector)
+  return frame_layout(handle.frame, {
+    max_height = handle.budget,
+    width = 1,
+    header = handle.header and handle.header.height or nil,
+    outline = outline,
+    inspector = inspector,
+  })
 end
 
 local applied = {} ---@type table<integer, string> win -> key of the config it last got

@@ -42,6 +42,39 @@ check("false turns it off", setup({ ui = { docstring = false } }).ui.docstring =
 check("...without a word", #warnings == 0)
 check("anything else is an error", not pcall(config.setup, { ui = { docstring = "middle" } }))
 
+check("ui.max_height takes a positive integer", setup({ ui = { max_height = 12 } }).ui.max_height == 12)
+check("...and rejects anything else", not pcall(config.setup, { ui = { max_height = 0 } }))
+
+-- the frame's pane minimums: header, outline, inspector
+check(
+  "ui.min_height defaults to header 1, outline 5, inspector 1",
+  vim.deep_equal(setup({}).ui.min_height, { header = 1, outline = 5, inspector = 1 })
+)
+check(
+  "...a partial table keeps the other defaults",
+  vim.deep_equal(
+    setup({ ui = { min_height = { outline = 3 } } }).ui.min_height,
+    { header = 1, outline = 3, inspector = 1 }
+  )
+)
+local function setup_error(opts)
+  local ok, err = pcall(config.setup, opts)
+  return not ok and tostring(err) or ""
+end
+check(
+  "a zero minimum is a setup error naming the key",
+  setup_error({ ui = { min_height = { outline = 0 } } }):find("ui.min_height.outline", 1, true) ~= nil
+)
+check(
+  "...so is a fraction",
+  setup_error({ ui = { min_height = { header = 1.5 } } }):find("ui.min_height.header", 1, true) ~= nil
+)
+check("...and a non-table", setup_error({ ui = { min_height = 5 } }):find("ui.min_height", 1, true) ~= nil)
+check(
+  "...and a pane the frame doesn't have",
+  setup_error({ ui = { min_height = { loupe = 2 } } }):find("ui.min_height.loupe", 1, true) ~= nil
+)
+
 vim.notify = orig_notify
 config.setup({})
 print(failures == 0 and "CONFIG ALL PASS" or ("CONFIG " .. failures .. " FAILURES"))

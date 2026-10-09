@@ -36,7 +36,6 @@ end
 ---@field roots typescope.Node[]
 ---@field opts typescope.RenderOpts
 ---@field width integer fixed float width (kept stable during interaction)
----@field max_height integer
 ---@field on_close fun()
 ---@field on_recurse? fun(node: typescope.Node, done: fun()) lazily resolve a beyond-depth node
 ---@field on_llm_nodes? fun(nodes: typescope.Node[], done: fun(ok: boolean, err: string?)) generate LLM examples for these leaves
@@ -73,14 +72,10 @@ function M.attach(args)
     roots = args.roots,
     opts = args.opts,
     width = args.width,
-    -- the frame is capped to its side of the cursor at open
-    max_height = args.handle.budget or args.max_height,
-    -- the header pane's rows, which come out of the same budget
-    header_h = args.handle.header and args.handle.header.height or 0,
     show_help = false,
-    -- the docked inspector shows inspector_id's details, and is only ever as tall as
-    -- the tallest it has been (inspector_h) — the rows above it must not move as
-    -- the cursor goes from a one-line node to a four-line one
+    -- the docked inspector shows inspector_id's details, and asks for as many
+    -- rows as the tallest it has been (inspector_h) — the rows above it must
+    -- not move as the cursor goes from a one-line node to a four-line one
     inspector_id = nil, ---@type string?
     inspector_h = 0,
     show_doc = false, -- the full docstring in place of the rows
@@ -263,7 +258,6 @@ function M.attach(args)
   end
 
   -- the most the inspector grows to; past it the details cut off with …
-  local INSPECTOR_MAX = 5
 
   --- The frame's bottom edge: only the key that opens help, the same in
   --- every view.
@@ -271,10 +265,12 @@ function M.attach(args)
     return { { " " .. config.get().keymaps.help .. " help ", "TypeScopeHint" } }
   end
 
-  --- The inspector's content for the node it is following, cut to the rows it
-  --- may have. Grows inspector_h, never shrinks it.
+  --- The inspector's content for the node it is following, cut to the rows
+  --- the frame allots it beside `outline_rows`. Grows inspector_h, never
+  --- shrinks it.
+  ---@param outline_rows integer
   ---@return typescope.InspectorUpdate?, integer width
-  local function inspector_content()
+  local function inspector_content(outline_rows)
     local node = st.inspector_id and model.find(st.roots, st.inspector_id)
     if not node then
       return nil, 0
@@ -285,26 +281,26 @@ function M.attach(args)
     if not ok then
       error(r)
     end
-    local cap = math.max(1, math.min(INSPECTOR_MAX, st.max_height - st.header_h - 1))
-    st.inspector_h = math.min(cap, math.max(st.inspector_h, #r.lines))
+    st.inspector_h = math.max(st.inspector_h, #r.lines)
+    local rows = float.heights(st.handle, outline_rows, st.inspector_h).inspector.height
     local lines, highlights, injections = {}, {}, {}
-    for i = 1, st.inspector_h do
+    for i = 1, rows do
       lines[i] = r.lines[i] or ""
     end
-    if #r.lines > st.inspector_h then
-      lines[st.inspector_h] = lines[st.inspector_h] .. " …"
+    if #r.lines > rows then
+      lines[rows] = lines[rows] .. " …"
     end
     for _, hl in ipairs(r.highlights) do
-      if hl.line < st.inspector_h then
+      if hl.line < rows then
         table.insert(highlights, hl)
       end
     end
     for _, inj in ipairs(r.ts_injections) do
-      if inj.line < st.inspector_h then
+      if inj.line < rows then
         table.insert(injections, inj)
       end
     end
-    return { lines = lines, highlights = highlights, ts_injections = injections, height = st.inspector_h }, r.width
+    return { lines = lines, highlights = highlights, ts_injections = injections, height = rows }, r.width
   end
 
   -- the rows as last rendered, and the float width they were laid out for:
@@ -326,7 +322,7 @@ function M.attach(args)
         lines = lines,
         highlights = highlights,
         width = st.width,
-        height = math.min(st.max_height - st.header_h, #lines),
+        height = #lines,
         footer = footer(),
       })
       vim.api.nvim_win_set_cursor(st.handle.win, { 1, 0 })
@@ -351,7 +347,7 @@ function M.attach(args)
         ts_injections = r.ts_injections,
         lang = st.opts.lang,
         width = st.width,
-        height = math.min(st.max_height - st.header_h, #r.lines),
+        height = #r.lines,
         footer = footer(),
       })
       return
@@ -379,7 +375,7 @@ function M.attach(args)
     sync_clock()
     local lines = not reuse and vim.list_extend({}, st.result.lines) or nil
     local highlights = st.result.highlights
-    local inspector, inspector_width = inspector_content()
+    local inspector, inspector_width = inspector_content(#st.result.lines)
     -- expanding deep subtrees produces wider content than the float opened
     -- with — grow the window (never shrink; up to max_width) or lines clip
     local target = st.width -- the width we were already headed for
@@ -403,7 +399,8 @@ function M.attach(args)
       ts_injections = st.result.ts_injections,
       lang = st.opts.lang,
       width = grown_width(),
-      height = math.min(st.max_height - st.header_h - (inspector and inspector.height or 0), #st.result.lines),
+      -- content rows: the frame shares the budget out (float.frame_layout)
+      height = #st.result.lines,
       inspector = inspector,
       footer = footer(),
     })

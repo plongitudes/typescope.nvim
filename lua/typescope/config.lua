@@ -16,7 +16,8 @@
 ---@field style "unicode"|"ascii"|"minimal"|"rounded"
 ---@field animations boolean
 ---@field max_width number >1: absolute columns; <=1: fraction of editor width
----@field max_height integer
+---@field max_height integer content rows the frame's panes share; borders are extra
+---@field min_height { header: integer, outline: integer, inspector: integer } rows each pane keeps before leftovers are shared out (a pane with less content shrinks to fit)
 ---@field border string|string[] any nvim float border value
 ---@field docstring boolean the footer carries the docstring's first sentence and d shows the whole of it
 ---@field hint boolean virtual-text "▸ typescope" marker on resolved call lines
@@ -113,7 +114,11 @@ local defaults = {
     style = "rounded", -- "unicode" | "ascii" | "minimal" | "rounded"
     animations = true,
     max_width = 0.5, -- fraction of editor width; values > 1 are absolute columns
-    max_height = 20,
+    max_height = 20, -- content rows; borders are extra
+    -- what each pane of the K float keeps before the rest is shared out
+    -- (header first, then the inspector up to 5, then the outline); a pane
+    -- with less content than its minimum shrinks to fit
+    min_height = { header = 1, outline = 5, inspector = 1 },
     border = "rounded",
     -- the footer carries the docstring's first sentence and d swaps the
     -- whole of it in for the rows; false turns both off
@@ -212,6 +217,18 @@ local function validate(cfg)
     error("typescope.setup: `ui.max_width` must be a positive number (<=1 = fraction of editor width)", 0)
   end
   check("ui.max_height", cfg.ui.max_height, "positive_integer")
+  check("ui.min_height", cfg.ui.min_height, "table")
+  for pane, rows in pairs(cfg.ui.min_height) do
+    if pane ~= "header" and pane ~= "outline" and pane ~= "inspector" then
+      error(
+        ("typescope.setup: `ui.min_height.%s` is not a pane; the panes are header, outline, inspector"):format(
+          tostring(pane)
+        ),
+        0
+      )
+    end
+    check("ui.min_height." .. pane, rows, "positive_integer")
+  end
   if type(cfg.ui.border) ~= "string" and type(cfg.ui.border) ~= "table" then
     error("typescope.setup: `ui.border` must be a string or table (any nvim float border value)", 0)
   end

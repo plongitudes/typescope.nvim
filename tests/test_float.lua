@@ -138,6 +138,7 @@ local function spec(over)
     header = 1,
     outline = 8,
     inspector = 3,
+    min_height = { header = 1, outline = 5, inspector = 1 },
   }, over or {})
 end
 
@@ -256,6 +257,68 @@ local layout_cases = {
     { header = 0, outline = 0, inspector = 0 },
     { header_h = 1, outline_h = 1, inspector_h = 1 },
   },
+  -- minimums and the leftover rows (ui.min_height, default 1 / 5 / 1)
+  {
+    "a pane with less content than its minimum shrinks to fit",
+    { outline = 2, inspector = 1 },
+    { outline_h = 2, inspector_h = 1, outline_row = 3, inspector_row = 3 + 1 + 2 + 1 },
+  },
+  {
+    "leftovers go to the header first, until it is fully wrapped",
+    { max_height = 10, header = 6, outline = 8, inspector = 4 },
+    { header_h = 1 + 3, inspector_h = 1, outline_h = 5 },
+  },
+  {
+    "...then to the inspector",
+    { max_height = 14, header = 6, outline = 8, inspector = 4 },
+    { header_h = 6, inspector_h = 1 + 2, outline_h = 5 },
+  },
+  {
+    "...up to its cap of 5, and the outline takes the rest",
+    { max_height = 20, header = 6, outline = 20, inspector = 8 },
+    { header_h = 6, inspector_h = 5, outline_h = 5 + 4 },
+  },
+  {
+    "the inspector's cap holds with rows to spare",
+    { max_height = 30, outline = 3, inspector = 8 },
+    { inspector_h = 5, outline_h = 3 },
+  },
+  {
+    "a minimum above the cap still holds",
+    { min_height = { header = 1, outline = 5, inspector = 7 }, inspector = 9 },
+    { inspector_h = 7 },
+  },
+  {
+    "the minimums are configurable",
+    {
+      max_height = 10,
+      header = 6,
+      outline = 8,
+      inspector = 1,
+      min_height = { header = 1, outline = 2, inspector = 1 },
+    },
+    { header_h = 6, inspector_h = 1, outline_h = 3 },
+  },
+  {
+    "minimums that overrun the budget squash the outline first",
+    { row = 30, lines = 42, below = true },
+    { budget = 5, header_h = 1, outline_h = 3, inspector_h = 1 },
+  },
+  {
+    "...and at the floor every pane is one row",
+    { row = 30, below = true, header = 4 },
+    { budget = 3, header_h = 1, outline_h = 1, inspector_h = 1 },
+  },
+  {
+    "max_height counts content rows only: borders are extra",
+    { max_height = 10, header = 6, outline = 8, inspector = 4 },
+    { content = 10, extent = 10 + 6 },
+  },
+  {
+    "...above the cursor too",
+    { max_height = 10, header = 6, outline = 8, inspector = 4, row = 30 },
+    { content = 10, top = 30 - 16 },
+  },
 }
 
 for _, case in ipairs(layout_cases) do
@@ -273,9 +336,15 @@ for _, case in ipairs(layout_cases) do
     top = got.top,
     col = got.col,
     rule = got.rule or "none",
+    content = 0,
   }
   for _, pane in ipairs({ "header", "outline", "inspector" }) do
     local p = got[pane]
+    if p then
+      view.content = view.content + p.height
+      -- the frame's outer rows: down to the last pane's bottom edge
+      view.extent = p.row + p.height + (got.rule and 2 or 0)
+    end
     view[pane] = p and "some" or "none"
     view[pane .. "_row"] = p and p.row
     view[pane .. "_h"] = p and p.height

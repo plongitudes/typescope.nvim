@@ -274,7 +274,12 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
   -- the frame: header, outline, and the inspector under them, hung from the
   -- cursor's screen position (float.lua places every pane itself)
   local pos = vim.fn.screenpos(0, srccursor[1], srccursor[2] + 1)
-  local frame = { row = math.max(0, pos.row - 1), col = math.max(0, pos.col - 1), max_height = cfg.ui.max_height }
+  local frame = {
+    row = math.max(0, pos.row - 1),
+    col = math.max(0, pos.col - 1),
+    max_height = cfg.ui.max_height,
+    min_height = cfg.ui.min_height,
+  }
   local handle = float.open({
     lines = result.lines,
     highlights = result.highlights,
@@ -288,7 +293,18 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
     border = cfg.ui.border,
     enter = focus,
     frame = frame,
-    header = head and { lines = head.lines, highlights = head.highlights, ts_injections = head.ts_injections },
+    header = head and {
+      lines = head.lines,
+      highlights = head.highlights,
+      ts_injections = head.ts_injections,
+      -- the budget allots it fewer rows than it wraps to: cut in the middle
+      fit = function(rows)
+        render_opts.view, render_opts.header_rows = "header", rows
+        local cut = render.render(roots, render_opts)
+        render_opts.view, render_opts.header_rows = nil, nil
+        return { lines = cut.lines, highlights = cut.highlights, ts_injections = cut.ts_injections }
+      end,
+    },
   })
 
   -- land on the active param's primary row: with ui.focus the tree keys are
@@ -308,7 +324,6 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
     roots = roots,
     opts = render_opts,
     width = width,
-    max_height = cfg.ui.max_height,
     on_close = M.close,
     on_recurse = function(node, done)
       if session then

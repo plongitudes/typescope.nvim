@@ -33,7 +33,8 @@
 ---@field example_reveal? fun(node: typescope.Node): number?, number?, integer? 0..1 through the fall, the wave phase it froze at, and the float width it froze at (38c)
 ---@field example_phase? number 0..1 position of the travelling wave through the pending bar (38c)
 ---@field lang? string treesitter language for injected snippet highlighting
----@field header? string one-line call shape, drawn by view = "header"
+---@field header? string call shape, drawn by view = "header", wrapped at whole params
+---@field header_rows? integer rows the header may take; past them it is cut in the middle (nil: as many as it wraps to)
 ---@field header_active? string param name lit as active in the header (matches insert's signature block)
 ---@field docstring? string full docstring text, shown by view = "doc"
 
@@ -893,38 +894,107 @@ function M.render(roots, opts)
     end
   end
 
+  -- The header's pieces, in units that stay on one row together: the name
+  -- with its paren, each param with its comma (the last with the closing
+  -- paren), the return type, the overload badge. `lead` joins a unit to the
+  -- one before it on the same row; a continuation row starts at the hanging
+  -- indent instead.
+  ---@param params string[] param tokens, "…" where the middle was cut
+  local function header_units(fn_name, params, ret, badge)
+    local units = { { lead = "", pieces = { { fn_name, "TypeScopeHeader" }, { "(", "TypeScopeHeader" } } } }
+    for i, tok in ipairs(params) do
+      local pieces = {}
+      if tok == "*" or tok == "/" then
+        pieces[1] = { tok, "TypeScopeKeyword" }
+      elseif tok == "…" then
+        pieces[1] = { tok, "TypeScopeChrome" }
+      else
+        local name, mark = tok:match("^(.-)(=…)$")
+        name = name or tok
+        pieces[1] = { name, name == opts.header_active and "TypeScopeActive" or "TypeScopeParam" }
+        if mark then
+          pieces[2] = { mark, "TypeScopeChrome" }
+        end
+      end
+      table.insert(pieces, i < #params and { ",", "TypeScopeChrome" } or { ")", "TypeScopeHeader" })
+      table.insert(units, { lead = i == 1 and "" or " ", pieces = pieces })
+    end
+    if #params == 0 then
+      table.insert(units[1].pieces, { ")", "TypeScopeHeader" })
+    end
+    if ret then
+      table.insert(
+        units,
+        { lead = " ", pieces = { { "-> ", "TypeScopeChrome" }, { ret, "TypeScopeType", "replace" } } }
+      )
+    end
+    if badge then
+      table.insert(units, { lead = " ", pieces = { { badge, "TypeScopeBadge" } } })
+    end
+    return units
+  end
+
+  -- Greedy wrap of header units at max_width. A unit too wide for a fresh
+  -- row is split piece by piece at find_break_point (in practice: a long
+  -- return type, at its commas).
+  local function wrap_header(units)
+    local INDENT = "  "
+    local rows, line = {}, new_line()
+    local function fresh()
+      return line.text == "" or line.text == INDENT
+    end
+    local function next_row()
+      table.insert(rows, line)
+      line = new_line():add(INDENT)
+    end
+    for _, unit in ipairs(units) do
+      local width = 0
+      for _, piece in ipairs(unit.pieces) do
+        width = width + strwidth(piece[1])
+      end
+      local lead = fresh() and "" or unit.lead
+      if not fresh() and line.width + strwidth(lead) + width > opts.max_width then
+        next_row()
+        lead = ""
+      end
+      line:add(lead)
+      for _, piece in ipairs(unit.pieces) do
+        local text, from = piece[1], 0
+        while text ~= "" do
+          local avail = opts.max_width - line.width
+          -- an indent already past the edge has no room to split into
+          if strwidth(text) <= avail or fresh() and avail < 1 then
+            line:add(text, piece[2], piece[3], piece[1], from)
+            text = ""
+          else
+            local cut = math.max(1, find_break_point(text, math.max(1, avail)))
+            line:add(text:sub(1, cut), piece[2], piece[3], piece[1], from)
+            local rest = text:sub(cut + 1)
+            local kept = rest:gsub("^%s+", "")
+            from = from + cut + (#rest - #kept)
+            text = kept
+            if text ~= "" then
+              next_row()
+            end
+          end
+        end
+      end
+    end
+    table.insert(rows, line)
+    return rows
+  end
+
   local function emit_header()
     if not opts.header then
       return
     end
-    -- the header is a one-liner by contract: a 48-param call shape must not
-    -- eat the float, so the param list elides at width with the return type
-    -- kept visible — run(app, *, host=…, …) -> None
-    local header = opts.header
-    if strwidth(header) > opts.max_width then
-      local ret_part = header:match("%)(%s*->.*)$") or ""
-      local body = header:sub(1, #header - #ret_part)
-      local suffix = "…)" .. ret_part
-      local budget = math.max(8, opts.max_width - strwidth(", " .. suffix))
-      local cut = math.max(1, find_break_point(body, budget))
-      -- drop the final (possibly cut-in-half) token so only whole params show.
-      -- With no comma kept there is no whole param to show: back up to the
-      -- paren, or `run_main(comline_list)` drew as `run_main(com, …)`, a
-      -- half name and a comma promising a second param that doesn't exist
-      local kept, dropped = body:sub(1, cut):gsub(",%s*[^,]*$", "")
-      if dropped > 0 then
-        header = kept .. ", " .. suffix
-      else
-        header = body:sub(1, (body:find("(", 1, true) or cut)) .. suffix
-      end
-    end
     -- colors align with the typing surface's signature block (Tony,
     -- 2026-08-06): yellow reserved for the callable + parens, params in
     -- param color with the active one lit, the return as a real type with
-    -- syntax injection. Elision marks (`=…`, trailing `…`) render as chrome
-    -- — same as outline rows' default marks — superseding the 2026-08-01
+    -- syntax injection. Elision marks (`=…`, `…`) render as chrome — same as
+    -- outline rows' default marks — superseding the 2026-08-01
     -- dim-at-header-hue call, which assumed a single-hue header.
-    local hline = new_line()
+    local header = opts.header
     -- we authored the format in resolve (name(tok, tok) -> ret [i/n]), so
     -- this parse can't miss; the plain fallback is pure defense
     local badge = header:match("%s(%[%d+/%d+%])$")
@@ -935,39 +1005,41 @@ function M.render(roots, opts)
     if not fn_name then
       fn_name, params = sig:match("^([^(]+)%((.-)%)$")
     end
-    if fn_name then
-      hline:add(fn_name, "TypeScopeHeader")
-      hline:add("(", "TypeScopeHeader")
-      local toks = params ~= "" and vim.split(params, ", ", { plain = true }) or {}
-      for i, tok in ipairs(toks) do
-        if tok == "*" or tok == "/" then
-          hline:add(tok, "TypeScopeKeyword")
-        elseif tok == "…" then
-          hline:add(tok, "TypeScopeChrome")
-        else
-          local name, mark = tok:match("^(.-)(=…)$")
-          name = name or tok
-          hline:add(name, name == opts.header_active and "TypeScopeActive" or "TypeScopeParam")
-          if mark then
-            hline:add(mark, "TypeScopeChrome")
-          end
-        end
-        if i < #toks then
-          hline:add(", ", "TypeScopeChrome")
-        end
-      end
-      hline:add(")", "TypeScopeHeader")
-      if ret then
-        hline:add(" -> ", "TypeScopeChrome")
-        hline:add(ret, "TypeScopeType", "replace")
-      end
-      if badge then
-        hline:add(" " .. badge, "TypeScopeBadge")
-      end
+    local limit = opts.header_rows or math.huge
+    local rows
+    if not fn_name then
+      rows = wrap_header({ { lead = "", pieces = { { header, "TypeScopeHeader" } } } })
     else
-      hline:add(header, "TypeScopeHeader")
+      -- Past its rows, the header loses params from the middle of the list
+      -- until it fits, so the name and the first params, and the last ones
+      -- and the return type, stay visible: f(a, b, …, z) -> R. A 48-param
+      -- call shape on a short screen still reads as itself.
+      local toks = params ~= "" and vim.split(params, ", ", { plain = true }) or {}
+      for cut = 0, #toks do
+        local keep = toks
+        if cut > 0 then
+          local head = math.ceil((#toks - cut) / 2)
+          keep = vim.list_slice(toks, 1, head)
+          table.insert(keep, "…")
+          vim.list_extend(keep, toks, #toks - (#toks - cut - head) + 1, #toks)
+        end
+        rows = wrap_header(header_units(fn_name, keep, ret, badge))
+        if #rows <= limit then
+          break
+        end
+      end
     end
-    emit(hline, nil)
+    -- even `f(…) -> R` overruns (a return type longer than the rows): keep
+    -- the rows at both ends
+    if #rows > limit then
+      local head = math.ceil(limit / 2)
+      local kept = vim.list_slice(rows, 1, head)
+      vim.list_extend(kept, rows, #rows - (limit - head) + 1, #rows)
+      rows = kept
+    end
+    for _, row in ipairs(rows) do
+      emit(row, nil)
+    end
   end
 
   -- The outline's other surfaces. Each is drawn into its own pane (the
