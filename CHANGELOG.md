@@ -8,7 +8,7 @@ The float becomes a frame of three panes, the header, the outline and the loupe,
 
 ### Upgrading
 
-`ui.max_height` now counts content rows only, so with the same setting the float is taller on screen by its borders and seams. The new `ui.min_height` (default `{ header = 1, outline = 5, inspector = 1 }`) sets what each pane keeps before leftover rows are shared out.
+With the same `ui.max_height` the float is taller on screen: `ui.max_height` still counts content rows only, but each seam between panes is now two border rows. The new `ui.min_height` (default `{ header = 1, outline = 5, inspector = 1 }`) sets what each pane keeps before leftover rows are shared out.
 
 ### Added
 
@@ -18,7 +18,7 @@ The float becomes a frame of three panes, the header, the outline and the loupe,
 ### Changed
 
 - **The float is three panes with visible seams.** Header, outline and loupe are stacked on one side of the cursor, chosen when the float opens, and each seam is a full bottom border then a full top border in your `ui.border` style. The `├─┤` join is gone, and so is the float's ` typescope ` title.
-- **The header is its own pane, pinned above the outline.** It wraps the whole signature (cut from the middle only when it can't fit), stays put as the outline scrolls, and follows the overload group the cursor is in. Its bottom border carries the group's `[i/n]`, with `✓` beside it on the matched overload. Its height is fixed at the tallest group's, so the outline never shifts. Its filetype is `typescope_header`.
+- **The header is its own pane, pinned above the outline.** It wraps the whole signature (cut from the middle only when it can't fit), stays put as the outline scrolls, and follows the overload group the cursor is in. Its bottom border carries the group's `[i/n]`, with a green `✓` beside it on the matched overload (`TypeScopeMatched`, linked to `DiagnosticOk`). Its height is fixed at the tallest group's, so the outline never shifts. Its filetype is `typescope_header`.
 - **`d` shows the docstring in the loupe, in place of the inspector.** The outline stays visible and keeps the cursor, and the docstring view scrolls to the hovered parameter's `:param` section. It grows the frame away from your code line, squashing the outline and header to their minimums if it must, and `d` again restores every pane's size.
 - **`?` opens the help view over the frame.** It's titled `typescope help`, grows away from your code line, and leaves the panes under it their sizes. Row keys do nothing while it shows; `?` again returns to the inspector or docstring view underneath, and `d` goes to the docstring view. Its `? toggle this help` row is gone.
 - **The footer is just `? help`**, right-aligned on the frame's bottom border, in every view. The docstring's first sentence is no longer in it; `ui.docstring = false` now only turns off `d`.

@@ -468,6 +468,7 @@ inherits your theme rather than overriding it.
     TypeScopeUnresolved         DiagnosticWarn
     TypeScopeHint               Comment
     TypeScopeActive             LspSignatureActiveParameter
+    TypeScopeMatched            DiagnosticOk
     TypeScopeTitle              FloatTitle
 
 Override through `highlights`: >lua

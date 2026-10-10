@@ -298,7 +298,7 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
       tag = meta and meta.overloads and { { (" [%d/%d] "):format(i, meta.overloads), "TypeScopeBadge" } } or nil,
     }
     if i == matched then
-      table.insert(heads[i].tag, 1, { " ✓", "TypeScopeActive" })
+      table.insert(heads[i].tag, 1, { " ✓", "TypeScopeMatched" })
     end
   end
   local width = math.min(max_width, math.max(result.width, header_width, 30))
