@@ -150,7 +150,6 @@ Bead for this iteration: $id" | tee "$log" | jq --unbuffered -rj "$stream_text"
   (cd "$wt" && stylua --check lua tests) || { echo "=== stylua diff after $id; stopping"; exit 1; }
 
   git -C "$wt" push -u origin "$branch"
-  (cd "$repo" && bd sync)
   rm -f "$log"
 done
 echo "=== hit max iterations ($max)"
