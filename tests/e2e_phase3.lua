@@ -666,6 +666,12 @@ if ulines then
       vim.api.nvim_win_get_cursor(ts_win)[1] == timeout_row
         and vim.deep_equal(vim.api.nvim_buf_get_lines(ts_buf2, 0, -1, false), outline_now)
     )
+    -- nor does any other motion: the outline holds still under help
+    for _, key in ipairs({ "G", "gg" }) do
+      vim.api.nvim_feedkeys(key, "x", false)
+      vim.cmd("doautocmd CursorMoved") -- headless never fires it
+      check("...nor does " .. key, vim.api.nvim_win_get_cursor(ts_win)[1] == timeout_row)
+    end
     vim.api.nvim_feedkeys("?", "x", false)
     check("? again closes help", help_win() == nil)
     check("...back to the inspector", inspector_text():find("^timeout") ~= nil)
@@ -945,6 +951,11 @@ do
       "row keys don't move or change the outline under it",
       vim.api.nvim_win_get_cursor(ow)[1] == row_before and vim.deep_equal(float_lines(), outline_before)
     )
+    for _, key in ipairs({ "G", "gg" }) do
+      vim.api.nvim_feedkeys(key, "x", false)
+      vim.cmd("doautocmd CursorMoved") -- headless never fires it
+      check("...nor does " .. key, vim.api.nvim_win_get_cursor(ow)[1] == row_before)
+    end
     vim.api.nvim_feedkeys("s", "x", false)
     check("s again closes it", overlay("typescope_signature") == nil and float_lines() ~= nil)
     vim.api.nvim_feedkeys("s", "x", false)
@@ -985,6 +996,12 @@ do
   local slines = sw and vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(sw), 0, -1, false) or {}
   check("an overlay taller than the room is cut to it", sw ~= nil and vim.api.nvim_win_get_config(sw).height < #slines)
   if sw then
+    -- a count scrolls that many lines, as <C-d> does anywhere (the default,
+    -- half the window, would be 2 here)
+    vim.api.nvim_feedkeys(vim.keycode("1<C-d>"), "x", false)
+    check("...1<C-d> scrolls it one line", vim.fn.getwininfo(sw)[1].topline == 2)
+    vim.api.nvim_feedkeys(vim.keycode("1<C-u>"), "x", false)
+    check("...1<C-u> one line back", vim.fn.getwininfo(sw)[1].topline == 1)
     vim.api.nvim_feedkeys(vim.keycode("<C-d>"), "x", false)
     local top = vim.fn.getwininfo(sw)[1].topline
     check("...<C-d> scrolls it", top > 1)

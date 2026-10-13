@@ -413,6 +413,14 @@ function M.attach(args)
     if st.width > target and next(reveals) ~= nil and config.get().ui.animations then
       grow = { from = shown, to = st.width, start = vim.uv.hrtime() }
     end
+    -- under an overlay the outline holds still: the view it had when the
+    -- overlay opened is put back after any motion the row keys don't cover
+    -- (G, gg, a search), see the CursorMoved autocmd
+    if not st.overlay then
+      st.held = nil
+    elseif not st.held and vim.api.nvim_win_is_valid(st.handle.win) then
+      st.held = vim.api.nvim_win_call(st.handle.win, vim.fn.winsaveview)
+    end
     float.update(st.handle, {
       lines = lines,
       highlights = highlights,
@@ -697,7 +705,8 @@ function M.attach(args)
   -- view from the outline; elsewhere they scroll the outline as usual
   for _, key in ipairs({ "<C-d>", "<C-u>" }) do
     map(key, function()
-      local keys = vim.keycode(key)
+      -- a count scrolls that many lines (and, as in any window, sets 'scroll')
+      local keys = (vim.v.count > 0 and vim.v.count or "") .. vim.keycode(key)
       local sig = st.handle.signature
       if st.overlay == "signature" and sig and vim.api.nvim_win_is_valid(sig.win) then
         vim.api.nvim_win_call(sig.win, function()
@@ -870,7 +879,15 @@ function M.attach(args)
     buffer = st.handle.buf,
     desc = "TypeScope: the inspector follows the cursor",
     callback = function()
-      if not st.result or st.overlay or not vim.api.nvim_win_is_valid(st.handle.win) then
+      if not st.result or not vim.api.nvim_win_is_valid(st.handle.win) then
+        return
+      end
+      if st.overlay then
+        if st.held then
+          vim.api.nvim_win_call(st.handle.win, function()
+            vim.fn.winrestview(st.held)
+          end)
+        end
         return
       end
       local id = st.result.line_to_node[vim.api.nvim_win_get_cursor(st.handle.win)[1]]

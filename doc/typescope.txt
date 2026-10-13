@@ -203,8 +203,8 @@ when you rebind anything. It is drawn over the frame, titled
 the line of code at the cursor: when the frame sits below the cursor it grows
 up to the frame's top and then down past its bottom; when the frame sits
 above, it grows up past the frame's top. While it shows, the row keys
-(<CR>, l, h, H, e, j, k, <C-d>, <C-u>) do nothing, so the outline cannot move
-under it. `?` again returns to whatever the loupe showed before; `d` goes
+(<CR>, l, h, H, e, j, k, <C-d>, <C-u>) do nothing, and any other motion (G,
+gg, a search) is put back, so the outline cannot move under it. `?` again returns to whatever the loupe showed before; `d` goes
 straight to the docstring view.
 
                                                   *typescope-signature-view*
