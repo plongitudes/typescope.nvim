@@ -339,10 +339,13 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
   -- land on the active param's primary row: with ui.focus the tree keys are
   -- live immediately, so the cursor should start where the user is typing.
   -- The inspector shows the cursor's row, so with no active param it
-  -- starts on the first one.
+  -- starts on the first one, or on the opening overload group's row: the
+  -- header follows the cursor's group, and group 1's first row would pull
+  -- it straight off the matched overload
+  local start_id = active_id or (meta and meta.overloads and roots[idx] and roots[idx].id) or nil
   for lnum = 1, #result.lines do
     local id = result.line_to_node[lnum]
-    if id and (id == active_id or not active_id) then
+    if id and (id == start_id or not start_id) then
       vim.api.nvim_win_set_cursor(handle.win, { lnum, 0 })
       break
     end

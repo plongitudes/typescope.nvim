@@ -425,6 +425,27 @@ if lines_h8h then
 end
 require("typescope").close()
 
+-- hover's usual case: no signatureHelp (cursor on the callee's name), so no
+-- active param. The written args still pick [2/2], and the cursor has to
+-- land in that group, or the header follows it straight back to [1/2]
+do
+  local mock = require("tests.mock_basedpyright")
+  mock.silent_signature = true
+  for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+    if l:find("fetch2 = fetch") then
+      vim.api.nvim_win_set_cursor(0, { i, 10 })
+    end
+  end
+  require("typescope").open()
+  vim.wait(2000, function()
+    return float_lines() ~= nil
+  end)
+  check("no signatureHelp: the written args still pick ✓ [2/2]", header_tag() == " ✓ [2/2] ─")
+  check("...and the header shows that group's signature", header_text():find("default", 1, true) ~= nil)
+  require("typescope").close()
+  mock.silent_signature = false
+end
+
 -- the three-pane frame (ADR 0001): header, outline, and the inspector in the
 -- loupe, each its own box; the docstring in its own view
 local function all_floats()
@@ -1607,7 +1628,7 @@ if lines7 then
   local _, cw = float_lines()
   vim.api.nvim_set_current_win(cw)
   vim.api.nvim_feedkeys("d", "x", false)
-  check("class docstring in the doc view", inspector_text():find("Connection settings") ~= nil)
+  check("class docstring in the docstring view", inspector_text():find("Connection settings") ~= nil)
   vim.api.nvim_feedkeys("d", "x", false)
 end
 require("typescope").close()
