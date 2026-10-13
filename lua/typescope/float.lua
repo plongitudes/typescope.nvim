@@ -392,7 +392,7 @@ end
 ---@field header? typescope.PaneLayout nil without a header
 ---@field outline typescope.PaneLayout
 ---@field inspector? typescope.PaneLayout nil while hidden
----@field help? typescope.PaneLayout the help overlay; its row may be negative (above the frame's top)
+---@field help? typescope.PaneLayout the help view; its row may be negative (above the frame's top)
 ---@field signature? typescope.PaneLayout the full signature's overlay; its row may be negative too
 
 --- Where every pane of the frame goes: the side of the cursor, the content

@@ -362,8 +362,8 @@ the cursor resolves to). `[i/n]` keeps its column whether or not `✓` shows.
 The header's height is fixed at the tallest group's wrapped signature, up to
 `ui.header_max_height`, so the outline never shifts as you cross groups. A
 signature that cannot fit keeps its required parameters, then its optional
-ones in order while they fit, in their places: `f(a, b=1, *, c)` can keep `a`
-and `c`, showing `f(a, …, *, c)`. Each gap is marked `…`, the last `…+N`, N
+ones in order while they fit, in their places: `f(a, b=1, *, c, d=2)` can
+keep `a` and `c`, showing `f(a, …, *, c, …+2)`. Each gap is marked `…`, the last `…+N`, N
 counting every hidden parameter, in `TypeScopeElided`. Required parameters
 that overrun alone are cut from the middle, keeping the start and the return
 type. When the outline cursor's parameter is hidden, the gap mark hiding it is

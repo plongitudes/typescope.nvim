@@ -77,6 +77,9 @@ function M.attach(args)
     width = args.width,
     -- drawn over the frame, one at a time: "help" (?) or "signature" (s)
     overlay = nil, ---@type "help"|"signature"|nil
+    -- the outline's view (winsaveview) when the overlay opened, put back
+    -- after any motion under it
+    held = nil, ---@type vim.fn.winsaveview.ret?
     -- the docked inspector shows inspector_id's details, and asks for as many
     -- rows as the tallest it has been (inspector_h) — the rows above it must
     -- not move as the cursor goes from a one-line node to a four-line one

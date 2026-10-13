@@ -383,7 +383,7 @@ do
 end
 
 -- 9. sections: the header is its own pane (view = "header"), so the rows carry
--- neither it nor a rule under it; the docstring is the doc view's, never a
+-- neither it nor a rule under it; the docstring is the docstring view's, never a
 -- section under the rows (U1)
 local section_tree = { model.new({ name = "x", kind = "param", type = { display = "int", category = "builtin" } }) }
 local section_opts = {
@@ -1691,7 +1691,7 @@ do
       header = "the header",
       header1 = "the header cut to one row",
       inspector = "the inspector's lines",
-      doc = "the doc view's lines",
+      doc = "the docstring view's lines",
     })[view] .. " survive every width from 20 to 80 intact", worst == nil)
     if worst then
       print("  " .. worst)
