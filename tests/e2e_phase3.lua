@@ -102,6 +102,23 @@ local function header_tag()
   end
   return text
 end
+-- the param names the header lights (TypeScopeActive), and its marks as
+-- drawn: a repaint replaces them, so equal ids mean nothing was redrawn
+local function header_lit()
+  local lines, w = header()
+  local lit, marks = {}, {}
+  if not w then
+    return lit, marks
+  end
+  local buf = vim.api.nvim_win_get_buf(w)
+  for _, m in ipairs(vim.api.nvim_buf_get_extmarks(buf, -1, 0, -1, { details = true })) do
+    table.insert(marks, m[1])
+    if m[4].hl_group == "TypeScopeActive" then
+      table.insert(lit, lines[m[2] + 1]:sub(m[3] + 1, m[4].end_col))
+    end
+  end
+  return lit, marks
+end
 
 --- A window's footer, as text.
 local function footer_of(w)
@@ -391,6 +408,20 @@ if lines_h8h then
   inspector_of("default")
   check("cursor back into group 2: ✓ [2/2] again", header_tag() == " ✓ [2/2] ─")
   check("...and its signature", header_text():find("default", 1, true) ~= nil)
+
+  -- the lit param is the cursor's, in whichever group the header shows
+  check("...with nothing lit on its group row", vim.deep_equal(header_lit(), {}))
+  inspector_of("·%s+default%s")
+  check("...and the cursor's param lit on a param row", vim.deep_equal(header_lit(), { "default" }))
+  inspector_of("%[1/2%]")
+  check("a group row lights nothing", vim.deep_equal(header_lit(), {}))
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "x", false)
+  vim.api.nvim_feedkeys("j", "x", false)
+  vim.cmd("doautocmd CursorMoved")
+  check(
+    "group 1's key row: group 1's header, with its key lit",
+    header_tag() == " [1/2] ─" and vim.deep_equal(header_lit(), { "key" })
+  )
 end
 require("typescope").close()
 
@@ -426,6 +457,7 @@ check(
 )
 local ulines, ts_win = float_lines()
 if ulines then
+  local lit_at_open = header_lit()
   local hlines, hwin = header()
   check(
     "header: the call shape, wrapped to width, return kept, the pane as tall as it",
@@ -470,6 +502,38 @@ if ulines then
     vim.deep_equal(header(), hlines) and vim.deep_equal(vim.api.nvim_win_get_config(hwin), hcfg)
   )
   vim.cmd("normal! gg")
+
+  -- the header lights the param of the outline row under the cursor: the
+  -- row's own, or the top-level param a nested row sits inside
+  do
+    vim.api.nvim_set_current_win(ts_win)
+    local function on(pattern)
+      for i, l in ipairs(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(ts_win), 0, -1, false)) do
+        if l:find(pattern) then
+          vim.api.nvim_win_set_cursor(ts_win, { i, 0 })
+          vim.cmd("doautocmd CursorMoved")
+          return header_lit()
+        end
+      end
+    end
+    check("opening on a param row lights it in the header", vim.deep_equal(lit_at_open, { "config" }))
+    check("moving to another param row moves the light", vim.deep_equal(on("·%s+timeout%s"), { "timeout" }))
+    check("a nested row lights its top-level param", vim.deep_equal(on("·%s+host%s"), { "config" }))
+    local _, marks = header_lit()
+    local tick = vim.b[vim.api.nvim_win_get_buf(hwin)].changedtick
+    check(
+      "...and a move under the same param leaves the header undrawn",
+      vim.deep_equal(on("·%s+port%s"), { "config" })
+        and vim.deep_equal(select(2, header_lit()), marks)
+        and vim.b[vim.api.nvim_win_get_buf(hwin)].changedtick == tick
+    )
+    check("the return row lights nothing", vim.deep_equal(on("returns"), {}))
+    vim.api.nvim_feedkeys("k", "x", false)
+    vim.cmd("doautocmd CursorMoved")
+    check("k back onto timeout lights it again", vim.deep_equal(header_lit(), { "timeout" }))
+    vim.cmd("normal! gg")
+    vim.cmd("doautocmd CursorMoved")
+  end
 
   -- d swaps the inspector for the docstring view in the loupe; the outline
   -- stays as it was, with the cursor in it. The view scrolls to the hovered

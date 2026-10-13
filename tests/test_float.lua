@@ -618,6 +618,58 @@ do
   float.close(h)
 end
 
+-- the header lights the param it's handed: a group is redrawn once per
+-- param it lights, and not at all while the lit param holds
+do
+  local drawn = {}
+  local function lighting(name)
+    return { { line = 0, col_start = 2, col_end = 2 + #name, group = "TypeScopeActive" } }
+  end
+  local h = float.open({
+    lines = { "a", "b", "c" },
+    highlights = {},
+    width = 20,
+    height = 3,
+    relative = "editor",
+    row = 0,
+    col = 0,
+    border = "rounded",
+    frame = { row = 2, col = 4, max_height = 9, min_height = { header = 1, outline = 5, inspector = 1 } },
+    headers = {
+      {
+        lines = { "f(x, yy)" },
+        highlights = {},
+        fit = function(rows, lit)
+          table.insert(drawn, lit or "-")
+          return { lines = { "f(x, yy)" }, highlights = lit and lighting(lit) or {} }
+        end,
+      },
+    },
+  })
+  local function lit_marks()
+    local out = {}
+    for _, m in ipairs(vim.api.nvim_buf_get_extmarks(h.header.buf, -1, 0, -1, { details = true })) do
+      if m[4].hl_group == "TypeScopeActive" then
+        table.insert(out, m[4].end_col - m[3])
+      end
+    end
+    return out
+  end
+  local base = { highlights = {}, width = 20, height = 3 }
+  check("a header opens unlit", #drawn == 0 and #lit_marks() == 0)
+  float.update(h, vim.tbl_extend("force", base, { header_lit = "x" }))
+  check("header_lit lights that param", vim.deep_equal(drawn, { "x" }) and vim.deep_equal(lit_marks(), { 1 }))
+  float.update(h, vim.tbl_extend("force", base, { header_lit = "x" }))
+  check("...and the same param again redraws nothing", #drawn == 1)
+  float.update(h, vim.tbl_extend("force", base, { header_lit = "yy" }))
+  check("another param moves the light", vim.deep_equal(lit_marks(), { 2 }))
+  float.update(h, base)
+  check("no header_lit lights nothing", #lit_marks() == 0)
+  float.update(h, vim.tbl_extend("force", base, { header_lit = "x" }))
+  check("...and a param lit before is drawn from what was kept", vim.deep_equal(drawn, { "x", "yy" }))
+  float.close(h)
+end
+
 if fail_count == 0 then
   print("FLOAT ALL PASS")
 else

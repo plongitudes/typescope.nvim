@@ -440,6 +440,40 @@ do
     { "f(x)", "  -> dict[str,", "  list[tuple[int,", "  int]]]" }
   )
 end
+-- the header lights header_active (the top-level param of the outline row
+-- under the cursor) with the typing surface's TypeScopeActive, and nothing
+-- else; the text doesn't change with it
+do
+  local function lit(header, active, rows)
+    local r = render.render(
+      section_tree,
+      opts({
+        show_examples = false,
+        header = header,
+        max_width = 30,
+        view = "header",
+        header_active = active,
+        header_rows = rows,
+      })
+    )
+    local out = {}
+    for _, h in ipairs(r.highlights) do
+      if h.group == "TypeScopeActive" then
+        table.insert(out, r.lines[h.line + 1]:sub(h.col_start + 1, h.col_end))
+      end
+    end
+    return out, r.lines
+  end
+  local long = "connect(host, port=…, timeout=…, retries=…) -> Connection"
+  eq_lines("header_active lights that param", (lit(long, "host")), { "host" })
+  eq_lines("...a defaulted one by name, not its =… mark", (lit(long, "timeout")), { "timeout" })
+  eq_lines("...on a continuation row too", (lit(long, "retries")), { "retries" })
+  eq_lines("...and *args / **kwargs by their starred names", (lit("f(*args, **kw)", "**kw")), { "**kw" })
+  eq_lines("no header_active lights nothing", (lit(long, nil)), {})
+  eq_lines("a name not in the header lights nothing", (lit(long, "returns")), {})
+  eq_lines("a param cut from the middle lights nothing", (lit(long, "port", 1)), {})
+  eq_lines("lighting leaves the text as it was", select(2, lit(long, "port")), select(2, lit(long, nil)))
+end
 
 local doc_view = render.render(section_tree, opts(vim.tbl_extend("force", section_opts, { view = "doc" })))
 eq_lines("the doc view is the whole docstring", doc_view.lines, {

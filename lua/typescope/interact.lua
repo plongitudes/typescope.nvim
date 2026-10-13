@@ -342,6 +342,21 @@ function M.attach(args)
     end
   end
 
+  --- The top-level param the node `id` belongs to — the param's own row, or
+  --- a field or member nested in its type — by name, as the header writes
+  --- it; nil for a row under no param (the return row, an overload group's).
+  ---@param id? string
+  ---@return string?
+  local function param_of(id)
+    local group = group_of(id)
+    local nodes = group and st.roots[group].children or st.roots
+    for _, node in ipairs(id and nodes or {}) do
+      if id == node.id or vim.startswith(id, node.id .. ".") then
+        return node.kind == "param" and node.name or nil
+      end
+    end
+  end
+
   -- the rows as last rendered, and the float width they were laid out for:
   -- reused by frames that change nothing but the inspector (see refresh)
   local rows = nil ---@type { result: typescope.RenderResult, width: integer }?
@@ -409,6 +424,8 @@ function M.attach(args)
       -- the header follows the cursor's overload group, as the inspector
       -- follows its row
       header = group_of(st.inspector_id),
+      -- ...and lights the param of the cursor's row
+      header_lit = param_of(st.inspector_id),
       -- help (?) is drawn over the frame, which goes on being laid out (and
       -- animated) under it exactly as it was
       help = st.show_help and help_content() or nil,

@@ -265,11 +265,14 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
   local result = render.render(roots, render_opts)
 
   --- Overload group `i`'s header, cut to `rows` (nil: as many as it wraps
-  --- to). Only the group that took the active-param flag lights it.
+  --- to), with the param `lit` lit. Which one is the outline cursor's
+  --- (interact), not signatureHelp's active param: in hover the cursor sits
+  --- on an argument, so hover resolves the argument and never the call.
   ---@param rows? integer
-  local function render_header(i, rows)
+  ---@param lit? string
+  local function render_header(i, rows, lit)
     render_opts.view, render_opts.header, render_opts.header_rows = "header", headers[i], rows
-    render_opts.header_active = i == idx and active_name or nil
+    render_opts.header_active = lit
     local ok, r = pcall(render.render, roots, render_opts)
     render_opts.view, render_opts.header, render_opts.header_rows, render_opts.header_active = nil, nil, nil, nil
     if not ok then
@@ -287,9 +290,10 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
       lines = r.lines,
       highlights = r.highlights,
       ts_injections = r.ts_injections,
-      -- the budget allots it fewer rows than it wraps to: cut in the middle
-      fit = function(rows)
-        local cut = render_header(i, rows)
+      -- the budget allots it fewer rows than it wraps to: cut in the middle;
+      -- and the outline's cursor moved to another param: light that one
+      fit = function(rows, lit)
+        local cut = render_header(i, rows, lit)
         return { lines = cut.lines, highlights = cut.highlights, ts_injections = cut.ts_injections }
       end,
       -- right-aligned on the header's bottom border; ✓ sits left of [i/n]
