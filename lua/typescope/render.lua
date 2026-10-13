@@ -898,15 +898,17 @@ function M.render(roots, opts)
   -- with its paren, each param with its comma (the last with the closing
   -- paren), the return type. `lead` joins a unit to the one before it on the
   -- same row; a continuation row starts at the hanging indent instead.
-  ---@param params string[] param tokens, "…" where the middle was cut
+  ---@param params (string|{ mark: string, lit: boolean })[] param tokens, and a gap mark where the cut dropped some
   local function header_units(fn_name, params, ret)
     local units = { { lead = "", pieces = { { fn_name, "TypeScopeHeader" }, { "(", "TypeScopeHeader" } } } }
     for i, tok in ipairs(params) do
       local pieces = {}
-      if tok == "*" or tok == "/" then
+      if type(tok) == "table" then
+        -- warn-coloured against the param blue; the one hiding the lit
+        -- param is lit in its place, so the header holds still
+        pieces[1] = { tok.mark, tok.lit and "TypeScopeActive" or "TypeScopeElided" }
+      elseif tok == "*" or tok == "/" then
         pieces[1] = { tok, "TypeScopeKeyword" }
-      elseif tok == "…" then
-        pieces[1] = { tok, "TypeScopeChrome" }
       else
         local name, mark = tok:match("^(.-)(=…)$")
         name = name or tok
@@ -980,6 +982,53 @@ function M.render(roots, opts)
     return rows
   end
 
+  --- The params a cut header shows: the visible tokens in signature order,
+  --- each run of hidden ones a gap mark in its place. A `*` or `/` shows
+  --- only between visible params; otherwise it falls into the gap.
+  ---@param toks string[]
+  ---@param shown table<integer, boolean>
+  ---@param active? string the lit param: the gap hiding it is lit
+  local function header_gaps(toks, shown, active)
+    local vis = {}
+    for i, tok in ipairs(toks) do
+      if tok == "*" or tok == "/" then
+        local before, after = false, false
+        for j = 1, i - 1 do
+          before = before or shown[j] or false
+        end
+        for j = i + 1, #toks do
+          after = after or shown[j] or false
+        end
+        vis[i] = before and after
+      else
+        vis[i] = shown[i] or false
+      end
+    end
+    local out, hidden, gap = {}, 0, nil
+    for i, tok in ipairs(toks) do
+      if vis[i] then
+        gap = nil
+        table.insert(out, tok)
+      else
+        if not gap then
+          gap = { mark = "…", lit = false }
+          table.insert(out, gap)
+        end
+        if tok ~= "*" and tok ~= "/" then
+          hidden = hidden + 1
+          gap.lit = gap.lit or (active ~= nil and tok:gsub("=…$", "") == active)
+        end
+      end
+    end
+    for i = #out, 1, -1 do
+      if type(out[i]) == "table" then
+        out[i].mark = "…+" .. hidden
+        break
+      end
+    end
+    return out
+  end
+
   local function emit_header()
     if not opts.header then
       return
@@ -1005,22 +1054,51 @@ function M.render(roots, opts)
     if not fn_name then
       rows = wrap_header({ { lead = "", pieces = { { header, "TypeScopeHeader" } } } })
     else
-      -- Past its rows, the header loses params from the middle of the list
-      -- until it fits, so the name and the first params, and the last ones
-      -- and the return type, stay visible: f(a, b, …, z) -> R. A 48-param
-      -- call shape on a short screen still reads as itself.
+      -- Past its rows, the header keeps every required param, then the
+      -- optional ones in signature order while they fit; whatever it drops
+      -- leaves a gap in place, `…` inside and `…+N` at the last one, N every
+      -- param hidden. Required params that overrun alone are cut in the
+      -- middle, so the start and end of the call still read: f(a, …, z, …+N).
       local toks = params ~= "" and vim.split(params, ", ", { plain = true }) or {}
-      for cut = 0, #toks do
-        local keep = toks
-        if cut > 0 then
-          local head = math.ceil((#toks - cut) / 2)
-          keep = vim.list_slice(toks, 1, head)
-          table.insert(keep, "…")
-          vim.list_extend(keep, toks, #toks - (#toks - cut - head) + 1, #toks)
+      rows = wrap_header(header_units(fn_name, toks, ret))
+      if #rows > limit then
+        local required, optional = {}, {}
+        for i, tok in ipairs(toks) do
+          if tok ~= "*" and tok ~= "/" then
+            table.insert((tok:find("=…$") or tok:find("^%*")) and optional or required, i)
+          end
         end
-        rows = wrap_header(header_units(fn_name, keep, ret))
+        ---@param shown table<integer, boolean> token index -> visible
+        local function attempt(shown)
+          return wrap_header(header_units(fn_name, header_gaps(toks, shown, opts.header_active), ret))
+        end
+        local shown = {}
+        for _, i in ipairs(required) do
+          shown[i] = true
+        end
+        rows = attempt(shown)
         if #rows <= limit then
-          break
+          for _, i in ipairs(optional) do
+            shown[i] = true
+            local more = attempt(shown)
+            if #more > limit then
+              shown[i] = nil
+              break
+            end
+            rows = more
+          end
+        else
+          for n = 1, #required do
+            local head = math.ceil((#required - n) / 2)
+            shown = {}
+            for j, i in ipairs(required) do
+              shown[i] = j <= head or j > head + n or nil
+            end
+            rows = attempt(shown)
+            if #rows <= limit then
+              break
+            end
+          end
         end
       end
     end

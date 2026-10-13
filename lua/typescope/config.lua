@@ -18,6 +18,7 @@
 ---@field max_width number >1: absolute columns; <=1: fraction of editor width
 ---@field max_height integer content rows the frame's panes share; borders are extra
 ---@field min_height { header: integer, outline: integer, inspector: integer } rows each pane keeps before leftovers are shared out (a pane with less content shrinks to fit)
+---@field header_max_height integer content rows the header may take; a longer signature is cut (`s` shows it whole). < 1: no cap
 ---@field border string|string[] any nvim float border value
 ---@field docstring boolean d shows the docstring view in the loupe
 ---@field hint boolean virtual-text "▸ typescope" marker on resolved call lines
@@ -32,6 +33,7 @@
 ---@field llm_generate string ask the model for the cursor node's example (and its neighbours')
 ---@field close string
 ---@field help string
+---@field signature string show the whole signature when the header is cut
 
 ---@class typescope.InsertModeConfig
 ---@field enabled boolean insert-mode typing surface (replaces signature help)
@@ -119,6 +121,9 @@ local defaults = {
     -- (header first, then the inspector up to 5, then the outline); a pane
     -- with less content than its minimum shrinks to fit
     min_height = { header = 1, outline = 5, inspector = 1 },
+    -- the header's rows at most; past them it keeps the required params,
+    -- then the optional ones in order, and `s` shows it whole. < 1: no cap
+    header_max_height = 4,
     border = "rounded",
     -- d shows the whole docstring in the loupe in place of the inspector;
     -- false turns it off
@@ -141,6 +146,7 @@ local defaults = {
     llm_generate = "e",
     close = "q",
     help = "?",
+    signature = "s",
   },
 }
 
@@ -217,6 +223,15 @@ local function validate(cfg)
     error("typescope.setup: `ui.max_width` must be a positive number (<=1 = fraction of editor width)", 0)
   end
   check("ui.max_height", cfg.ui.max_height, "positive_integer")
+  -- any integer: < 1 turns the cap off
+  if type(cfg.ui.header_max_height) ~= "number" or cfg.ui.header_max_height % 1 ~= 0 then
+    error(
+      ("typescope.setup: `ui.header_max_height` must be an integer (< 1 = no cap), got %s"):format(
+        vim.inspect(cfg.ui.header_max_height)
+      ),
+      0
+    )
+  end
   check("ui.min_height", cfg.ui.min_height, "table")
   for pane, rows in pairs(cfg.ui.min_height) do
     if pane ~= "header" and pane ~= "outline" and pane ~= "inspector" then
@@ -247,6 +262,7 @@ local function validate(cfg)
     "llm_generate",
     "close",
     "help",
+    "signature",
   }) do
     check("keymaps." .. key, cfg.keymaps[key], "string")
   end

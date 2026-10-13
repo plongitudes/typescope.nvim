@@ -418,21 +418,25 @@ do
     "  timeout=…, retries=…)",
     "  -> Connection",
   })
-  eq_lines("...and is cut in the middle when it gets fewer rows", header_at(long, 30, 2), {
-    "connect(host, port=…, …,",
-    "  retries=…) -> Connection",
+  eq_lines("...and with fewer rows keeps the required params, then optional ones in order", header_at(long, 30, 2), {
+    "connect(host, port=…, …+2)",
+    "  -> Connection",
   })
-  eq_lines("...down to one row, keeping both ends", header_at(long, 30, 1), { "connect(host, …) -> Connection" })
+  eq_lines(
+    "...down to one row, the required ones cut in the middle too",
+    header_at(long, 30, 1),
+    { "connect(…+4) -> Connection" }
+  )
   eq_lines("...and left whole when it fits its rows", header_at(long, 30, 3), header_at(long, 30))
   eq_lines(
     "one param elides to the parens (typescope.nvim-ssu)",
     header_at("run_main(comline_list) -> dict[str, _F2PyDict]", 40, 1),
-    { "run_main(…) -> dict[str, _F2PyDict]" }
+    { "run_main(…+1) -> dict[str, _F2PyDict]" }
   )
   eq_lines(
     "whole params survive the cut",
     header_at("connect(hôte, port=…, timeout=…) -> Conn", 34, 1),
-    { "connect(hôte, …) -> Conn" }
+    { "connect(hôte, port=…, …+1) -> Conn" }
   )
   eq_lines(
     "a return type too long for a row of its own splits at a comma",
@@ -471,8 +475,96 @@ do
   eq_lines("...and *args / **kwargs by their starred names", (lit("f(*args, **kw)", "**kw")), { "**kw" })
   eq_lines("no header_active lights nothing", (lit(long, nil)), {})
   eq_lines("a name not in the header lights nothing", (lit(long, "returns")), {})
-  eq_lines("a param cut from the middle lights nothing", (lit(long, "port", 1)), {})
+  eq_lines("a param the cut hides lights the gap mark hiding it", (lit(long, "port", 1)), { "…+4" })
   eq_lines("lighting leaves the text as it was", select(2, lit(long, "port")), select(2, lit(long, nil)))
+end
+
+-- the cut header (typescope.nvim-6fp.11): required params always stay, then
+-- optional ones in signature order until the rows run out; dropped params
+-- leave a gap in place, inner gaps `…`, the last `…+N` with N every hidden
+-- param, each mark in TypeScopeElided (the gap hiding the lit param in
+-- TypeScopeActive). Required params alone past the rows are cut in the middle.
+do
+  local function cut(header, width, rows, active)
+    return render.render(
+      section_tree,
+      opts({
+        show_examples = false,
+        header = header,
+        max_width = width,
+        view = "header",
+        header_rows = rows,
+        header_active = active,
+      })
+    )
+  end
+  local function marks(r, group)
+    local out = {}
+    for _, h in ipairs(r.highlights) do
+      if h.group == group then
+        table.insert(out, r.lines[h.line + 1]:sub(h.col_start + 1, h.col_end))
+      end
+    end
+    return out
+  end
+  eq_lines(
+    "required params alone, when no optional one fits beside them",
+    cut("f(alpha, beta, gamma=…, delta=…)", 24, 1).lines,
+    { "f(alpha, beta, …+2)" }
+  )
+  eq_lines(
+    "...then optional ones, in signature order, while they fit",
+    cut("f(alpha, beta, gamma=…, delta=…)", 28, 1).lines,
+    { "f(alpha, beta, gamma=…, …+1)" }
+  )
+  local kw = cut("f(alpha, beta=…, *, gamma, delta=…)", 28, 1)
+  eq_lines("a keyword-only required param survives, with … at the inner gap", kw.lines, {
+    "f(alpha, …, *, gamma, …+2)",
+  })
+  eq_lines("every gap mark is TypeScopeElided", marks(kw, "TypeScopeElided"), { "…", "…+2" })
+  check(
+    "...and the =… default marks stay chrome",
+    vim.tbl_contains(marks(cut("f(a, b=…)", 20), "TypeScopeChrome"), "=…")
+      and #marks(cut("f(a, b=…)", 20), "TypeScopeElided") == 0
+  )
+  eq_lines(
+    "a * with nothing shown after it goes into the gap",
+    cut("f(alpha, *, beta=…, gamma=…)", 16, 1).lines,
+    { "f(alpha, …+2)" }
+  )
+  local req = cut("f(a1, a2, a3, a4, a5, b=…)", 18, 1)
+  eq_lines("required params past the rows are cut in the middle, N counting all hidden", req.lines, {
+    "f(a1, …, a5, …+4)",
+  })
+  local lit_req = cut("f(a1, a2, a3, a4, a5, b=…)", 18, 1, "a3")
+  eq_lines("a hidden lit param lights the gap mark hiding it", marks(lit_req, "TypeScopeActive"), { "…" })
+  eq_lines("...which is then not TypeScopeElided", marks(lit_req, "TypeScopeElided"), { "…+4" })
+  eq_lines("...and the text holds still", lit_req.lines, req.lines)
+  eq_lines(
+    "a lit param hidden in the last gap lights …+N",
+    marks(cut("f(a1, a2, a3, a4, a5, b=…)", 18, 1, "b"), "TypeScopeActive"),
+    { "…+4" }
+  )
+  -- the uvicorn.run shape: one required param and a long keyword-only tail
+  local opt = {}
+  for i = 1, 24 do
+    opt[i] = ("option_%02d=…"):format(i)
+  end
+  local run = cut("run(app, *, " .. table.concat(opt, ", ") .. ") -> None", 60, 4)
+  local text = table.concat(run.lines, "\n")
+  check("a uvicorn.run-sized header fits its 4 rows", #run.lines == 4)
+  check("...opening on the required param and the *", vim.startswith(run.lines[1], "run(app, *, option_01=…,"))
+  local shown = {}
+  for n in text:gmatch("option_(%d%d)") do
+    table.insert(shown, tonumber(n))
+  end
+  local in_order = #shown > 0
+  for i, n in ipairs(shown) do
+    in_order = in_order and n == i
+  end
+  check("...then optional ones in signature order", in_order)
+  check("...ending on …+N, N the hidden ones", vim.endswith(run.lines[4], ("…+%d) -> None"):format(24 - #shown)))
+  check("...with the one gap", #marks(run, "TypeScopeElided") == 1)
 end
 
 local doc_view = render.render(section_tree, opts(vim.tbl_extend("force", section_opts, { view = "doc" })))

@@ -26,6 +26,9 @@ local groups = {
   -- group: LspSignatureActiveParameter often carries a bg that boxes it in
   TypeScopeMatched = { link = "DiagnosticOk" },
   TypeScopeTitle = { link = "FloatTitle" },
+  -- a cut header's gap marks (`…`, `…+N`): they must pop against the param
+  -- colour, and the callable already has yellow's hue, so a link
+  TypeScopeElided = { link = "DiagnosticWarn" },
 }
 
 local applied = false

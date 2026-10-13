@@ -290,8 +290,9 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
       lines = r.lines,
       highlights = r.highlights,
       ts_injections = r.ts_injections,
-      -- the budget allots it fewer rows than it wraps to: cut in the middle;
-      -- and the outline's cursor moved to another param: light that one
+      -- the cap or the budget allots it fewer rows than it wraps to: cut
+      -- (required params, then optional ones, gaps marked); and the
+      -- outline's cursor moved to another param: light that one
       fit = function(rows, lit)
         local cut = render_header(i, rows, lit)
         return { lines = cut.lines, highlights = cut.highlights, ts_injections = cut.ts_injections }
@@ -316,6 +317,7 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
     col = math.max(0, pos.col - 1),
     max_height = cfg.ui.max_height,
     min_height = cfg.ui.min_height,
+    header_max_height = cfg.ui.header_max_height,
   }
   local handle = float.open({
     lines = result.lines,

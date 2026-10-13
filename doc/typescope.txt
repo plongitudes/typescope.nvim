@@ -187,8 +187,11 @@ through `keymaps` (|typescope-config|); the defaults are shown.
                 (needs ollama)
     d           Docstring: show it in the loupe in place of the inspector,
                 or go back to the inspector
-    <C-d>       Scroll the docstring view down (in the outline otherwise)
-    <C-u>       Scroll the docstring view up (in the outline otherwise)
+    <C-d>       Scroll the docstring view down (in the outline otherwise),
+                or the full signature while it shows
+    <C-u>       Scroll the docstring view up (in the outline otherwise),
+                or the full signature while it shows
+    s           Show the whole signature when the header is cut, or close it
     q           Close, from any view
     <Esc>       Close, from any view
     ?           Open the help view, or close it
@@ -203,6 +206,17 @@ above, it grows up past the frame's top. While it shows, the row keys
 (<CR>, l, h, H, e, j, k, <C-d>, <C-u>) do nothing, so the outline cannot move
 under it. `?` again returns to whatever the loupe showed before; `d` goes
 straight to the docstring view.
+
+                                                  *typescope-signature-view*
+When the header is cut (past `ui.header_max_height`, or squashed by the
+docstring view), `s` shows the whole signature over the frame: the same
+colours, `=…` marks and lit parameter as the header, titled `signature`, or
+`signature [i/n]` on an overloaded callable. It hangs from the header pane and
+grows away from the line of code, leaving the panes under it their sizes. The
+row keys do nothing while it shows; `s`, `q` and <Esc> close it, <C-d> and
+<C-u> scroll it when it is taller than the room, and `?` swaps it for help.
+`s` does nothing when the header shows the whole signature already, and every
+open starts without it.
 
 ==============================================================================
 7. CONFIGURATION                                           *typescope-config*
@@ -242,6 +256,7 @@ Defaults in full: >lua
         max_width = 0.5,
         max_height = 20,
         min_height = { header = 1, outline = 5, inspector = 1 },
+        header_max_height = 4,
         border = "rounded",
         docstring = true,
         hint = true,
@@ -259,6 +274,7 @@ Defaults in full: >lua
         llm_generate = "e",
         close = "q",
         help = "?",
+        signature = "s",
       },
     })
 <
@@ -308,6 +324,16 @@ ui.min_height ~
     the minimums, the outline, then the header, then the inspector give way,
     down to a row each; the float still opens with as few as three rows.
 
+                                           *typescope-ui-header-max-height*
+ui.header_max_height ~
+    Default 4. The most content rows the header takes; a shorter signature
+    stays shorter. Past it the header keeps the required parameters, then
+    the optional ones in signature order while they fit, and marks each gap
+    where parameters were left out: `…` inside, `…+N` at the last, N counting
+    every hidden parameter (|typescope-header|). `s` shows the whole
+    signature (|typescope-signature-view|). Any integer below 1 turns the cap
+    off; anything else that is not an integer is a setup error.
+
                                                           *typescope-ui-hint*
 ui.hint ~
     A virtual-text "▸ typescope" marker on call lines that resolved, so you
@@ -332,9 +358,16 @@ put while the outline scrolls. On an overloaded callable it shows the overload
 group the cursor is in, and its bottom border carries that group's `[i/n]`,
 with `✓` beside it when the group is the matched overload (the one the call at
 the cursor resolves to). `[i/n]` keeps its column whether or not `✓` shows.
-The header's height is fixed at the tallest group's wrapped signature, so the
-outline never shifts as you cross groups; a signature that cannot fit is cut
-from the middle, keeping its start and its return type.
+The header's height is fixed at the tallest group's wrapped signature, up to
+`ui.header_max_height`, so the outline never shifts as you cross groups. A
+signature that cannot fit keeps its required parameters, then its optional
+ones in order while they fit, in their places: `f(a, b=1, *, c)` can keep `a`
+and `c`, showing `f(a, …, *, c)`. Each gap is marked `…`, the last `…+N`, N
+counting every hidden parameter, in `TypeScopeElided`. Required parameters
+that overrun alone are cut from the middle, keeping the start and the return
+type. When the outline cursor's parameter is hidden, the gap mark hiding it is
+lit instead, so the header holds still. `s` shows the whole signature
+(|typescope-signature-view|).
 
                                                       *typescope-outline-rows*
 The outline is one compact row per parameter (name, type, short default),
@@ -470,6 +503,7 @@ inherits your theme rather than overriding it.
     TypeScopeActive             LspSignatureActiveParameter
     TypeScopeMatched            DiagnosticOk
     TypeScopeTitle              FloatTitle
+    TypeScopeElided             DiagnosticWarn
 
 Override through `highlights`: >lua
 

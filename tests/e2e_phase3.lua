@@ -650,6 +650,7 @@ if ulines then
     check("...with the same `? help` footer", footer_of(hw) == " ? help ─")
     check("...listing the keys", htext:find("expand / collapse", 1, true) ~= nil)
     check("...but not the key that opened it", not htext:find("toggle this help", 1, true))
+    check("...including s for the whole signature", htext:find("s%s+the whole signature") ~= nil)
     check(
       "...the panes under it stay shown, at their sizes",
       vim.deep_equal(pane_heights(), heights_before) and shown(hwin) and shown(ts_win) and shown(iwin2)
@@ -854,6 +855,152 @@ do
   check("...and the header is whole again", vim.deep_equal(header(), head_before))
   require("typescope").close()
   require("typescope").setup({})
+  vim.fn.winrestview(view)
+end
+
+-- ui.header_max_height: past the cap the header keeps the required params,
+-- marks the gap `…+N` in TypeScopeElided (lit instead when it hides the
+-- cursor row's param), and s shows the whole signature as an overlay
+do
+  local view = vim.fn.winsaveview()
+  local function overlay(ft)
+    for _, w in ipairs(vim.api.nvim_list_wins()) do
+      if vim.bo[vim.api.nvim_win_get_buf(w)].filetype == ft then
+        return not vim.api.nvim_win_get_config(w).hide and w or nil
+      end
+    end
+  end
+  local function title_of(w)
+    local text = ""
+    for _, chunk in ipairs(vim.api.nvim_win_get_config(w).title or {}) do
+      text = text .. chunk[1]
+    end
+    return text
+  end
+  local function marks_of(w, group)
+    local buf, out = vim.api.nvim_win_get_buf(w), {}
+    local text = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    for _, m in ipairs(vim.api.nvim_buf_get_extmarks(buf, -1, 0, -1, { details = true })) do
+      if m[4].hl_group == group then
+        table.insert(out, text[m[2] + 1]:sub(m[3] + 1, m[4].end_col))
+      end
+    end
+    return out
+  end
+  local function open_at_call()
+    vim.api.nvim_set_current_win(vim.fn.bufwinid(bufnr))
+    vim.api.nvim_win_set_cursor(0, { call_line, 12 })
+    require("typescope").open()
+    vim.wait(2000, function()
+      return float_lines() ~= nil
+    end)
+  end
+  require("typescope").setup({ ui = { max_width = 40, header_max_height = 1 } })
+  open_at_call()
+  local head, hw = header()
+  check(
+    "a header past ui.header_max_height keeps the required param, …+N at the gap",
+    head ~= nil
+      and vim.api.nvim_win_get_config(hw).height == 1
+      and vim.deep_equal(head, { "create_server(config, …+1) -> Response" })
+  )
+  check(
+    "...the gap mark in TypeScopeElided",
+    hw ~= nil and vim.deep_equal(marks_of(hw, "TypeScopeElided"), { "…+1" })
+  )
+  inspector_of("·%s+timeout%s")
+  check(
+    "the cursor on the hidden param lights its gap mark, the header unchanged",
+    vim.deep_equal(marks_of(hw, "TypeScopeActive"), { "…+1" }) and vim.deep_equal(header(), head)
+  )
+  local _, ow = float_lines()
+  local _, iw = inspector()
+  local function heights()
+    return {
+      vim.api.nvim_win_get_config(hw).height,
+      vim.api.nvim_win_get_config(ow).height,
+      vim.api.nvim_win_get_config(iw).height,
+    }
+  end
+  local before, row_before = heights(), vim.api.nvim_win_get_cursor(ow)[1]
+  local outline_before = float_lines()
+  vim.api.nvim_feedkeys("s", "x", false)
+  local sw = overlay("typescope_signature")
+  check("s: the full signature opens over the frame", sw ~= nil)
+  if sw then
+    local sc = vim.api.nvim_win_get_config(sw)
+    local text = table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(sw), 0, -1, false), "\n")
+    check("...titled `signature`", title_of(sw) == " signature ")
+    check("...drawn over the panes", sc.zindex > vim.api.nvim_win_get_config(ow).zindex)
+    check("...with the same `? help` footer", footer_of(sw) == " ? help ─")
+    check("...holding the whole header", text:find("config", 1, true) and text:find("timeout=…", 1, true))
+    check("...with no gap mark", #marks_of(sw, "TypeScopeElided") == 0)
+    check("...and the selected param lit", vim.deep_equal(marks_of(sw, "TypeScopeActive"), { "timeout" }))
+    check("...the panes under it at their sizes", vim.deep_equal(heights(), before))
+    check("...focus stays in the outline", vim.api.nvim_get_current_win() == ow)
+    for _, key in ipairs({ "j", "k", "<CR>", "l", "h", "H" }) do
+      vim.api.nvim_feedkeys(vim.keycode(key), "x", false)
+    end
+    check(
+      "row keys don't move or change the outline under it",
+      vim.api.nvim_win_get_cursor(ow)[1] == row_before and vim.deep_equal(float_lines(), outline_before)
+    )
+    vim.api.nvim_feedkeys("s", "x", false)
+    check("s again closes it", overlay("typescope_signature") == nil and float_lines() ~= nil)
+    vim.api.nvim_feedkeys("s", "x", false)
+    vim.api.nvim_feedkeys("?", "x", false)
+    check("? swaps it for help", overlay("typescope_signature") == nil and overlay("typescope_help") ~= nil)
+    vim.api.nvim_feedkeys("s", "x", false)
+    check("...and s swaps help for it", overlay("typescope_signature") ~= nil and overlay("typescope_help") == nil)
+    for _, key in ipairs({ "q", "<Esc>" }) do
+      if not overlay("typescope_signature") then
+        open_at_call()
+        vim.api.nvim_set_current_win(select(2, float_lines()))
+        vim.api.nvim_feedkeys("s", "x", false)
+      end
+      vim.api.nvim_feedkeys(vim.keycode(key), "x", false)
+      check(key .. " closes the float from the signature overlay", float_lines() == nil and #all_floats() == 0)
+    end
+    open_at_call()
+    check("the overlay is closed again on every open", overlay("typescope_signature") == nil)
+  end
+  require("typescope").close()
+
+  -- taller than the room: <C-d>/<C-u> scroll it. A narrow frame wraps the
+  -- header to a row per param; a short screen leaves the overlay fewer rows
+  local lines_before = vim.o.lines
+  require("typescope").setup({ ui = { max_width = 16, header_max_height = 1 } })
+  vim.o.lines = 14
+  vim.api.nvim_set_current_win(vim.fn.bufwinid(bufnr))
+  vim.api.nvim_win_set_cursor(0, { call_line, 12 })
+  vim.cmd("normal! zb")
+  require("typescope").open()
+  vim.wait(2000, function()
+    return float_lines() ~= nil
+  end)
+  vim.api.nvim_set_current_win(select(2, float_lines()))
+  vim.api.nvim_feedkeys("s", "x", false)
+  sw = overlay("typescope_signature")
+  local slines = sw and vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(sw), 0, -1, false) or {}
+  check("an overlay taller than the room is cut to it", sw ~= nil and vim.api.nvim_win_get_config(sw).height < #slines)
+  if sw then
+    vim.api.nvim_feedkeys(vim.keycode("<C-d>"), "x", false)
+    local top = vim.fn.getwininfo(sw)[1].topline
+    check("...<C-d> scrolls it", top > 1)
+    vim.api.nvim_feedkeys(vim.keycode("<C-u>"), "x", false)
+    check("...and <C-u> back", vim.fn.getwininfo(sw)[1].topline < top)
+  end
+  require("typescope").close()
+  vim.o.lines = lines_before
+
+  -- a header under the cap: s does nothing
+  require("typescope").setup({})
+  open_at_call()
+  vim.api.nvim_set_current_win(select(2, float_lines()))
+  local insp = inspector_text()
+  vim.api.nvim_feedkeys("s", "x", false)
+  check("s does nothing when the header isn't cut", overlay("typescope_signature") == nil and inspector_text() == insp)
+  require("typescope").close()
   vim.fn.winrestview(view)
 end
 

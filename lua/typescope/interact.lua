@@ -53,6 +53,7 @@ local function help_content()
     { km.collapse_all, "collapse all" },
     { km.llm_generate, "example for this row, from the model" },
     { km.docstring, "docstring: open / back" },
+    { km.signature, "the whole signature, when the header is cut" },
     { km.close .. " / <Esc>", "close" },
   }
   local lines, highlights = {}, {}
@@ -74,7 +75,8 @@ function M.attach(args)
     roots = args.roots,
     opts = args.opts,
     width = args.width,
-    show_help = false,
+    -- drawn over the frame, one at a time: "help" (?) or "signature" (s)
+    overlay = nil, ---@type "help"|"signature"|nil
     -- the docked inspector shows inspector_id's details, and asks for as many
     -- rows as the tallest it has been (inspector_h) — the rows above it must
     -- not move as the cursor goes from a one-line node to a four-line one
@@ -428,7 +430,9 @@ function M.attach(args)
       header_lit = param_of(st.inspector_id),
       -- help (?) is drawn over the frame, which goes on being laid out (and
       -- animated) under it exactly as it was
-      help = st.show_help and help_content() or nil,
+      help = st.overlay == "help" and help_content() or nil,
+      -- ...and so is the whole signature (s), when the header is cut
+      signature = st.overlay == "signature" or nil,
     })
     if focus_id then
       for lnum, id in pairs(st.result.line_to_node) do
@@ -453,11 +457,11 @@ function M.attach(args)
   local function map(lhs, fn)
     vim.keymap.set("n", lhs, fn, { buffer = st.handle.buf, nowait = true })
   end
-  --- A key that acts on the outline's rows: inert while help covers them,
-  --- rather than moving or changing rows the user can't see.
+  --- A key that acts on the outline's rows: inert while an overlay covers
+  --- them, rather than moving or changing rows the user can't see.
   local function row_map(lhs, fn)
     map(lhs, function()
-      if not st.show_help then
+      if not st.overlay then
         fn()
       end
     end)
@@ -564,7 +568,19 @@ function M.attach(args)
   -- help opens over whichever view the loupe shows, and closes back onto it;
   -- the rows under it never moved, so there is nothing to put back
   map(km.help, function()
-    st.show_help = not st.show_help
+    st.overlay = st.overlay ~= "help" and "help" or nil
+    refresh()
+  end)
+  -- the header's group whole, over the frame; only when the header is cut
+  -- (past ui.header_max_height, or squashed by the docstring view)
+  map(km.signature, function()
+    if st.overlay == "signature" then
+      st.overlay = nil
+    elseif float.header_cut(st.handle) then
+      st.overlay = "signature"
+    else
+      return
+    end
     refresh()
   end)
   -- Locate a param's definition line inside the rendered docstring section.
@@ -623,7 +639,7 @@ function M.attach(args)
   ---@param fn fun()
   local function in_loupe(fn)
     local p = st.handle.inspector
-    if st.show_doc and not st.show_help and p and vim.api.nvim_win_is_valid(p.win) then
+    if st.show_doc and not st.overlay and p and vim.api.nvim_win_is_valid(p.win) then
       vim.api.nvim_win_call(p.win, fn)
       return true
     end
@@ -643,10 +659,10 @@ function M.attach(args)
   end
 
   map(km.docstring, function()
-    -- from help: help closes onto the docstring view, which is already
+    -- from an overlay: it closes onto the docstring view, which is already
     -- under it or opens below
-    if st.show_help and st.show_doc then
-      st.show_help = false
+    if st.overlay and st.show_doc then
+      st.overlay = nil
       refresh()
       return
     end
@@ -671,17 +687,26 @@ function M.attach(args)
     if not ok then
       error(r)
     end
-    st.doc, st.show_doc, st.show_help = r, true, false
+    st.doc, st.show_doc, st.overlay = r, true, nil
     refresh()
     -- hovering a param opens the docs where they define it
     scroll_doc(node_under_cursor())
   end)
 
-  -- <C-d>/<C-u> scroll the docstring view from the outline; elsewhere they
-  -- scroll the outline as usual
+  -- <C-d>/<C-u> scroll the full signature while it shows, the docstring
+  -- view from the outline; elsewhere they scroll the outline as usual
   for _, key in ipairs({ "<C-d>", "<C-u>" }) do
-    row_map(key, function()
+    map(key, function()
       local keys = vim.keycode(key)
+      local sig = st.handle.signature
+      if st.overlay == "signature" and sig and vim.api.nvim_win_is_valid(sig.win) then
+        vim.api.nvim_win_call(sig.win, function()
+          vim.cmd("normal! " .. keys)
+        end)
+        return
+      elseif st.overlay then
+        return
+      end
       if not in_loupe(function()
         vim.cmd("normal! " .. keys)
       end) then
@@ -845,7 +870,7 @@ function M.attach(args)
     buffer = st.handle.buf,
     desc = "TypeScope: the inspector follows the cursor",
     callback = function()
-      if not st.result or st.show_help or not vim.api.nvim_win_is_valid(st.handle.win) then
+      if not st.result or st.overlay or not vim.api.nvim_win_is_valid(st.handle.win) then
         return
       end
       local id = st.result.line_to_node[vim.api.nvim_win_get_cursor(st.handle.win)[1]]

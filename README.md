@@ -112,11 +112,14 @@ Bind these rather than writing Lua callbacks:
 | `j` / `k` | Move by node, not by line |
 | `e` | Ask the model for this row's example, and its neighbours' (needs ollama) |
 | `d` | Docstring: show it in the loupe in place of the inspector, or go back |
-| `<C-d>` / `<C-u>` | Scroll the docstring view (the outline otherwise) |
+| `<C-d>` / `<C-u>` | Scroll the docstring view (the outline otherwise), or the full signature while it shows |
+| `s` | Show the whole signature when the header is cut, or close it |
 | `q` / `<Esc>` | Close, from any view |
 | `?` | Open the help view, or close it |
 
 The help view is generated from your actual `keymaps` config, so it stays correct if you rebind anything. It's drawn over the frame, titled `typescope help`, and the panes under it keep their sizes. It grows away from the line you're editing: up to the frame's top and then down past its bottom when the frame is below the cursor, up past the frame's top when it's above. The row keys do nothing while it's up, so the outline can't move underneath it. `?` again goes back to whatever was showing; `d` goes straight to the docstring view.
+
+When the header is cut, `s` shows the whole signature the same way: over the frame, titled `signature` (`signature [i/n]` on an overloaded callable), with the same colours and lit parameter as the header. It hangs from the header and grows away from your code line, and the panes under it keep their sizes. Row keys do nothing while it's up; `s`, `q` and `<Esc>` close it, `<C-d>` / `<C-u>` scroll it when it's taller than the room, and `?` swaps it for help. With the whole signature already in the header, `s` does nothing.
 
 ## Configuration
 
@@ -157,6 +160,7 @@ require("typescope").setup({
     max_width = 0.5,         -- <=1: fraction of editor width; >1: absolute columns
     max_height = 20,         -- content rows the panes share; borders are extra
     min_height = { header = 1, outline = 5, inspector = 1 }, -- rows each pane keeps before leftovers are shared
+    header_max_height = 4,   -- the header's rows at most; < 1 = no cap (s shows the rest)
     border = "rounded",      -- any nvim float border value
     docstring = true,        -- d shows the docstring view; false turns it off
     hint = true,             -- virtual-text "▸ typescope" marker on resolved call lines
@@ -174,6 +178,7 @@ require("typescope").setup({
     llm_generate = "e",
     close = "q",
     help = "?",
+    signature = "s",
   },
 })
 ```
@@ -190,11 +195,15 @@ The `trigger = "hover"` auto-open never steals focus in either mode.
 
 `max_height` counts the content rows the frame's panes share; borders and seams come on top. `min_height` is what each pane keeps before the rest is shared out. A pane with less content than its minimum shrinks to fit it, so a one-parameter function doesn't get five empty outline rows. Leftover rows go to the header until its signature is fully wrapped, then to the inspector up to five rows, then to the outline. On a screen too short for the minimums, the outline, then the header, then the inspector give way, down to a row each; the float still opens with as few as three rows.
 
+### `ui.header_max_height`
+
+The most rows the header takes, 4 by default; a shorter signature stays shorter. A callable with dozens of parameters (`uvicorn.run`, SQLAlchemy's `relationship`) would otherwise wrap to a dozen header rows and leave the outline its minimum. Past the cap the header keeps every required parameter, then the optional ones in signature order while they fit, and marks the gaps (see [The float](#the-float)); `s` shows the whole thing. Any integer below 1 turns the cap off.
+
 ## The float
 
 The float is a frame of three panes stacked on one side of your cursor: the **header**, the **outline**, and the **loupe**. Each seam between two panes is a full bottom border followed by a full top border, in your `ui.border` style, because the panes do different jobs. The frame opens below the cursor, or above it when there's more room there, and stays on that side until it closes. Its bottom border carries `? help` at the right end, whatever view is showing.
 
-The **header** is the signature, wrapped onto as many rows as it needs, and it stays put while the outline scrolls. On an overloaded callable it follows the overload group your cursor is in, and its bottom border carries that group's `[i/n]`, with a `✓` beside it when the group is the matched overload (the one your call actually resolves to). `[i/n]` keeps its column whether or not the `✓` is there. The header's height is fixed at the tallest group's signature, so the outline doesn't jump as you cross groups; a signature that can't fit is cut from the middle, keeping its start and its return type.
+The **header** is the signature, wrapped onto as many rows as it needs, and it stays put while the outline scrolls. On an overloaded callable it follows the overload group your cursor is in, and its bottom border carries that group's `[i/n]`, with a `✓` beside it when the group is the matched overload (the one your call actually resolves to). `[i/n]` keeps its column whether or not the `✓` is there. The header's height is fixed at the tallest group's signature, up to `ui.header_max_height`, so the outline doesn't jump as you cross groups. A signature that can't fit keeps its required parameters, then its optional ones in order while they fit, each in its place: `f(a, b=1, *, c)` can show as `f(a, …, *, c)`. Inner gaps are marked `…` and the last `…+N`, N counting every hidden parameter, in `TypeScopeElided` (linked to `DiagnosticWarn`). Required parameters that overrun alone are cut from the middle, keeping the start and the return type. If the parameter your outline cursor is on is hidden, the gap mark hiding it lights up instead, so the header holds still; `s` shows the whole signature.
 
 The **outline** is one compact row per parameter, with fields, members and the return type beneath. Overload group rows keep their own `[i/n]`, so you can still see where groups begin as you scroll.
 
@@ -265,7 +274,7 @@ The inspector shows a plausible example value for each leaf.
 
 Every group links to something sensible in your colorscheme, so TypeScope simply inherits your theme. Override any of them through `highlights`:
 
-`TypeScopeField` `TypeScopeProperty` `TypeScopeEnumMember` `TypeScopeGroup` `TypeScopeParam` `TypeScopeType` `TypeScopeDefault` `TypeScopeExample` `TypeScopeExamplePending` `TypeScopeChrome` `TypeScopeKeyword` `TypeScopeBadge` `TypeScopeEvaluated` `TypeScopeHeader` `TypeScopeHeaderDim` `TypeScopeDocstring` `TypeScopeUnresolved` `TypeScopeHint` `TypeScopeActive` `TypeScopeMatched` `TypeScopeTitle`
+`TypeScopeField` `TypeScopeProperty` `TypeScopeEnumMember` `TypeScopeGroup` `TypeScopeParam` `TypeScopeType` `TypeScopeDefault` `TypeScopeExample` `TypeScopeExamplePending` `TypeScopeChrome` `TypeScopeKeyword` `TypeScopeBadge` `TypeScopeEvaluated` `TypeScopeHeader` `TypeScopeHeaderDim` `TypeScopeDocstring` `TypeScopeUnresolved` `TypeScopeHint` `TypeScopeActive` `TypeScopeMatched` `TypeScopeTitle` `TypeScopeElided`
 
 ```lua
 require("typescope").setup({

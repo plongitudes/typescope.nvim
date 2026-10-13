@@ -45,6 +45,15 @@ check("anything else is an error", not pcall(config.setup, { ui = { docstring = 
 check("ui.max_height takes a positive integer", setup({ ui = { max_height = 12 } }).ui.max_height == 12)
 check("...and rejects anything else", not pcall(config.setup, { ui = { max_height = 0 } }))
 
+-- the header's cap: content rows, < 1 = no cap
+check("ui.header_max_height defaults to 4", setup({}).ui.header_max_height == 4)
+check("...takes a positive integer", setup({ ui = { header_max_height = 6 } }).ui.header_max_height == 6)
+check("...0 means no cap, and is no error", setup({ ui = { header_max_height = 0 } }).ui.header_max_height == 0)
+check("...so does a negative", setup({ ui = { header_max_height = -1 } }).ui.header_max_height == -1)
+check("...a fraction is an error", not pcall(config.setup, { ui = { header_max_height = 2.5 } }))
+check("...so is a string", not pcall(config.setup, { ui = { header_max_height = "4" } }))
+check("keymaps.signature defaults to s", setup({}).keymaps.signature == "s")
+
 -- the frame's pane minimums: header, outline, inspector
 check(
   "ui.min_height defaults to header 1, outline 5, inspector 1",

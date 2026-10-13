@@ -414,6 +414,46 @@ local layout_cases = {
     { help_row = 13 - 6, help_h = 4 },
   },
   { "help without a border: no box to add", { help = 4, border = "none" }, { help_row = 12 - 4, help_h = 4 } },
+  -- ui.header_max_height caps the header's rows; a short signature stays short
+  { "the header is capped", { header = 6, header_cap = 4 }, { header_h = 4, outline_h = 8, inspector_h = 3 } },
+  { "...a header under the cap keeps its rows", { header = 2, header_cap = 4 }, { header_h = 2 } },
+  { "...a cap under 1 is no cap", { header = 6, header_cap = 0 }, { header_h = 6 } },
+  {
+    "...and the rows it frees go on down the leftover order",
+    { max_height = 10, header = 6, outline = 8, inspector = 1, header_cap = 2 },
+    { header_h = 2, inspector_h = 1, outline_h = 7 },
+  },
+  {
+    "...the docstring view squashes a capped header no further than its floor",
+    { docstring = 30, header = 6, header_cap = 3 },
+    { header_h = 1, outline_h = 5, inspector_h = 14 },
+  },
+  -- the full signature (s): an overlay anchored on the header pane, growing
+  -- away from the code line; the panes under it keep their sizes. The frame
+  -- is 3 + 10 + 5 = 18 rows; the overlay's box adds 2.
+  { "no signature, no overlay", {}, { signature = "none" } },
+  { "no header, no signature overlay", { signature = 6, header = false }, { signature = "none" } },
+  {
+    "the signature leaves every pane its size and place",
+    { signature = 6 },
+    { header_h = 1, outline_h = 8, inspector_h = 3, header_row = 0, outline_row = 3, inspector_row = 13, top = 6 },
+  },
+  {
+    "signature below the cursor: it hangs from the header's top and grows down",
+    { signature = 6 },
+    { signature_row = 0, signature_h = 6, signature_footer = true, signature_border = "rounded" },
+  },
+  { "...stopping at the screen edge", { signature = 40 }, { signature_row = 0, signature_h = 40 - 6 - 2 } },
+  {
+    "signature above the cursor: it sits on the header's bottom edge and grows up",
+    { signature = 6, row = 30 },
+    { below = false, top = 30 - 18, signature_row = 3 - 8, signature_h = 6 },
+  },
+  {
+    "...stopping at the screen's top",
+    { signature = 40, row = 30 },
+    { signature_row = -(30 - 18), signature_h = 30 - 18 + 3 - 2 },
+  },
 }
 
 for _, case in ipairs(layout_cases) do
@@ -433,9 +473,9 @@ for _, case in ipairs(layout_cases) do
     rule = got.rule or "none",
     content = 0,
   }
-  for _, pane in ipairs({ "header", "outline", "inspector", "help" }) do
+  for _, pane in ipairs({ "header", "outline", "inspector", "help", "signature" }) do
     local p = got[pane]
-    if p and pane ~= "help" then
+    if p and pane ~= "help" and pane ~= "signature" then
       view.content = view.content + p.height
       -- the frame's outer rows: down to the last pane's bottom edge
       view.extent = p.row + p.height + (got.rule and 2 or 0)
@@ -615,6 +655,109 @@ do
   })
   check("a tall header gets what the budget allots", h.header.height == 9 - 3 - 1)
   check("...only the groups past it are fit", fitted.a == nil and fitted.b == 5)
+  float.close(h)
+end
+
+-- ui.header_max_height: the header is capped at open, and every group past
+-- the cap is fit to it; the full signature shows over the frame on demand
+do
+  local fitted = {}
+  local function group(name, n)
+    local lines = {}
+    for i = 1, n do
+      lines[i] = name .. i
+    end
+    return {
+      lines = lines,
+      highlights = {},
+      fit = function(rows, lit)
+        fitted[name] = rows
+        local out = vim.list_slice(lines, 1, rows)
+        return {
+          lines = out,
+          highlights = lit and { { line = 0, col_start = 0, col_end = 1, group = "TypeScopeActive" } } or {},
+        }
+      end,
+      tag = { { (" [%s] "):format(name), "TypeScopeBadge" } },
+    }
+  end
+  local function open(groups, cap)
+    return float.open({
+      lines = { "a", "b", "c" },
+      highlights = {},
+      width = 20,
+      height = 3,
+      relative = "editor",
+      row = 0,
+      col = 0,
+      border = "rounded",
+      frame = { row = 2, col = 4, max_height = 20, header_max_height = cap },
+      headers = groups,
+    })
+  end
+  local base = { highlights = {}, width = 20, height = 3, footer = { { " ? help ", "TypeScopeHint" } } }
+  local h = open({ group("a", 2), group("b", 8) }, 3)
+  float.update(h, base)
+  check("the header is capped at header_max_height", h.header.height == 3)
+  check("...only the groups past it are fit", fitted.a == nil and fitted.b == 3)
+  check("...and the shown group under the cap is not cut", float.header_cut(h) == false)
+  float.update(h, vim.tbl_extend("force", base, { header = 2 }))
+  check("a group past the cap is cut", float.header_cut(h) == true)
+  local panes = {}
+  for _, w in ipairs({ h.win, h.header.win, h.inspector.win }) do
+    panes[w] = vim.api.nvim_win_get_config(w)
+  end
+  float.update(h, vim.tbl_extend("force", base, { header = 2, signature = true, header_lit = "b" }))
+  local sig = h.signature
+  local cfg = sig and vim.api.nvim_win_get_config(sig.win)
+  check("signature = true opens the overlay", cfg ~= nil and cfg.hide == false)
+  check("...findable by filetype", sig ~= nil and vim.bo[sig.buf].filetype == "typescope_signature")
+  check(
+    "...holding the group's whole header",
+    sig ~= nil
+      and vim.deep_equal(
+        vim.api.nvim_buf_get_lines(sig.buf, 0, -1, false),
+        { "b1", "b2", "b3", "b4", "b5", "b6", "b7", "b8" }
+      )
+  )
+  local lit = 0
+  for _, m in ipairs(sig and vim.api.nvim_buf_get_extmarks(sig.buf, -1, 0, -1, { details = true }) or {}) do
+    lit = lit + (m[4].hl_group == "TypeScopeActive" and 1 or 0)
+  end
+  check("...with the selected param lit", lit == 1)
+  check("...over the panes", cfg ~= nil and cfg.zindex > vim.api.nvim_win_get_config(h.win).zindex)
+  local title = ""
+  for _, chunk in ipairs(cfg and type(cfg.title) == "table" and cfg.title or {}) do
+    title = title .. chunk[1]
+  end
+  check("...titled with its overload group", title == " signature [2/2] ")
+  local footer = ""
+  for _, chunk in ipairs(cfg and type(cfg.footer) == "table" and cfg.footer or {}) do
+    footer = footer .. chunk[1]
+  end
+  check("...and the same ? help footer", footer == " ? help ─")
+  local still = true
+  for w, before in pairs(panes) do
+    local now = vim.api.nvim_win_get_config(w)
+    still = still and now.height == before.height and now.row == before.row
+  end
+  check("...the panes under it unmoved", still)
+  float.update(h, vim.tbl_extend("force", base, { header = 2 }))
+  check("signature = nil hides it", vim.api.nvim_win_get_config(sig.win).hide == true)
+  float.close(h)
+  check("closing the frame closes it too", not vim.api.nvim_win_is_valid(sig.win))
+
+  h = open({ group("c", 8) }, 3)
+  float.update(h, vim.tbl_extend("force", base, { signature = true }))
+  title = ""
+  for _, chunk in ipairs(vim.api.nvim_win_get_config(h.signature.win).title or {}) do
+    title = title .. chunk[1]
+  end
+  check("a plain callable's overlay is titled signature", title == " signature ")
+  float.close(h)
+
+  h = open({ group("d", 8) }, 0)
+  check("a cap under 1 leaves the header whole", h.header.height == 8 and float.header_cut(h) == false)
   float.close(h)
 end
 

@@ -5,6 +5,7 @@
 ---@field header? typescope.HeaderPane the frame's header pane, above the outline (the handle's own buf/win are the outline)
 ---@field inspector? { buf: integer, win: integer } the frame's loupe, below the outline
 ---@field help? { buf: integer, win: integer } the help view, drawn over the frame; opened by the first update that shows it
+---@field signature? { buf: integer, win: integer } the full signature, drawn over the frame; opened by the first update that shows it
 ---@field budget? integer content rows the frame's panes may share; fixed at open so the frame never outgrows its side of the cursor
 ---@field frame? typescope.Frame
 
@@ -12,7 +13,7 @@
 ---@field buf integer
 ---@field win integer
 ---@field height integer content rows, fixed at open: the tallest group's
----@field groups typescope.HeaderContent[] one per overload group, each fit to `height`
+---@field groups typescope.HeaderContent[] one per overload group, each fit to `height`; `full` keeps it whole
 ---@field shown? integer the group on display
 ---@field rows? integer the rows it is drawn to: `height`, or fewer while the docstring view squashes it
 ---@field lit? string the param lit on display: the outline cursor's
@@ -372,6 +373,8 @@ end
 ---@field inspector? integer the inspector's content rows; nil hides the loupe (help) and the outline closes the frame
 ---@field docstring? integer the docstring view's rows: the loupe shows it, grown from the inspector's rows toward the budget (needs `inspector`)
 ---@field help? integer the help view's rows: an overlay over the frame, which leaves the panes as they are
+---@field signature? integer the full signature's rows: an overlay anchored on the header pane (needs `header`)
+---@field header_cap? integer the most rows the header takes (ui.header_max_height); nil or < 1: no cap
 
 ---@class typescope.PaneLayout
 ---@field row integer the pane's outer top edge, as an offset from the frame's top
@@ -390,6 +393,7 @@ end
 ---@field outline typescope.PaneLayout
 ---@field inspector? typescope.PaneLayout nil while hidden
 ---@field help? typescope.PaneLayout the help overlay; its row may be negative (above the frame's top)
+---@field signature? typescope.PaneLayout the full signature's overlay; its row may be negative too
 
 --- Where every pane of the frame goes: the side of the cursor, the content
 --- budget there, and each pane's rows. Pure — reads no editor state, opens
@@ -404,6 +408,10 @@ function M.frame_layout(spec)
     if spec[name] then
       table.insert(stack, { name = name, rows = spec[name] })
     end
+  end
+  -- a short signature stays short; past the cap, s shows the rest
+  if stack[1] and stack[1].name == "header" and spec.header_cap and spec.header_cap >= 1 then
+    stack[1].rows = math.min(stack[1].rows, spec.header_cap)
   end
   local chrome = 2 * edge * #stack
   local below_room = spec.lines - spec.row - 1
@@ -449,6 +457,28 @@ function M.frame_layout(spec)
       footer = true,
     }
   end
+  if spec.signature and layout.header then
+    -- also over the frame, but hung from the header: under the cursor it
+    -- starts at the frame's top and grows down; above, it sits on the
+    -- header's bottom edge and grows up, so it never covers the code line
+    local want = math.max(1, spec.signature) + 2 * edge
+    local hdr = layout.header
+    local outer, row
+    if below then
+      outer = math.min(want, below_room)
+      row = hdr.row
+    else
+      local bottom = hdr.row + hdr.height + 2 * edge
+      outer = math.min(want, layout.top + bottom)
+      row = bottom - outer
+    end
+    layout.signature = {
+      row = row,
+      height = math.max(1, outer - 2 * edge),
+      border = spec.border,
+      footer = true,
+    }
+  end
   return layout
 end
 
@@ -472,7 +502,7 @@ end
 ---@field lines string[] the header wrapped to as many rows as it needs
 ---@field highlights typescope.Highlight[]
 ---@field ts_injections? typescope.Injection[]
----@field fit? fun(rows: integer, lit?: string): typescope.HeaderContent the header redrawn to fit `rows` (middle-elided), with the param `lit` lit
+---@field fit? fun(rows: integer, lit?: string): typescope.HeaderContent the header redrawn to fit `rows` (required params, then optional ones, gaps marked), with the param `lit` lit
 ---@field lit? string the param lit in `lines`/`highlights` (nil: none)
 ---@field tag? { [1]: string, [2]: string }[] chunks for the header's bottom border, right-aligned (an overload group's `✓ [i/n]`)
 
@@ -483,7 +513,7 @@ end
 ---@field lang? string treesitter language for injected snippet highlighting
 ---@field title? string
 ---@field footer? string|{ [1]: string, [2]: string }[] text, or chunks with highlight groups
----@field frame? { row: integer, col: integer, max_height: integer, min_height?: table<string, integer> } open as the K float's frame (header, outline, inspector); row/col are the source cursor's 0-indexed SCREEN position the frame hangs from, max_height the content rows the panes may share (ui.max_height), min_height each pane's minimum (ui.min_height)
+---@field frame? { row: integer, col: integer, max_height: integer, min_height?: table<string, integer>, header_max_height?: integer } open as the K float's frame (header, outline, inspector); row/col are the source cursor's 0-indexed SCREEN position the frame hangs from, max_height the content rows the panes may share (ui.max_height), min_height each pane's minimum (ui.min_height), header_max_height the header's cap (ui.header_max_height; < 1 none)
 ---@field headers? typescope.HeaderContent[] the frame's header pane, one per overload group (a plain callable has one); nil opens the frame without one
 ---@field header_shown? integer the group the header opens on (default 1)
 ---@field row integer
@@ -529,8 +559,8 @@ end
 
 --- Draw overload group `i` into the header pane, fit to `rows` (default: its
 --- height), with the param `lit` lit. The docstring view can squash the
---- header below its height, and then the group is redrawn cut in the middle
---- rather than showing only its first rows; the lit param follows the
+--- header below its height, and then the group is redrawn cut by the same
+--- rule as the cap rather than showing only its first rows; the lit param follows the
 --- outline's cursor. Each redraw is kept, since the frame redraws 60 times a
 --- second, and nothing is drawn while group, rows and lit param hold.
 --- Its tag rides the pane's bottom border, which the next layout places.
@@ -610,6 +640,7 @@ function M.open(opts)
       max_height = opts.frame.max_height,
       width = opts.width,
       header = tallest,
+      header_cap = opts.frame.header_max_height,
       outline = opts.height,
       inspector = 1,
     })
@@ -620,12 +651,16 @@ function M.open(opts)
     handle.inspector = pane_window("typescope_inspector", opts.border)
     if tallest then
       -- the header's height is fixed here, for the life of the float: as
-      -- many rows as the tallest group wraps to, unless the budget allots it
-      -- fewer, and then every group past them is redrawn cut to them
+      -- many rows as the tallest group wraps to, unless the cap or the
+      -- budget allots it fewer, and then every group past them is redrawn
+      -- cut to them. `full` is what s shows.
       local rows = placed.header.height
       local groups = {}
       for i, head in ipairs(opts.headers) do
-        groups[i] = #head.lines > rows and head.fit and vim.tbl_extend("keep", head.fit(rows, head.lit), head) or head
+        groups[i] = #head.lines > rows
+            and head.fit
+            and vim.tbl_extend("keep", head.fit(rows, head.lit), { full = head }, head)
+          or vim.tbl_extend("keep", { full = head }, head)
       end
       handle.header = pane_window("typescope_header", opts.border)
       handle.header.height = rows
@@ -636,6 +671,30 @@ function M.open(opts)
     end
   end
   return handle
+end
+
+--- Whether the header leaves out part of the group it shows: past the cap,
+--- or squashed by the docstring view. Only then has s anything to show.
+---@param handle typescope.FloatHandle
+---@return boolean
+function M.header_cut(handle)
+  local hdr = handle.header
+  local head = hdr and hdr.groups[hdr.shown]
+  return head ~= nil and #head.full.lines > (hdr.rows or hdr.height)
+end
+
+--- The group the header shows, whole, with the param `lit` lit: the full
+--- signature's overlay.
+---@param hdr typescope.HeaderPane
+---@return typescope.HeaderContent
+local function full_header(hdr)
+  local full = hdr.groups[hdr.shown].full
+  if full.fit and hdr.lit ~= full.lit then
+    local key = ("full:%d:%s"):format(hdr.shown, hdr.lit or "")
+    hdr.cuts[key] = hdr.cuts[key] or full.fit(#full.lines, hdr.lit)
+    return hdr.cuts[key]
+  end
+  return full
 end
 
 --- The rows the frame's panes get for this content, on the side and budget
@@ -694,7 +753,8 @@ end
 ---@param footer? { [1]: string, [2]: string }[]
 ---@param lang? string
 ---@param help? typescope.HelpUpdate
-local function layout(handle, width, outline_h, inspector, footer, lang, help)
+---@param signature? boolean the full signature over the frame
+local function layout(handle, width, outline_h, inspector, footer, lang, help, signature)
   local p = handle.inspector
   local open = inspector ~= nil and p ~= nil and vim.api.nvim_win_is_valid(p.win)
   local hdr = handle.header
@@ -706,6 +766,7 @@ local function layout(handle, width, outline_h, inspector, footer, lang, help)
     inspector = open and inspector.height or nil,
     docstring = open and inspector.docstring and #inspector.lines or nil,
     help = help and #help.lines or nil,
+    signature = signature and hdr and #hdr.groups[hdr.shown].full.lines or nil,
   })
   -- right-justified on a bottom edge, ending one rule glyph short of the
   -- corner: ╰────── ? help ─╯
@@ -757,6 +818,15 @@ local function layout(handle, width, outline_h, inspector, footer, lang, help)
   elseif handle.help then
     configure(handle.help.win, { hide = true }, "hidden")
   end
+  if placed.signature then
+    handle.signature = handle.signature or pane_window("typescope_signature", handle.frame.border, 60)
+    local full = full_header(hdr)
+    set_content(handle.signature.buf, full.lines, full.highlights, full.ts_injections, hdr.lang)
+    local title = #hdr.groups > 1 and (" signature [%d/%d] "):format(hdr.shown, #hdr.groups) or " signature "
+    place(handle.signature.win, placed.signature, nil, title)
+  elseif handle.signature then
+    configure(handle.signature.win, { hide = true }, "hidden")
+  end
   if not p or not vim.api.nvim_win_is_valid(p.win) then
     return
   end
@@ -771,7 +841,7 @@ end
 --- Swap content and resize in one synchronous block — no scheduling between
 --- buffer and window updates, so expand/collapse never shows a partial frame.
 ---@param handle typescope.FloatHandle
----@param opts { lines?: string[], highlights: typescope.Highlight[], ts_injections?: typescope.Injection[], lang?: string, width?: integer, height?: integer, title?: string, inspector?: typescope.InspectorUpdate, footer?: { [1]: string, [2]: string }[], header?: integer, header_lit?: string, help?: typescope.HelpUpdate } lines = nil: the outline's content is unchanged (only the inspector or the frame moved); header: the overload group the header shows (nil: unchanged); header_lit: the param the header lights (nil: none); help: the help view over the frame (nil: closed)
+---@param opts { lines?: string[], highlights: typescope.Highlight[], ts_injections?: typescope.Injection[], lang?: string, width?: integer, height?: integer, title?: string, inspector?: typescope.InspectorUpdate, footer?: { [1]: string, [2]: string }[], header?: integer, header_lit?: string, help?: typescope.HelpUpdate, signature?: boolean } lines = nil: the outline's content is unchanged (only the inspector or the frame moved); header: the overload group the header shows (nil: unchanged); header_lit: the param the header lights (nil: none); help: the help view over the frame (nil: closed); signature: the header's group whole, over the frame
 function M.update(handle, opts)
   if opts.lines then
     set_content(handle.buf, opts.lines, opts.highlights, opts.ts_injections, opts.lang)
@@ -780,7 +850,7 @@ function M.update(handle, opts)
     show_header(handle.header, opts.header or handle.header.shown, nil, opts.header_lit)
   end
   if handle.frame then
-    layout(handle, opts.width, opts.height, opts.inspector, opts.footer, opts.lang, opts.help)
+    layout(handle, opts.width, opts.height, opts.inspector, opts.footer, opts.lang, opts.help, opts.signature)
     return
   end
   local cfg = {}
@@ -827,7 +897,12 @@ function M.close(handle)
   if vim.api.nvim_win_is_valid(handle.win) then
     vim.api.nvim_win_close(handle.win, true)
   end
-  for _, pane in ipairs({ handle.header or false, handle.inspector or false, handle.help or false }) do
+  for _, pane in ipairs({
+    handle.header or false,
+    handle.inspector or false,
+    handle.help or false,
+    handle.signature or false,
+  }) do
     if pane then
       M._forget(pane.buf)
       applied[pane.win] = nil
