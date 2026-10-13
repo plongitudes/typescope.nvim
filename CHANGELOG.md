@@ -15,7 +15,7 @@ With the same `ui.max_height` the float is taller on screen: `ui.max_height` sti
 - **`ui.min_height`.** The rows each pane keeps before the rest of `ui.max_height` is shared out: to the header until the signature is fully wrapped, then the inspector up to five rows, then the outline. A pane with less content shrinks to fit it.
 - **`<C-d>` / `<C-u>` scroll the docstring view** from the outline.
 - **`ui.header_max_height` caps the header** (default 4 rows; below 1 turns it off), so a callable with dozens of parameters no longer takes the outline's rows. Past the cap the header keeps the required parameters, then the optional ones in order, and marks each gap `…`, the last `…+N` with N the hidden count, in the new `TypeScopeElided` group (linked to `DiagnosticWarn`). If the outline cursor's parameter is hidden, its gap mark lights up instead.
-- **`s` shows the whole signature** (`keymaps.signature`) over the frame when the header is cut, titled `signature` or `signature [i/n]`. Row keys rest while it shows; `s`, `q` and `<Esc>` close it, `<C-d>` / `<C-u>` scroll it, `?` swaps it for help.
+- **`s` shows the whole signature** (`keymaps.signature`) over the frame when the header is elided, hung from the header and growing down over the other panes, titled `signature` or `signature [i/n]`. Row keys rest while it shows; `s`, `q` and `<Esc>` close it, `<C-d>` / `<C-u>` scroll it, `?` swaps it for help.
 
 ### Changed
 

@@ -113,13 +113,13 @@ Bind these rather than writing Lua callbacks:
 | `e` | Ask the model for this row's example, and its neighbours' (needs ollama) |
 | `d` | Docstring: show it in the loupe in place of the inspector, or go back |
 | `<C-d>` / `<C-u>` | Scroll the docstring view (the outline otherwise), or the full signature while it shows |
-| `s` | Show the whole signature when the header is cut, or close it |
+| `s` | Show the whole signature when the header is elided, or close it |
 | `q` / `<Esc>` | Close, from any view |
 | `?` | Open the help view, or close it |
 
 The help view is generated from your actual `keymaps` config, so it stays correct if you rebind anything. It's drawn over the frame, titled `typescope help`, and the panes under it keep their sizes. It grows away from the line you're editing: up to the frame's top and then down past its bottom when the frame is below the cursor, up past the frame's top when it's above. The row keys do nothing while it's up, so the outline can't move underneath it. `?` again goes back to whatever was showing; `d` goes straight to the docstring view.
 
-When the header is cut, `s` shows the whole signature the same way: over the frame, titled `signature` (`signature [i/n]` on an overloaded callable), with the same colours and lit parameter as the header. It hangs from the header and grows away from your code line, and the panes under it keep their sizes. Row keys do nothing while it's up; `s`, `q` and `<Esc>` close it, `<C-d>` / `<C-u>` scroll it when it's taller than the room, and `?` swaps it for help. With the whole signature already in the header, `s` does nothing.
+When the header is elided, `s` shows the whole signature the same way: over the frame, titled `signature` (`signature [i/n]` on an overloaded callable), with the same colours and lit parameter as the header. It hangs from the header's top and grows down over the other panes, never over your code line, and the panes under it keep their sizes. Row keys do nothing while it's up; `s`, `q` and `<Esc>` close it, `<C-d>` / `<C-u>` scroll it when it's taller than the room, and `?` swaps it for help. With the whole signature already in the header, `s` does nothing.
 
 ## Configuration
 

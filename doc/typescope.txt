@@ -191,7 +191,7 @@ through `keymaps` (|typescope-config|); the defaults are shown.
                 or the full signature while it shows
     <C-u>       Scroll the docstring view up (in the outline otherwise),
                 or the full signature while it shows
-    s           Show the whole signature when the header is cut, or close it
+    s           Show the whole signature when the header is elided, or close it
     q           Close, from any view
     <Esc>       Close, from any view
     ?           Open the help view, or close it
@@ -208,11 +208,12 @@ under it. `?` again returns to whatever the loupe showed before; `d` goes
 straight to the docstring view.
 
                                                   *typescope-signature-view*
-When the header is cut (past `ui.header_max_height`, or squashed by the
+When the header is elided (past `ui.header_max_height`, or squashed by the
 docstring view), `s` shows the whole signature over the frame: the same
 colours, `=…` marks and lit parameter as the header, titled `signature`, or
-`signature [i/n]` on an overloaded callable. It hangs from the header pane and
-grows away from the line of code, leaving the panes under it their sizes. The
+`signature [i/n]` on an overloaded callable. It hangs from the header pane's
+top and grows down over the other panes; past the frame it only grows away from
+the line of code. The panes under it keep their sizes. The
 row keys do nothing while it shows; `s`, `q` and <Esc> close it, <C-d> and
 <C-u> scroll it when it is taller than the room, and `?` swaps it for help.
 `s` does nothing when the header shows the whole signature already, and every

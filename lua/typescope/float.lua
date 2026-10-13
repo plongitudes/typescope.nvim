@@ -458,9 +458,10 @@ function M.frame_layout(spec)
     }
   end
   if spec.signature and layout.header then
-    -- also over the frame, but hung from the header: under the cursor it
-    -- starts at the frame's top and grows down; above, it sits on the
-    -- header's bottom edge and grows up, so it never covers the code line
+    -- also over the frame, hung from the header's top so the signature's
+    -- first row stays where the header's was. It grows down over the panes:
+    -- under the cursor on past the frame's bottom; above it, to the frame's
+    -- bottom edge and then up past its top, so it never covers the code line
     local want = math.max(1, spec.signature) + 2 * edge
     local hdr = layout.header
     local outer, row
@@ -468,9 +469,8 @@ function M.frame_layout(spec)
       outer = math.min(want, below_room)
       row = hdr.row
     else
-      local bottom = hdr.row + hdr.height + 2 * edge
-      outer = math.min(want, layout.top + bottom)
-      row = bottom - outer
+      outer = math.min(want, layout.top + offset)
+      row = math.min(hdr.row, offset - outer)
     end
     layout.signature = {
       row = row,

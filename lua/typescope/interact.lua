@@ -53,7 +53,7 @@ local function help_content()
     { km.collapse_all, "collapse all" },
     { km.llm_generate, "example for this row, from the model" },
     { km.docstring, "docstring: open / back" },
-    { km.signature, "the whole signature, when the header is cut" },
+    { km.signature, "the whole signature, when the header is elided" },
     { km.close .. " / <Esc>", "close" },
   }
   local lines, highlights = {}, {}
@@ -431,7 +431,7 @@ function M.attach(args)
       -- help (?) is drawn over the frame, which goes on being laid out (and
       -- animated) under it exactly as it was
       help = st.overlay == "help" and help_content() or nil,
-      -- ...and so is the whole signature (s), when the header is cut
+      -- ...and so is the whole signature (s), when the header is elided
       signature = st.overlay == "signature" or nil,
     })
     if focus_id then
@@ -571,7 +571,7 @@ function M.attach(args)
     st.overlay = st.overlay ~= "help" and "help" or nil
     refresh()
   end)
-  -- the header's group whole, over the frame; only when the header is cut
+  -- the header's group whole, over the frame; only when the header is elided
   -- (past ui.header_max_height, or squashed by the docstring view)
   map(km.signature, function()
     if st.overlay == "signature" then

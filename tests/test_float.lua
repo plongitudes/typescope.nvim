@@ -445,14 +445,16 @@ local layout_cases = {
   },
   { "...stopping at the screen edge", { signature = 40 }, { signature_row = 0, signature_h = 40 - 6 - 2 } },
   {
-    "signature above the cursor: it sits on the header's bottom edge and grows up",
+    "signature above the cursor: it hangs from the header's top too, over the panes",
     { signature = 6, row = 30 },
-    { below = false, top = 30 - 18, signature_row = 3 - 8, signature_h = 6 },
+    { below = false, top = 30 - 18, signature_row = 0, signature_h = 6 },
   },
+  { "...down to the frame's bottom edge", { signature = 16, row = 30 }, { signature_row = 0, signature_h = 16 } },
+  { "...then on up past the frame's top", { signature = 25, row = 30 }, { signature_row = 18 - 27, signature_h = 25 } },
   {
     "...stopping at the screen's top",
     { signature = 40, row = 30 },
-    { signature_row = -(30 - 18), signature_h = 30 - 18 + 3 - 2 },
+    { signature_row = -(30 - 18), signature_h = 30 - 2 },
   },
 }
 

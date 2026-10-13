@@ -33,7 +33,7 @@
 ---@field llm_generate string ask the model for the cursor node's example (and its neighbours')
 ---@field close string
 ---@field help string
----@field signature string show the whole signature when the header is cut
+---@field signature string show the whole signature when the header is elided
 
 ---@class typescope.InsertModeConfig
 ---@field enabled boolean insert-mode typing surface (replaces signature help)

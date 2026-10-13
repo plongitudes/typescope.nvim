@@ -967,10 +967,11 @@ do
   require("typescope").close()
 
   -- taller than the room: <C-d>/<C-u> scroll it. A narrow frame wraps the
-  -- header to a row per param; a short screen leaves the overlay fewer rows
+  -- header to a row per param; a short screen leaves the overlay, which
+  -- may cover the whole frame, still fewer rows than that
   local lines_before = vim.o.lines
-  require("typescope").setup({ ui = { max_width = 16, header_max_height = 1 } })
-  vim.o.lines = 14
+  require("typescope").setup({ ui = { max_width = 10, header_max_height = 1 } })
+  vim.o.lines = 10
   vim.api.nvim_set_current_win(vim.fn.bufwinid(bufnr))
   vim.api.nvim_win_set_cursor(0, { call_line, 12 })
   vim.cmd("normal! zb")
