@@ -118,7 +118,8 @@ fi
 for ((i = 1; i <= max; i++)); do
   # only beads triaged for an agent: iterations file follow-ups as
   # needs-triage, and those may need things the sandbox can't do
-  id=$(cd "$repo" && bd ready --json | jq -r --arg p "$epic." \
+  # bd ready shows 10 issues by default; unrelated beads can push ours past that
+  id=$(cd "$repo" && bd ready --limit 1000 --json | jq -r --arg p "$epic." \
     '[.[] | select((.id | startswith($p)) and ((.labels // []) | index("ready-for-agent")))][0].id // empty')
   if [ -z "$id" ]; then
     echo "=== no ready bead under $epic: done after $((i - 1)) iterations"
