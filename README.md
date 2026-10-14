@@ -209,7 +209,7 @@ The **outline** is one compact row per parameter, with fields, members and the r
 
 The **loupe** shows one of two views. The **inspector** shows details of the outline row the cursor is on: its whole type (the row truncates ones that are too long), the evaluated shape, the full default, an example, and where it was inherited from. It changes as you move from row to row, while the rows themselves stay put. Below, the cursor is on `host`:
 
-<img src="https://raw.githubusercontent.com/plongitudes/typescope.nvim/assets/ledger.png" width="470" alt="TypeScope on create_server(config, timeout=…) -> Response, with the cursor on host: the inspector under the rows shows host str, e.g. "localhost"">
+<img src="https://raw.githubusercontent.com/plongitudes/typescope.nvim/assets/outline.png" width="470" alt="TypeScope on create_server(config, timeout=…) -> Response, with the cursor on host: the inspector under the rows shows host str, e.g. "localhost"">
 
 `d` swaps the inspector for the **docstring view**, the callable's whole docstring, and `d` again swaps it back. The outline stays visible and keeps the cursor, so you can read a parameter's row and its prose together: the docstring view scrolls to the hovered parameter's `:param` section as you move, and `<C-d>` / `<C-u>` scroll it by hand. It grows the frame toward `max_height`, away from the line you're editing, then squashes the outline and then the header to their minimums (the outline keeps your row in view). Going back puts every pane back at its old size.
 

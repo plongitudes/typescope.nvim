@@ -12,7 +12,7 @@ Set Shell zsh
 Set FontFamily "FantasqueSansM Nerd Font"
 Set FontSize 28
 Set Columns 56
-Set Rows 15
+Set Rows 17
 Set Padding 32
 Set CursorBlink false
 # Ghostty's Gruvbox Dark: nvim runs transparent, so this bg is what shows
@@ -55,7 +55,7 @@ Type "j"
 Sleep 500ms
 Show
 Sleep 100ms
-Screenshot demo/shots/ledger.png
+Screenshot demo/shots/outline.png
 Sleep 500ms
 Hide
 Type "qZQ"
