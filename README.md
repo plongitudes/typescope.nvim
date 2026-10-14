@@ -159,7 +159,7 @@ require("typescope").setup({
     animations = true,
     max_width = 0.5,         -- <=1: fraction of editor width; >1: absolute columns
     max_height = 20,         -- content rows the panes share; borders are extra
-    min_height = { header = 1, outline = 5, inspector = 1 }, -- rows each pane keeps before leftovers are shared
+    min_height = { header = 1, outline = 5, loupe = 1 }, -- rows each pane keeps before leftovers are shared
     header_max_height = 4,   -- the header's rows at most; < 1 = no cap (s shows the rest)
     border = "rounded",      -- any nvim float border value
     docstring = true,        -- d shows the docstring view; false turns it off
@@ -193,7 +193,7 @@ The `trigger = "hover"` auto-open never steals focus in either mode.
 
 ### `ui.max_height` and `ui.min_height`
 
-`max_height` counts the content rows the frame's panes share; borders and seams come on top. `min_height` is what each pane keeps before the rest is shared out. A pane with less content than its minimum shrinks to fit it, so a one-parameter function doesn't get five empty outline rows. Leftover rows go to the header until its signature is fully wrapped, then to the inspector up to five rows, then to the outline. On a screen too short for the minimums, the outline, then the header, then the inspector give way, down to a row each; the float still opens with as few as three rows.
+`max_height` counts the content rows the frame's panes share; borders and seams come on top. `min_height` is what each pane keeps before the rest is shared out. A pane with less content than its minimum shrinks to fit it, so a one-parameter function doesn't get five empty outline rows. Leftover rows go to the header until its signature is fully wrapped, then to the loupe up to five rows, then to the outline. On a screen too short for the minimums, the outline, then the header, then the loupe give way, down to a row each; the float still opens with as few as three rows.
 
 ### `ui.header_max_height`
 

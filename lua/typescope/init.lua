@@ -316,7 +316,12 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
     row = math.max(0, pos.row - 1),
     col = math.max(0, pos.col - 1),
     max_height = cfg.ui.max_height,
-    min_height = cfg.ui.min_height,
+    -- the loupe is the frame's "inspector" pane, whichever view it shows
+    min_height = {
+      header = cfg.ui.min_height.header,
+      outline = cfg.ui.min_height.outline,
+      inspector = cfg.ui.min_height.loupe,
+    },
     header_max_height = cfg.ui.header_max_height,
   }
   local handle = float.open({

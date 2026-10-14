@@ -56,15 +56,12 @@ check("keymaps.signature defaults to s", setup({}).keymaps.signature == "s")
 
 -- the frame's pane minimums: header, outline, inspector
 check(
-  "ui.min_height defaults to header 1, outline 5, inspector 1",
-  vim.deep_equal(setup({}).ui.min_height, { header = 1, outline = 5, inspector = 1 })
+  "ui.min_height defaults to header 1, outline 5, loupe 1",
+  vim.deep_equal(setup({}).ui.min_height, { header = 1, outline = 5, loupe = 1 })
 )
 check(
   "...a partial table keeps the other defaults",
-  vim.deep_equal(
-    setup({ ui = { min_height = { outline = 3 } } }).ui.min_height,
-    { header = 1, outline = 3, inspector = 1 }
-  )
+  vim.deep_equal(setup({ ui = { min_height = { outline = 3 } } }).ui.min_height, { header = 1, outline = 3, loupe = 1 })
 )
 local function setup_error(opts)
   local ok, err = pcall(config.setup, opts)
@@ -81,7 +78,13 @@ check(
 check("...and a non-table", setup_error({ ui = { min_height = 5 } }):find("ui.min_height", 1, true) ~= nil)
 check(
   "...and a pane the frame doesn't have",
-  setup_error({ ui = { min_height = { loupe = 2 } } }):find("ui.min_height.loupe", 1, true) ~= nil
+  setup_error({ ui = { min_height = { footer = 2 } } }):find("ui.min_height.footer", 1, true) ~= nil
+)
+-- the loupe is the pane; the inspector is only one of the views it shows
+check("the loupe's minimum is ui.min_height.loupe", pcall(config.setup, { ui = { min_height = { loupe = 2 } } }))
+check(
+  "...and inspector, a view rather than a pane, is not a key",
+  setup_error({ ui = { min_height = { inspector = 2 } } }):find("ui.min_height.inspector", 1, true) ~= nil
 )
 
 vim.notify = orig_notify
