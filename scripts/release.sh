@@ -14,11 +14,14 @@
 # annotated tag carrying the changelog section. It does not push. Pushing
 # after tagging will publish, and release.yml will take it from there.
 #
-# scripts/release.sh prepare <version> runs on a release branch. It refuses
+# scripts/release.sh prepare <version> runs on a release/* branch. It refuses
 # a version that isn't in X.Y.Z form, one that's already tagged, one that
-# isn't after the latest tag, a dirty working tree, and running on main. It
-# then updates the version in Cargo.toml, Cargo.lock, M.RELEASE and the
-# changelog heading.
+# isn't after the latest tag, and a dirty working tree. It then updates the
+# version in Cargo.toml, Cargo.lock, M.RELEASE and the changelog heading.
+#
+# Outside a release/* branch, prepare (or no command at all) prints the whole
+# two-step walkthrough instead, so starting from the wrong place shows where
+# to start.
 #
 # scripts/release.sh tag runs on main and requires the checkout to match
 # origin/main. It stops if you're behind or ahead, and tells you by how many
@@ -78,15 +81,52 @@ changelog_section() {
   ' "$CHANGELOG"
 }
 
+# the whole release, start to finish: shown when the script is run outside a
+# release/* branch with anything but `tag` (which belongs on main)
+walkthrough() {
+    local prev next
+    prev=$(latest_tag)
+    next=X.Y.Z
+    if [[ "${prev#v}" =~ ^([0-9]+)\.([0-9]+)\.[0-9]+$ ]]; then
+        next="${BASH_REMATCH[1]}.$((BASH_REMATCH[2] + 1)).0"
+    fi
+    cat >&2 <<EOF
+release: a release starts on a release/* branch (you are on $(git rev-parse --abbrev-ref HEAD)).
+
+Pick the version from CHANGELOG.md's [Unreleased]: anything under Upgrading
+or Removed, or a setting that now warns and is ignored, is a minor bump;
+fixes alone are a patch. The latest tag is ${prev:-none}; $next would be the
+next minor.
+
+  1. On a release branch, bump the version and date [Unreleased]:
+
+       git checkout -b release/v$next main
+       scripts/release.sh prepare $next
+
+     Finish the notes in the dated section, commit, push, and merge the PR.
+
+  2. On main, after the merge, tag it and push the tag (pushing publishes):
+
+       git checkout main && git pull --ff-only
+       scripts/release.sh tag
+       git push origin v$next
+
+See "Releasing" in CONTRIBUTING.md.
+EOF
+    exit 1
+}
+
+on_release_branch() {
+    [[ "$(git rev-parse --abbrev-ref HEAD)" == release/* ]]
+}
+
 prepare() {
     local version=${1:-}
     version=${version#v}
     [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] \
         || die "'${1:-}' is not a version; expected MAJOR.MINOR.PATCH, e.g. 0.4.0"
 
-    local branch prev
-    branch=$(git rev-parse --abbrev-ref HEAD)
-    [ "$branch" != main ] || die "prepare runs on a release branch (git checkout -b release/v$version); the bump lands through a PR"
+    local prev
     require_clean
 
     git fetch --quiet --tags origin
@@ -182,7 +222,13 @@ EOF
 }
 
 case "${1:-}" in
-    prepare) prepare "${2:-}" ;;
     tag) tag ;;
-    *) die "usage: scripts/release.sh prepare <MAJOR.MINOR.PATCH> | scripts/release.sh tag" ;;
+    prepare)
+        on_release_branch || walkthrough
+        prepare "${2:-}"
+        ;;
+    *)
+        on_release_branch || walkthrough
+        die "usage: scripts/release.sh prepare <MAJOR.MINOR.PATCH> | scripts/release.sh tag"
+        ;;
 esac

@@ -72,7 +72,7 @@ git checkout -b release/v0.4.0 main
 scripts/release.sh prepare 0.4.0   # bumps the four places, dates [Unreleased]
 ```
 
-`prepare` refuses a malformed version, one that is already tagged or not after the latest tag, an empty `[Unreleased]`, a dirty tree, and running on main. It doesn't write the notes: finish the section it dated (an intro paragraph, then Upgrading, Removed, Changed, Added, Fixed, Deprecated, Development as they apply), commit, and merge the PR.
+`prepare` refuses a malformed version, one that is already tagged or not after the latest tag, an empty `[Unreleased]`, and a dirty tree, and runs only on a `release/*` branch: anywhere else, it (or the script run with no command) prints this whole walkthrough instead. It doesn't write the notes: finish the section it dated (an intro paragraph, then Upgrading, Removed, Changed, Added, Fixed, Deprecated, Development as they apply), commit, and merge the PR.
 
 ```sh
 git checkout main && git pull --ff-only
