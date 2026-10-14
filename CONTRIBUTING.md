@@ -72,7 +72,7 @@ git checkout -b release/v0.4.0 main
 scripts/release.sh prepare 0.4.0   # bumps the four places, dates [Unreleased]
 ```
 
-`prepare` refuses a malformed version, one that is already tagged or not after the latest tag, an empty `[Unreleased]`, a dirty tree, and running on main. It doesn't write the notes: finish the section it dated (an intro paragraph, then Upgrading, Removed, Changed, Added, Fixed, Deprecated, Development as they apply), commit, and merge the PR.
+`prepare` refuses a malformed version, one that is already tagged or not after the latest tag, an empty `[Unreleased]`, and a dirty tree, and runs only on a `release/*` branch: anywhere else, it (or the script run with no command) prints this whole walkthrough instead. It doesn't write the notes: finish the section it dated (an intro paragraph, then Upgrading, Removed, Changed, Added, Fixed, Deprecated, Development as they apply), commit, and merge the PR.
 
 ```sh
 git checkout main && git pull --ff-only
@@ -80,7 +80,7 @@ scripts/release.sh tag             # checks, shows the version and notes, asks y
 git push origin v0.4.0
 ```
 
-`tag` reads the version back from `M.RELEASE`, checks the Cargo files agree, and refuses unless the checkout is clean and exactly `origin/main`: behind means the tag would miss the merged release, ahead means it would point at commits main doesn't have. On a yes it creates an annotated tag whose message is the changelog section. It doesn't push; pushing the tag is what publishes.
+`tag` reads the version back from `M.RELEASE`; if that is still the latest tag, nothing has been prepared on main yet, and it says so (naming an open `release/*` PR when `gh` can see one) and prints the walkthrough. Otherwise it checks the Cargo files agree, and refuses unless the checkout is clean and exactly `origin/main`: behind means the tag would miss the merged release, ahead means it would point at commits main doesn't have. On a yes it creates an annotated tag whose message is the changelog section. It doesn't push; pushing the tag is what publishes.
 
 The pushed tag runs `.github/workflows/release.yml`, which checks again: the tagged commit must be on main, and `M.RELEASE` and `oracle/Cargo.toml` must match the tag. It then builds the three binaries and publishes them with `SHA256SUMS`. If it fails after the tag is pushed, fix forward on main, then delete the tag (`git push origin :refs/tags/v0.4.0 && git tag -d v0.4.0`) and run `tag` again.
 
