@@ -82,8 +82,10 @@ changelog_section() {
 }
 
 # the whole release, start to finish: shown when the script is run outside a
-# release/* branch with anything but `tag` (which belongs on main)
+# release/* branch with anything but `tag` (which belongs on main), and when
+# tag finds nothing prepared. $1 replaces the opening line.
 walkthrough() {
+    local lead=${1:-"a release starts on a release/* branch (you are on $(git rev-parse --abbrev-ref HEAD))."}
     local prev next
     prev=$(latest_tag)
     next=X.Y.Z
@@ -91,7 +93,7 @@ walkthrough() {
         next="${BASH_REMATCH[1]}.$((BASH_REMATCH[2] + 1)).0"
     fi
     cat >&2 <<EOF
-release: a release starts on a release/* branch (you are on $(git rev-parse --abbrev-ref HEAD)).
+release: $lead
 
 Pick the version from CHANGELOG.md's [Unreleased]: anything under Upgrading
 or Removed, or a setting that now warns and is ignored, is a minor bump;
@@ -190,10 +192,21 @@ tag() {
     [ "$(cargo_version)" = "$version" ] || die "$CARGO_TOML says $(cargo_version), M.RELEASE says $tag"
     [ "$(lock_version)" = "$version" ] || die "$CARGO_LOCK says $(lock_version), M.RELEASE says $tag"
 
-    ! git rev-parse --quiet --verify "refs/tags/$tag" >/dev/null || die "$tag is already tagged"
-    [ -z "$(git ls-remote --tags origin "refs/tags/$tag")" ] || die "$tag already exists on origin"
+    # the gate between the two halves: until the release PR merges, main still
+    # carries the last release's version, so there is nothing to tag yet
     local prev
     prev=$(latest_tag)
+    if [ "$tag" = "$prev" ]; then
+        local open=""
+        if command -v gh >/dev/null 2>&1; then
+            open=$(gh pr list --state open --json number,headRefName \
+                -q '.[] | select(.headRefName | startswith("release/")) | "\(.headRefName) is PR #\(.number), still open"' \
+                2>/dev/null | head -n 1) || open=""
+        fi
+        walkthrough "main is still at $tag, the latest tag: nothing is prepared to release yet${open:+ ($open)}. Merge the release PR first; if there isn't one, start at step 1."
+    fi
+    ! git rev-parse --quiet --verify "refs/tags/$tag" >/dev/null || die "$tag is already tagged"
+    [ -z "$(git ls-remote --tags origin "refs/tags/$tag")" ] || die "$tag already exists on origin"
     [ -z "$prev" ] || version_gt "$version" "${prev#v}" || die "$tag is not after the latest tag, $prev"
 
     local notes
