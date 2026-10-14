@@ -214,24 +214,28 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
   -- matched by name — see lsp.active_param for why not by index. Cached
   -- trees carry the previous open's flag, so clear before setting.
   local active_name = lsp.active_param(sig_result)
-  local header = meta and meta.header or nil
-  local active_id = nil -- the cursor (and the ledger's panel) opens on the active param
+  -- one header per overload group (a plain callable has one; a class hover
+  -- none: its root row is the header), and the group it opens on
+  local headers = meta and meta.header and { meta.header } or nil
+  local idx, matched = 1, nil
+  local active_id = nil -- the cursor (and the outline's inspector) opens on the active param
   if meta and meta.overloads then
     -- overloads (U4): stacked groups — expand the one that matches the
     -- arguments so far, collapse the rest; the active-param flag lives on
-    -- that group's children. Header follows the same choice. The server's
-    -- activeSignature wins when it says something; 0 is ambiguous
-    -- (basedpyright's constant answer), so the written args break the tie
-    -- client-side (h8h).
+    -- that group's children. The header opens on the same choice, then
+    -- follows the cursor. The server's activeSignature wins when it says
+    -- something; 0 is ambiguous (basedpyright's constant answer), so the
+    -- written args break the tie client-side (h8h). With neither, nothing
+    -- is the matched overload and group 1 opens unmarked.
     local server_idx = sig_result and sig_result.activeSignature or 0
-    local idx
     if server_idx > 0 then
-      idx = math.min(server_idx + 1, meta.overloads)
+      matched = math.min(server_idx + 1, meta.overloads)
     else
       local impl = require("typescope.extract").get(vim.bo[srcbuf].filetype)
       local args = impl and impl.call_args and impl.call_args(srcbuf, srccursor[1] - 1, srccursor[2])
-      idx = require("typescope.match").pick(roots, args) or 1
+      matched = require("typescope.match").pick(roots, args)
     end
+    idx = matched or 1
     for i, root in ipairs(roots) do
       root.state.expanded = i == idx
       for _, child in ipairs(root.children) do
@@ -239,7 +243,7 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
         active_id = child.active and child.id or active_id
       end
     end
-    header = meta.headers[idx] .. (" [%d/%d]"):format(idx, meta.overloads)
+    headers = meta.headers
   else
     for _, root in ipairs(roots) do
       root.active = root.kind == "param" and root.name == active_name or false
@@ -254,27 +258,72 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
     show_examples = cfg.show_examples and cfg.example_mode ~= "none",
     example_kind = cfg.example_mode == "llm" and "llm" or "heuristic",
     lang = vim.bo[srcbuf].filetype,
-    -- unified float (U1): call-shape header + docstring view, absorbing the
-    -- retired anchor float's content
-    header = header,
-    header_active = active_name,
+    -- unified float (U1): docstring view, absorbing the retired anchor
+    -- float's content; the call-shape header is drawn per group below
     docstring = meta and meta.docstring or nil,
   }
   local result = render.render(roots, render_opts)
-  local width = math.min(max_width, math.max(result.width, 30))
+
+  --- Overload group `i`'s header, cut to `rows` (nil: as many as it wraps
+  --- to), with the param `lit` lit. Which one is the outline cursor's
+  --- (interact), not signatureHelp's active param: in hover the cursor sits
+  --- on an argument, so hover resolves the argument and never the call.
+  ---@param rows? integer
+  ---@param lit? string
+  local function render_header(i, rows, lit)
+    render_opts.view, render_opts.header, render_opts.header_rows = "header", headers[i], rows
+    render_opts.header_active = lit
+    local ok, r = pcall(render.render, roots, render_opts)
+    render_opts.view, render_opts.header, render_opts.header_rows, render_opts.header_active = nil, nil, nil, nil
+    if not ok then
+      error(r)
+    end
+    return r
+  end
+  local heads = nil ---@type typescope.HeaderContent[]?
+  local header_width = 0
+  for i = 1, headers and #headers or 0 do
+    local r = render_header(i)
+    header_width = math.max(header_width, r.width)
+    heads = heads or {}
+    heads[i] = {
+      lines = r.lines,
+      highlights = r.highlights,
+      ts_injections = r.ts_injections,
+      -- the cap or the budget allots it fewer rows than it wraps to: cut
+      -- (required params, then optional ones, gaps marked); and the
+      -- outline's cursor moved to another param: light that one
+      fit = function(rows, lit)
+        local cut = render_header(i, rows, lit)
+        return { lines = cut.lines, highlights = cut.highlights, ts_injections = cut.ts_injections }
+      end,
+      -- right-aligned on the header's bottom border; ✓ sits left of [i/n]
+      -- so [i/n] never moves, and the border's own rule fills its place on
+      -- every other group
+      tag = meta and meta.overloads and { { (" [%d/%d] "):format(i, meta.overloads), "TypeScopeBadge" } } or nil,
+    }
+    if i == matched then
+      table.insert(heads[i].tag, 1, { " ✓", "TypeScopeMatched" })
+    end
+  end
+  local width = math.min(max_width, math.max(result.width, header_width, 30))
   local height = math.min(cfg.ui.max_height, #result.lines)
 
-  -- the rows and a docked panel under them, hung from the cursor's screen
-  -- position (float.lua places both windows itself)
+  -- the frame: header, outline, and the inspector under them, hung from the
+  -- cursor's screen position (float.lua places every pane itself)
   local pos = vim.fn.screenpos(0, srccursor[1], srccursor[2] + 1)
-  local panel = { row = math.max(0, pos.row - 1), col = math.max(0, pos.col - 1), max_height = cfg.ui.max_height }
+  local frame = {
+    row = math.max(0, pos.row - 1),
+    col = math.max(0, pos.col - 1),
+    max_height = cfg.ui.max_height,
+    min_height = cfg.ui.min_height,
+    header_max_height = cfg.ui.header_max_height,
+  }
   local handle = float.open({
     lines = result.lines,
     highlights = result.highlights,
     ts_injections = result.ts_injections,
     lang = render_opts.lang,
-    title = " typescope ",
-    footer = " ? help ",
     relative = "cursor",
     row = 1,
     col = 0,
@@ -282,16 +331,21 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
     height = height,
     border = cfg.ui.border,
     enter = focus,
-    panel = panel,
+    frame = frame,
+    headers = heads,
+    header_shown = idx,
   })
 
   -- land on the active param's primary row: with ui.focus the tree keys are
   -- live immediately, so the cursor should start where the user is typing.
-  -- The panel shows the cursor's row, so with no active param it
-  -- starts on the first one rather than the header.
+  -- The inspector shows the cursor's row, so with no active param it
+  -- starts on the first one, or on the opening overload group's row: the
+  -- header follows the cursor's group, and group 1's first row would pull
+  -- it straight off the matched overload
+  local start_id = active_id or (meta and meta.overloads and roots[idx] and roots[idx].id) or nil
   for lnum = 1, #result.lines do
     local id = result.line_to_node[lnum]
-    if id and (id == active_id or not active_id) then
+    if id and (id == start_id or not start_id) then
       vim.api.nvim_win_set_cursor(handle.win, { lnum, 0 })
       break
     end
@@ -302,21 +356,20 @@ local function show(srcbuf, roots, meta, token, client, sig_result, focus)
     roots = roots,
     opts = render_opts,
     width = width,
-    max_height = cfg.ui.max_height,
     on_close = M.close,
     on_recurse = function(node, done)
       if session then
         require("typescope.resolve").recurse(session.client, node, session.token, done)
       end
     end,
-    -- not through `session`: the ledger's first ask runs inside attach(),
+    -- not through `session`: the outline's first ask runs inside attach(),
     -- before `session` exists, and a dropped call never calls `done` —
     -- which left interact waiting on a batch that was never sent, and every
     -- later ask (e included) parked behind it
     on_llm_nodes = function(nodes, done)
       require("typescope.examples").llm_nodes(nodes, token, done)
     end,
-    -- the panel's sibling group, generated as the cursor gets there
+    -- the inspector's sibling group, generated as the cursor gets there
     auto_examples = cfg.ollama.enabled and cfg.example_mode == "llm",
     on_llm_error = function(err)
       if not llm_auto_warned then

@@ -21,7 +21,7 @@ The bottom pane of the frame. It shows the inspector or the docstring view; the 
 _Avoid_: slot, detail pane, panel
 
 **Header**:
-The signature at the top of the float, for the overload group the cursor is in, wrapped to fit. It stays put while the outline scrolls, and its height is fixed at the tallest group's so the outline never shifts.
+The signature at the top of the float, for the overload group the cursor is in, wrapped to fit. It stays put while the outline scrolls, and its height is fixed at the tallest group's so the outline never shifts as you cross groups. That height is capped at `ui.header_max_height` and can be squashed further by a growing docstring view; a signature past it is elided, each gap marked `…` and the last `…+N`.
 _Avoid_: title, signature line
 
 **Outline**:
@@ -39,6 +39,10 @@ _Avoid_: doc overlay, doc mode
 **Help view**:
 The list of float keys, titled `typescope help`, drawn over the float rather than in place of a pane. It grows away from the line of code being worked on, and the panes under it keep their sizes.
 _Avoid_: help overlay
+
+**Signature view**:
+The whole signature, titled `signature`, drawn over the frame with `s` when the header is elided. It hangs from the header's top and grows over the other panes, never over the line of code being worked on, and the panes under it keep their sizes.
+_Avoid_: expanded header, full header
 
 ## Overloads
 

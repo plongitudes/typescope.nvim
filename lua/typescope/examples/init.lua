@@ -182,7 +182,7 @@ end
 
 --- The unit of generation: the leaves beside `node` that still need
 --- asking, nearest first and `node` itself ahead of them, at most one batch.
---- The panel shows one node at a time, so generating the whole visible tree
+--- The inspector shows one node at a time, so generating the whole visible tree
 --- asks a slow model about rows nobody may ever look at; the neighbours are
 --- where the cursor goes next. Values already cached are copied on here.
 --- `force` is an explicit ask (the e key): `node` is asked again even if it

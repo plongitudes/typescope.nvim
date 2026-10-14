@@ -20,7 +20,7 @@
 ---@field origin? string parent class name for inherited fields (rendered as ↑Parent)
 ---@field evaluated? string pyright's evaluated type for leaves structural resolution couldn't crack (rendered as ≈ T)
 ---@field inferred? boolean the oracle's answer for a member/return with no annotation (the checker's inference, drawn ≈). TRANSITIONAL: until the treesitter resolver goes, the ≈ rendering is driven by `evaluated`, which the oracle client sets alongside this
----@field evaluated_owner? string the annotation ref the evaluation came from (named in the ledger detail when it isn't the whole annotation)
+---@field evaluated_owner? string the annotation ref the evaluation came from (named in the inspector when it isn't the whole annotation)
 ---@field source? { uri: string, range: table } where the type is declared
 ---@field children typescope.Node[]
 ---@field state typescope.NodeState

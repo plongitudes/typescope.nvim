@@ -15,9 +15,9 @@ TypeScope _(like 'periscope'! Get it? ... wow, tough crowd.)_ asks a type checke
 
 The checker is [pyrefly](https://github.com/facebook/pyrefly) wrapped in a small binary. We call this the `oracle` (it really kind of needs a name change, doesn't it), and it runs alongside your Python LSP. I use basedpyright, this repo assumes you're using that or vanilla pyright. If you're using another type checker in your nvim setup, the results from pyrefly _might_ be a bit different from your own typechecker, but I believe that most results should be satisfactory. The `oracle` is downloaded for your platform the first time you open a Python buffer (see [Requirements](#requirements)). The patch to Pyrefly is a small change that takes a function pyrefly already uses internally for attribute completion and makes it public. With that patch in place, `oracle` can ask for every attribute of a type (its own and inherited ones), each with its type filled in. It adds no type-checking logic of its own, and if pyrefly eventually makes this a public feature, oracle could be dropped in favor of vanilla pyrefly.
 
-<img src="https://raw.githubusercontent.com/plongitudes/typescope.nvim/assets/intro.png" width="470" alt="TypeScope on create_server(config, timeout=…) -> Response: config expanded to host, port and debug, then timeout and returns, over a panel for the config row">
+<img src="https://raw.githubusercontent.com/plongitudes/typescope.nvim/assets/intro.png" width="470" alt="TypeScope on create_server(config, timeout=…) -> Response: config expanded to host, port and debug, then timeout and returns, over an inspector for the config row">
 
-One compact line per parameter, and a panel docked under the rows shows everything about the row your cursor is on. See [The ledger](#the-ledger).
+The signature stays pinned at the top, one compact row per parameter scrolls beneath it, and an inspector at the bottom shows everything about the row your cursor is on. See [The float](#the-float).
 
 ## Requirements
 
@@ -111,11 +111,15 @@ Bind these rather than writing Lua callbacks:
 | `H` | Collapse all |
 | `j` / `k` | Move by node, not by line |
 | `e` | Ask the model for this row's example, and its neighbours' (needs ollama) |
-| `d` | Docstring: show all of it in place of the rows, or go back |
-| `q` / `<Esc>` | Close |
-| `?` | Toggle the help overlay |
+| `d` | Docstring: show it in the loupe in place of the inspector, or go back |
+| `<C-d>` / `<C-u>` | Scroll the docstring view (the outline otherwise), or the full signature while it shows |
+| `s` | Show the whole signature when the header is elided, or close it |
+| `q` / `<Esc>` | Close, from any view |
+| `?` | Open the help view, or close it |
 
-The `?` overlay is generated from your actual `keymaps` config, so it stays correct if you rebind anything.
+The help view is generated from your actual `keymaps` config, so it stays correct if you rebind anything. It's drawn over the frame, titled `typescope help`, and the panes under it keep their sizes. It grows away from the line you're editing: up to the frame's top and then down past its bottom when the frame is below the cursor, up past the frame's top when it's above. The row keys do nothing while it's up, so the outline can't move underneath it. `?` again goes back to whatever was showing; `d` goes straight to the docstring view.
+
+When the header is elided, `s` shows the whole signature the same way: over the frame, titled `signature` (`signature [i/n]` on an overloaded callable), with the same colours and lit parameter as the header. It hangs from the header's top and grows down over the other panes, never over your code line, and the panes under it keep their sizes. Row keys do nothing while it's up; `s`, `q` and `<Esc>` close it, `<C-d>` / `<C-u>` scroll it when it's taller than the room, and `?` swaps it for help. With the whole signature already in the header, `s` does nothing.
 
 ## Configuration
 
@@ -154,9 +158,11 @@ require("typescope").setup({
     style = "rounded",       -- "unicode" | "ascii" | "minimal" | "rounded"
     animations = true,
     max_width = 0.5,         -- <=1: fraction of editor width; >1: absolute columns
-    max_height = 20,
+    max_height = 20,         -- content rows the panes share; borders are extra
+    min_height = { header = 1, outline = 5, inspector = 1 }, -- rows each pane keeps before leftovers are shared
+    header_max_height = 4,   -- the header's rows at most; < 1 = no cap (s shows the rest)
     border = "rounded",      -- any nvim float border value
-    docstring = true,        -- first sentence in the footer, d for the rest; false turns both off
+    docstring = true,        -- d shows the docstring view; false turns it off
     hint = true,             -- virtual-text "▸ typescope" marker on resolved call lines
     focus = true,            -- explicit opens enter the float; false = momentary hover
   },
@@ -172,6 +178,7 @@ require("typescope").setup({
     llm_generate = "e",
     close = "q",
     help = "?",
+    signature = "s",
   },
 })
 ```
@@ -184,13 +191,27 @@ Bad values are rejected at `setup()` time with a message.
 
 The `trigger = "hover"` auto-open never steals focus in either mode.
 
-## The ledger
+### `ui.max_height` and `ui.min_height`
 
-One compact line per parameter, and a small subpanel is docked at the bottom of the float, showing details of the row the cursor is on: its whole type (the row truncates ones that are too long), the evaluated shape, the full default, an example, and where it was inherited from. The detail panel changes as you move the cursor from row to row. The frame's bottom edge carries the docstring's first sentence for a little extra info, and `d` swaps the floating window's contents for the full docstring (it's a toggle). Below, the cursor is on `host`:
+`max_height` counts the content rows the frame's panes share; borders and seams come on top. `min_height` is what each pane keeps before the rest is shared out. A pane with less content than its minimum shrinks to fit it, so a one-parameter function doesn't get five empty outline rows. Leftover rows go to the header until its signature is fully wrapped, then to the inspector up to five rows, then to the outline. On a screen too short for the minimums, the outline, then the header, then the inspector give way, down to a row each; the float still opens with as few as three rows.
 
-<img src="https://raw.githubusercontent.com/plongitudes/typescope.nvim/assets/ledger.png" width="470" alt="TypeScope on create_server(config, timeout=…) -> Response, with the cursor on host: the panel under the rows shows host str, e.g. "localhost"">
+### `ui.header_max_height`
 
-The panel grows to fit the tallest node it has shown (up to five lines) and doesn't shrink back, so the rows above it stay put. The frame opens below the cursor, or above it when there is more room there.
+The most rows the header takes, 4 by default; a shorter signature stays shorter. A callable with dozens of parameters (`uvicorn.run`, SQLAlchemy's `relationship`) would otherwise wrap to a dozen header rows and leave the outline its minimum. Past the cap the header keeps every required parameter, then the optional ones in signature order while they fit, and marks the gaps (see [The float](#the-float)); `s` shows the whole thing. Any integer below 1 turns the cap off.
+
+## The float
+
+The float is a frame of three panes stacked on one side of your cursor: the **header**, the **outline**, and the **loupe**. Each seam between two panes is a full bottom border followed by a full top border, in your `ui.border` style, because the panes do different jobs. The frame opens below the cursor, or above it when there's more room there, and stays on that side until it closes. Its bottom border carries `? help` at the right end, whatever view is showing.
+
+The **header** is the signature, wrapped onto as many rows as it needs, and it stays put while the outline scrolls. On an overloaded callable it follows the overload group your cursor is in, and its bottom border carries that group's `[i/n]`, with a `✓` beside it when the group is the matched overload (the one your call actually resolves to). `[i/n]` keeps its column whether or not the `✓` is there. The header's height is fixed at the tallest group's signature, up to `ui.header_max_height`, so the outline doesn't jump as you cross groups. A signature that can't fit keeps its required parameters, then its optional ones in order while they fit, each in its place: `f(a, b=1, *, c, d=2)` can show as `f(a, …, *, c, …+2)`. Inner gaps are marked `…` and the last `…+N`, N counting every hidden parameter, in `TypeScopeElided` (linked to `DiagnosticWarn`). Required parameters that overrun alone are cut from the middle, keeping the start and the return type. If the parameter your outline cursor is on is hidden, the gap mark hiding it lights up instead, so the header holds still; `s` shows the whole signature.
+
+The **outline** is one compact row per parameter, with fields, members and the return type beneath. Overload group rows keep their own `[i/n]`, so you can still see where groups begin as you scroll.
+
+The **loupe** shows one of two views. The **inspector** shows details of the outline row the cursor is on: its whole type (the row truncates ones that are too long), the evaluated shape, the full default, an example, and where it was inherited from. It changes as you move from row to row, while the rows themselves stay put. Below, the cursor is on `host`:
+
+<img src="https://raw.githubusercontent.com/plongitudes/typescope.nvim/assets/outline.png" width="470" alt="TypeScope on create_server(config, timeout=…) -> Response, with the cursor on host: the inspector under the rows shows host str, e.g. "localhost"">
+
+`d` swaps the inspector for the **docstring view**, the callable's whole docstring, and `d` again swaps it back. The outline stays visible and keeps the cursor, so you can read a parameter's row and its prose together: the docstring view scrolls to the hovered parameter's `:param` section as you move, and `<C-d>` / `<C-u>` scroll it by hand. It grows the frame toward `max_height`, away from the line you're editing, then squashes the outline and then the header to their minimums (the outline keeps your row in view). Going back puts every pane back at its old size.
 
 ## Insert mode
 
@@ -204,10 +225,10 @@ Off by default while it bakes.
 
 ## Examples
 
-The panel shows a plausible example value for each leaf.
+The inspector shows a plausible example value for each leaf.
 
 - `example_mode = "heuristic"` (default) — pattern-table values, matched on name and type. No network, no model, instant. Press `e` on a row to ask the model for its example (and its nearest neighbours') on demand.
-- `example_mode = "llm"` — generate through ollama automatically, as you move: the row the panel is on and its nearest neighbours, one batch at a time. Heuristics show until the real values land, then swap in place. `e` on a row asks again, including rows the model had no answer for.
+- `example_mode = "llm"` — generate through ollama automatically, as you move: the row the inspector is on and its nearest neighbours, one batch at a time. Heuristics show until the real values land, then swap in place. `e` on a row asks again, including rows the model had no answer for.
 - `example_mode = "none"` — no examples at all.
 
 ### The RAM cost of ollama
@@ -222,7 +243,7 @@ The panel shows a plausible example value for each leaf.
 
 ## Styles
 
-`ui.style` picks the charset: `rounded`, `unicode`, `ascii`, `minimal`. All four are plain Unicode or ASCII — no Nerd Font glyphs — so any font works. The same ledger, in each:
+`ui.style` picks the charset: `rounded`, `unicode`, `ascii`, `minimal`. All four are plain Unicode or ASCII — no Nerd Font glyphs — so any font works. The same outline, in each:
 
 <table>
 <tr><th align="left"><code>rounded</code> (default)</th><th align="left"><code>unicode</code></th></tr>
@@ -253,7 +274,7 @@ The panel shows a plausible example value for each leaf.
 
 Every group links to something sensible in your colorscheme, so TypeScope simply inherits your theme. Override any of them through `highlights`:
 
-`TypeScopeField` `TypeScopeProperty` `TypeScopeEnumMember` `TypeScopeGroup` `TypeScopeParam` `TypeScopeType` `TypeScopeDefault` `TypeScopeExample` `TypeScopeExamplePending` `TypeScopeChrome` `TypeScopeKeyword` `TypeScopeBadge` `TypeScopeEvaluated` `TypeScopeHeader` `TypeScopeHeaderDim` `TypeScopeDocstring` `TypeScopeUnresolved` `TypeScopeHint` `TypeScopeActive` `TypeScopeTitle`
+`TypeScopeField` `TypeScopeProperty` `TypeScopeEnumMember` `TypeScopeGroup` `TypeScopeParam` `TypeScopeType` `TypeScopeDefault` `TypeScopeExample` `TypeScopeExamplePending` `TypeScopeChrome` `TypeScopeKeyword` `TypeScopeBadge` `TypeScopeEvaluated` `TypeScopeHeader` `TypeScopeHeaderDim` `TypeScopeDocstring` `TypeScopeUnresolved` `TypeScopeHint` `TypeScopeActive` `TypeScopeMatched` `TypeScopeTitle` `TypeScopeElided`
 
 ```lua
 require("typescope").setup({

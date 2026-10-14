@@ -13,6 +13,11 @@ local M = {}
 ---@type table<string, integer>
 M.counts = {}
 
+-- Answer signatureHelp with nothing, as basedpyright does with the cursor on
+-- a callee's name outside its parens (hover's usual position). Off by
+-- default: the suites mostly lean on the active param it reports.
+M.silent_signature = false
+
 function M.reset_counts()
   M.counts = { signatureHelp = 0 }
 end
@@ -89,6 +94,8 @@ function M.cmd(fixture_dir)
         callback(nil, nil)
       elseif method == "textDocument/definition" or method == "textDocument/declaration" then
         callback(nil, nil) -- advertised so client_for picks us; never asked in earnest
+      elseif method == "textDocument/signatureHelp" and M.silent_signature then
+        callback(nil, nil)
       elseif method == "textDocument/signatureHelp" then
         local fname = vim.uri_to_fname(params.textDocument.uri)
         local word = word_at(fname, params.position.line, params.position.character)

@@ -16,9 +16,11 @@
 ---@field style "unicode"|"ascii"|"minimal"|"rounded"
 ---@field animations boolean
 ---@field max_width number >1: absolute columns; <=1: fraction of editor width
----@field max_height integer
+---@field max_height integer content rows the frame's panes share; borders are extra
+---@field min_height { header: integer, outline: integer, inspector: integer } rows each pane keeps before leftovers are shared out (a pane with less content shrinks to fit)
+---@field header_max_height integer content rows the header may take; a longer signature is cut (`s` shows it whole). < 1: no cap
 ---@field border string|string[] any nvim float border value
----@field docstring boolean the footer carries the docstring's first sentence and d shows the whole of it
+---@field docstring boolean d shows the docstring view in the loupe
 ---@field hint boolean virtual-text "▸ typescope" marker on resolved call lines
 ---@field focus boolean explicit opens enter the float; false = momentary hover convention (second K focuses)
 
@@ -31,6 +33,7 @@
 ---@field llm_generate string ask the model for the cursor node's example (and its neighbours')
 ---@field close string
 ---@field help string
+---@field signature string show the whole signature when the header is elided
 
 ---@class typescope.InsertModeConfig
 ---@field enabled boolean insert-mode typing surface (replaces signature help)
@@ -113,10 +116,17 @@ local defaults = {
     style = "rounded", -- "unicode" | "ascii" | "minimal" | "rounded"
     animations = true,
     max_width = 0.5, -- fraction of editor width; values > 1 are absolute columns
-    max_height = 20,
+    max_height = 20, -- content rows; borders are extra
+    -- what each pane of the K float keeps before the rest is shared out
+    -- (header first, then the inspector up to 5, then the outline); a pane
+    -- with less content than its minimum shrinks to fit
+    min_height = { header = 1, outline = 5, inspector = 1 },
+    -- the header's rows at most; past them it keeps the required params,
+    -- then the optional ones in order, and `s` shows it whole. < 1: no cap
+    header_max_height = 4,
     border = "rounded",
-    -- the footer carries the docstring's first sentence and d swaps the
-    -- whole of it in for the rows; false turns both off
+    -- d shows the whole docstring in the loupe in place of the inspector;
+    -- false turns it off
     docstring = true,
     hint = true,
     -- true: an explicit open (K / :TypeScope) enters the float — cursor
@@ -136,6 +146,7 @@ local defaults = {
     llm_generate = "e",
     close = "q",
     help = "?",
+    signature = "s",
   },
 }
 
@@ -212,6 +223,27 @@ local function validate(cfg)
     error("typescope.setup: `ui.max_width` must be a positive number (<=1 = fraction of editor width)", 0)
   end
   check("ui.max_height", cfg.ui.max_height, "positive_integer")
+  -- any integer: < 1 turns the cap off
+  if type(cfg.ui.header_max_height) ~= "number" or cfg.ui.header_max_height % 1 ~= 0 then
+    error(
+      ("typescope.setup: `ui.header_max_height` must be an integer (< 1 = no cap), got %s"):format(
+        vim.inspect(cfg.ui.header_max_height)
+      ),
+      0
+    )
+  end
+  check("ui.min_height", cfg.ui.min_height, "table")
+  for pane, rows in pairs(cfg.ui.min_height) do
+    if pane ~= "header" and pane ~= "outline" and pane ~= "inspector" then
+      error(
+        ("typescope.setup: `ui.min_height.%s` is not a pane; the panes are header, outline, inspector"):format(
+          tostring(pane)
+        ),
+        0
+      )
+    end
+    check("ui.min_height." .. pane, rows, "positive_integer")
+  end
   if type(cfg.ui.border) ~= "string" and type(cfg.ui.border) ~= "table" then
     error("typescope.setup: `ui.border` must be a string or table (any nvim float border value)", 0)
   end
@@ -230,6 +262,7 @@ local function validate(cfg)
     "llm_generate",
     "close",
     "help",
+    "signature",
   }) do
     check("keymaps." .. key, cfg.keymaps[key], "string")
   end
@@ -239,8 +272,8 @@ end
 ---@param opts? table
 ---@return typescope.Config
 function M.setup(opts)
-  -- removed in 0.3.0: in the ledger, l opens a subtree a level at a time and
-  -- the panel shows one node, so "open everything under here" mostly cost a
+  -- removed in 0.3.0: in the outline, l opens a subtree a level at a time and
+  -- the inspector shows one node, so "open everything under here" mostly cost a
   -- slow local model and a pinned oracle. Carried keys are harmless; say so
   -- once rather than failing the whole setup over it.
   if opts and type(opts.keymaps) == "table" then
@@ -259,12 +292,12 @@ function M.setup(opts)
       )
     end
   end
-  -- removed in 0.4.0: the ledger is the only layout. A setup naming it is
-  -- already what it gets, so only a different layout is worth a word.
+  -- removed in 0.4.0: the outline is the only layout, so any ui.layout is a
+  -- leftover worth a word.
   if opts and type(opts.ui) == "table" then
-    if opts.ui.layout ~= nil and opts.ui.layout ~= "ledger" then
+    if opts.ui.layout ~= nil then
       vim.notify(
-        ("typescope: ui.layout = %q was removed in 0.4.0; the ledger is the only layout"):format(
+        ("typescope: ui.layout = %q was removed in 0.4.0; the outline is the only layout"):format(
           tostring(opts.ui.layout)
         ),
         vim.log.levels.WARN

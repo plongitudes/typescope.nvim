@@ -22,7 +22,13 @@ local groups = {
   TypeScopeUnresolved = { link = "DiagnosticWarn" },
   TypeScopeHint = { link = "Comment" },
   TypeScopeActive = { link = "LspSignatureActiveParameter" },
+  -- the header tag's ✓ sits on a border, so it takes a foreground-only
+  -- group: LspSignatureActiveParameter often carries a bg that boxes it in
+  TypeScopeMatched = { link = "DiagnosticOk" },
   TypeScopeTitle = { link = "FloatTitle" },
+  -- a cut header's gap marks (`…`, `…+N`): they must pop against the param
+  -- colour, and the callable already has yellow's hue, so a link
+  TypeScopeElided = { link = "DiagnosticWarn" },
 }
 
 local applied = false

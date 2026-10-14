@@ -57,7 +57,7 @@ Two paths (oracle when present, old resolver when not) would keep the plugin wor
                                                 └───────────────────────────────┘
 ```
 
-The oracle speaks **LSP**, not a bespoke protocol, and advertises **no capabilities except document sync**, so it never competes with basedpyright for hover, definition or diagnostics. That choice buys, for free from `vim.lsp`: spawn and restart, root detection, `didOpen`/`didChange` carrying *unsaved buffer contents*, cancellation, and `lsp.client_for`-style discovery. The one custom request is `typescope/structure`. basedpyright stays attached for `signatureHelp` (the `activeParameter` the ledger opens on) and for everything K falls through to.
+The oracle speaks **LSP**, not a bespoke protocol, and advertises **no capabilities except document sync**, so it never competes with basedpyright for hover, definition or diagnostics. That choice buys, for free from `vim.lsp`: spawn and restart, root detection, `didOpen`/`didChange` carrying *unsaved buffer contents*, cancellation, and `lsp.client_for`-style discovery. The one custom request is `typescope/structure`. basedpyright stays attached for `signatureHelp` (the `activeParameter` the outline opens on) and for everything K falls through to.
 
 Both halves are pinned to each other by a protocol version in the `initialize` result (`serverInfo.version` and a `typescope.protocol` field); the client refuses a mismatch with a health-style message rather than mis-rendering.
 

@@ -15,6 +15,11 @@ if vim.fn.executable(oracle_bin) ~= 1 then
 end
 
 require("typescope").setup({})
+-- headless nvim is 24 rows. The frame's minimums (header 1, outline 5,
+-- inspector 1) overrun the 5 rows that fit under a cursor mid-screen, which
+-- leaves the inspector its one-row minimum and nothing to read; a taller
+-- screen gives every pane the rows these checks read.
+vim.o.lines = 40
 
 local failures = 0
 local function check(desc, cond)
@@ -34,25 +39,33 @@ local function float_lines()
 end
 
 -- The rows carry one line per node; an example, an origin tag and a ≈
--- evaluation are the docked panel's, which shows the cursor's row.
-local function panel()
+-- evaluation are the docked inspector's, which shows the cursor's row.
+local function inspector()
   for _, w in ipairs(vim.api.nvim_list_wins()) do
-    if vim.bo[vim.api.nvim_win_get_buf(w)].filetype == "typescope_panel" then
+    if vim.bo[vim.api.nvim_win_get_buf(w)].filetype == "typescope_inspector" then
       return vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(w), 0, -1, false), w
     end
   end
 end
-local function panel_text()
-  local lines, w = panel()
+local function inspector_text()
+  local lines, w = inspector()
   if not lines or vim.api.nvim_win_get_config(w).hide then
     return ""
   end
   return table.concat(lines, "\n")
 end
+-- the loupe's first visible line: where the docstring view has scrolled to
+local function loupe_top()
+  local lines, w = inspector()
+  if not lines or vim.api.nvim_win_get_config(w).hide then
+    return ""
+  end
+  return lines[vim.fn.getwininfo(w)[1].topline] or ""
+end
 
 --- Focus the float, put the cursor on the first row matching `pattern`, and
---- return what the panel shows for it.
-local function panel_of(pattern)
+--- return what the inspector shows for it.
+local function inspector_of(pattern)
   local lines, w = float_lines()
   if not lines then
     return ""
@@ -65,18 +78,61 @@ local function panel_of(pattern)
       break
     end
   end
-  return panel_text()
+  return inspector_text()
 end
 
--- the frame's bottom edge: the docstring's first sentence lives there
-local function footer_text()
-  local _, w = panel()
+-- the header pane: the signature, pinned above the outline
+local function header()
+  for _, w in ipairs(vim.api.nvim_list_wins()) do
+    if vim.bo[vim.api.nvim_win_get_buf(w)].filetype == "typescope_header" then
+      return vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(w), 0, -1, false), w
+    end
+  end
+end
+local function header_text()
+  return table.concat(header() or {}, "\n")
+end
+-- the header's bottom border: an overload group's `✓ [i/n]` tag
+local function header_tag()
+  local _, w = header()
   local footer = w and vim.api.nvim_win_get_config(w).footer
   local text = ""
   for _, chunk in ipairs(type(footer) == "table" and footer or {}) do
     text = text .. chunk[1]
   end
   return text
+end
+-- the param names the header lights (TypeScopeActive), and its marks as
+-- drawn: a repaint replaces them, so equal ids mean nothing was redrawn
+local function header_lit()
+  local lines, w = header()
+  local lit, marks = {}, {}
+  if not w then
+    return lit, marks
+  end
+  local buf = vim.api.nvim_win_get_buf(w)
+  for _, m in ipairs(vim.api.nvim_buf_get_extmarks(buf, -1, 0, -1, { details = true })) do
+    table.insert(marks, m[1])
+    if m[4].hl_group == "TypeScopeActive" then
+      table.insert(lit, lines[m[2] + 1]:sub(m[3] + 1, m[4].end_col))
+    end
+  end
+  return lit, marks
+end
+
+--- A window's footer, as text.
+local function footer_of(w)
+  local footer = w and vim.api.nvim_win_get_config(w).footer
+  local text = ""
+  for _, chunk in ipairs(type(footer) == "table" and footer or {}) do
+    text = text .. chunk[1]
+  end
+  return text
+end
+-- the frame's bottom edge: the loupe draws it while the inspector shows
+local function footer_text()
+  local _, w = inspector()
+  return footer_of(w)
 end
 
 -- open the fixture: setup() attaches the oracle on FileType; the basedpyright
@@ -120,10 +176,10 @@ if lines then
   check("union annotation intact", all:find("int | None", 1, true) ~= nil)
   check("param timeout with default", all:find("timeout") and all:find("30%.0"))
   check("returns Response present, collapsed", all:find("returns") and not all:find("status"))
-  check("heuristic examples rendered (host -> localhost)", panel_of("·%s+host%s"):find("localhost") ~= nil)
-  check("inherited field with origin tag", panel_of("·%s+env%s"):find("↑BaseConfig", 1, true) ~= nil)
+  check("heuristic examples rendered (host -> localhost)", inspector_of("·%s+host%s"):find("localhost") ~= nil)
+  check("inherited field with origin tag", inspector_of("·%s+env%s"):find("↑BaseConfig", 1, true) ~= nil)
   local _, override_count = all:gsub("verbose", "")
-  local verbose_badged = panel_of("·%s+verbose%s"):find("↑", 1, true) ~= nil
+  local verbose_badged = inspector_of("·%s+verbose%s"):find("↑", 1, true) ~= nil
   check("child override wins (verbose appears once, unbadged)", override_count == 1 and not verbose_badged)
 
   -- expand retry (depth 2 resolved its fields inline)
@@ -278,9 +334,8 @@ if lines_l24 then
   -- client-side matching (h8h): the mock reports activeSignature=0 here
   -- (no commas before the cursor), so the string literal "app.log" picks
   -- the sink: str overload over sink: TextIO
-  check("client pick expands the str overload [2/2]", lines_l24[1]:find("%[2/2%]") ~= nil)
+  check("client pick expands the str overload [2/2]", header_tag() == " ✓ [2/2] ─")
   check("stub annotations replace Any", all_l24:find("sink") ~= nil and not all_l24:find("Any"))
-  check("runtime docstring rides the hop", footer_text():find("Register a sink") ~= nil)
 
   -- d on an overload group's param (loguru's log.add case, 082): the group
   -- root is the callable, not a param, so the jump must resolve one level
@@ -296,9 +351,8 @@ if lines_l24 then
     end
   end
   vim.api.nvim_feedkeys("d", "x", false)
-  local ov_l = vim.api.nvim_win_get_cursor(ov_win)[1]
-  local ov_text = vim.api.nvim_buf_get_lines(ov_buf, ov_l - 1, ov_l, false)[1] or ""
-  check("d on overload param lands on its docstring definition", ov_text:find("sink : file-like", 1, true) ~= nil)
+  check("runtime docstring rides the hop", inspector_text():find("Register a sink") ~= nil)
+  check("d on overload param scrolls to its docstring definition", loupe_top():find("sink : file-like", 1, true) ~= nil)
   vim.api.nvim_feedkeys("d", "x", false)
 end
 require("typescope").close()
@@ -318,12 +372,82 @@ end)
 local lines_h8h = float_lines()
 check("client-match float opened", lines_h8h ~= nil)
 if lines_h8h then
-  check("string literal disqualifies key: int, picks [2/2]", lines_h8h[1]:find("%[2/2%]") ~= nil)
+  check("string literal disqualifies key: int, picks [2/2]", header_tag() == " ✓ [2/2] ─")
+
+  -- the header follows the overload group the cursor is in; the open-time
+  -- pick is only where it starts, and ✓ stays with the matched overload
+  local _, hwin = header()
+  local hcfg = vim.api.nvim_win_get_config(hwin)
+  check(
+    "header: the matched group's signature, its [i/n] on the border, not in the text",
+    header_text():find("default", 1, true) ~= nil and not header_text():find("[2/2]", 1, true)
+  )
+  check("header: no title", hcfg.title == nil or #hcfg.title == 0)
+  check(
+    "outline group rows keep their own [i/n]",
+    table.concat(lines_h8h, "\n"):find("[1/2]", 1, true) ~= nil
+      and table.concat(lines_h8h, "\n"):find("[2/2]", 1, true) ~= nil
+  )
+  local matched_tag, matched_h = header_tag(), hcfg.height
+  inspector_of("%[1/2%]")
+  check(
+    "cursor into group 1: the header shows its signature",
+    header_text():find("fetch(key", 1, true) ~= nil and not header_text():find("default", 1, true)
+  )
+  check("...and [1/2], with rule where ✓ was", header_tag() == " [1/2] ─")
+  local function bracket_col(tag)
+    return vim.fn.strdisplaywidth(tag:match("%[.*$"))
+  end
+  check(
+    "[i/n] sits at the same column with and without ✓",
+    bracket_col(header_tag()) == bracket_col(matched_tag)
+      and vim.api.nvim_win_get_config(hwin).footer_pos == "right"
+      and vim.api.nvim_win_get_config(hwin).width == hcfg.width
+  )
+  check("the header's height holds across groups", vim.api.nvim_win_get_config(hwin).height == matched_h)
+  inspector_of("default")
+  check("cursor back into group 2: ✓ [2/2] again", header_tag() == " ✓ [2/2] ─")
+  check("...and its signature", header_text():find("default", 1, true) ~= nil)
+
+  -- the lit param is the cursor's, in whichever group the header shows
+  check("...with nothing lit on its group row", vim.deep_equal(header_lit(), {}))
+  inspector_of("·%s+default%s")
+  check("...and the cursor's param lit on a param row", vim.deep_equal(header_lit(), { "default" }))
+  inspector_of("%[1/2%]")
+  check("a group row lights nothing", vim.deep_equal(header_lit(), {}))
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "x", false)
+  vim.api.nvim_feedkeys("j", "x", false)
+  vim.cmd("doautocmd CursorMoved")
+  check(
+    "group 1's key row: group 1's header, with its key lit",
+    header_tag() == " [1/2] ─" and vim.deep_equal(header_lit(), { "key" })
+  )
 end
 require("typescope").close()
 
--- unified float (U1): one window with the header over the rows, the panel
--- docked under it, and the docstring in its own view
+-- hover's usual case: no signatureHelp (cursor on the callee's name), so no
+-- active param. The written args still pick [2/2], and the cursor has to
+-- land in that group, or the header follows it straight back to [1/2]
+do
+  local mock = require("tests.mock_basedpyright")
+  mock.silent_signature = true
+  for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+    if l:find("fetch2 = fetch") then
+      vim.api.nvim_win_set_cursor(0, { i, 10 })
+    end
+  end
+  require("typescope").open()
+  vim.wait(2000, function()
+    return float_lines() ~= nil
+  end)
+  check("no signatureHelp: the written args still pick ✓ [2/2]", header_tag() == " ✓ [2/2] ─")
+  check("...and the header shows that group's signature", header_text():find("default", 1, true) ~= nil)
+  require("typescope").close()
+  mock.silent_signature = false
+end
+
+-- the three-pane frame (ADR 0001): header, outline, and the inspector in the
+-- loupe, each its own box; the docstring in its own view
 local function all_floats()
   local out = {}
   for _, w in ipairs(vim.api.nvim_list_wins()) do
@@ -343,49 +467,260 @@ require("typescope").open()
 vim.wait(2000, function()
   return float_lines() ~= nil
 end)
-local panels = 0
+local panes = {}
 for _, w in ipairs(all_floats()) do
-  if vim.bo[vim.api.nvim_win_get_buf(w)].filetype == "typescope_panel" then
-    panels = panels + 1
-  end
+  local ft = vim.bo[vim.api.nvim_win_get_buf(w)].filetype
+  panes[ft] = (panes[ft] or 0) + 1
 end
-check("exactly one float and its panel (anchor retired)", #all_floats() == 2 and panels == 1)
+check(
+  "three panes: header, outline, inspector (anchor retired)",
+  #all_floats() == 3 and panes.typescope_header == 1 and panes.typescope == 1 and panes.typescope_inspector == 1
+)
 local ulines, ts_win = float_lines()
 if ulines then
-  local all_u = table.concat(ulines, "\n")
+  local lit_at_open = header_lit()
+  local hlines, hwin = header()
   check(
-    "header: one-line call shape, elided to width, return kept",
-    ulines[1]:find("create_server(config", 1, true) ~= nil and ulines[1]:find("-> Response", 1, true) ~= nil
+    "header: the call shape, wrapped to width, return kept, the pane as tall as it",
+    table.concat(hlines, "\n"):find("create_server(config", 1, true) ~= nil
+      and hlines[#hlines]:find("-> Response", 1, true) ~= nil
+      and vim.api.nvim_win_get_config(hwin).height == #hlines
   )
-  check("separator rule present", all_u:find("────", 1, true) ~= nil)
+  check(
+    "the outline no longer carries the signature line",
+    not table.concat(ulines, "\n"):find("create_server(", 1, true)
+  )
 
-  -- d from a param row jumps to that param's definition in the docstring,
-  -- movement inside it is plain (k = one line, no bounce back to the rows),
-  -- and a second d returns to the row it left
+  -- each seam is the upper pane's whole bottom edge then the lower pane's
+  -- whole top edge, in the user's border style
+  local function full_box(w)
+    local b = vim.api.nvim_win_get_config(w).border
+    if type(b) ~= "table" or #b ~= 8 then
+      return false
+    end
+    for _, cell in ipairs(b) do
+      if (type(cell) == "table" and cell[1] or cell) == "" then
+        return false
+      end
+    end
+    return true
+  end
+  local _, iwin = inspector()
+  check("every pane is a whole box (rounded)", full_box(hwin) and full_box(ts_win) and full_box(iwin))
+  check(
+    "the footer is `? help` and one rule glyph, on the bottom pane only",
+    footer_text() == " ? help ─" and footer_of(hwin) == "" and footer_of(ts_win) == ""
+  )
+
+  -- the header is pinned: the outline scrolls under it, untouched
+  local hcfg = vim.api.nvim_win_get_config(hwin)
+  vim.api.nvim_set_current_win(ts_win)
+  vim.api.nvim_win_set_cursor(ts_win, { #ulines, 0 })
+  vim.cmd("doautocmd CursorMoved")
+  vim.cmd("normal! \5")
+  check(
+    "scrolling the outline leaves the header's buffer and window alone",
+    vim.deep_equal(header(), hlines) and vim.deep_equal(vim.api.nvim_win_get_config(hwin), hcfg)
+  )
+  vim.cmd("normal! gg")
+
+  -- the header lights the param of the outline row under the cursor: the
+  -- row's own, or the top-level param a nested row sits inside
+  do
+    vim.api.nvim_set_current_win(ts_win)
+    local function on(pattern)
+      for i, l in ipairs(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(ts_win), 0, -1, false)) do
+        if l:find(pattern) then
+          vim.api.nvim_win_set_cursor(ts_win, { i, 0 })
+          vim.cmd("doautocmd CursorMoved")
+          return header_lit()
+        end
+      end
+    end
+    check("opening on a param row lights it in the header", vim.deep_equal(lit_at_open, { "config" }))
+    check("moving to another param row moves the light", vim.deep_equal(on("·%s+timeout%s"), { "timeout" }))
+    check("a nested row lights its top-level param", vim.deep_equal(on("·%s+host%s"), { "config" }))
+    local _, marks = header_lit()
+    local tick = vim.b[vim.api.nvim_win_get_buf(hwin)].changedtick
+    check(
+      "...and a move under the same param leaves the header undrawn",
+      vim.deep_equal(on("·%s+port%s"), { "config" })
+        and vim.deep_equal(select(2, header_lit()), marks)
+        and vim.b[vim.api.nvim_win_get_buf(hwin)].changedtick == tick
+    )
+    check("the return row lights nothing", vim.deep_equal(on("returns"), {}))
+    vim.api.nvim_feedkeys("k", "x", false)
+    vim.cmd("doautocmd CursorMoved")
+    check("k back onto timeout lights it again", vim.deep_equal(header_lit(), { "timeout" }))
+    vim.cmd("normal! gg")
+    vim.cmd("doautocmd CursorMoved")
+  end
+
+  -- d swaps the inspector for the docstring view in the loupe; the outline
+  -- stays as it was, with the cursor in it. The view scrolls to the hovered
+  -- param's definition and follows the cursor; <C-d>/<C-u> scroll it from
+  -- the outline. A second d brings the inspector back.
   vim.api.nvim_set_current_win(ts_win)
   local ts_buf2 = vim.api.nvim_win_get_buf(ts_win)
   local function cursor_text()
     local l = vim.api.nvim_win_get_cursor(ts_win)[1]
     return l, vim.api.nvim_buf_get_lines(ts_buf2, l - 1, l, false)[1] or ""
   end
-  for i, l in ipairs(vim.api.nvim_buf_get_lines(ts_buf2, 0, -1, false)) do
-    -- the exact row ("· timeout  float"): plain "timeout" also hits the
-    -- header and config's timeout_ms child
-    if l:find("·%s+timeout%s") then
-      vim.api.nvim_win_set_cursor(ts_win, { i, 0 })
-      break
+  local function row_of(pattern)
+    for i, l in ipairs(vim.api.nvim_buf_get_lines(ts_buf2, 0, -1, false)) do
+      if l:find(pattern) then
+        return i
+      end
     end
   end
+  -- the exact row ("· timeout  float"): plain "timeout" also hits config's
+  -- timeout_ms child
+  local timeout_row = row_of("·%s+timeout%s")
+  vim.api.nvim_win_set_cursor(ts_win, { timeout_row, 0 })
+  vim.cmd("doautocmd CursorMoved")
+  local outline_before = vim.api.nvim_buf_get_lines(ts_buf2, 0, -1, false)
+  local _, iwin2 = inspector()
+  local loupe_h = vim.api.nvim_win_get_config(iwin2).height
+  local function pane_heights()
+    return {
+      vim.api.nvim_win_get_config(hwin).height,
+      vim.api.nvim_win_get_config(ts_win).height,
+      vim.api.nvim_win_get_config(iwin2).height,
+    }
+  end
+  local heights_before = pane_heights()
   vim.api.nvim_feedkeys("d", "x", false)
-  local dl, dtext = cursor_text()
-  check("d jumps to the hovered param's docstring definition", dtext:find("timeout : float", 1, true) ~= nil)
-  vim.api.nvim_feedkeys("k", "x", false)
-  local kl = vim.api.nvim_win_get_cursor(ts_win)[1]
-  check("k inside the doc view moves exactly one line", kl == dl - 1)
+  check("d: the loupe shows the docstring", inspector_text():find("Spin up", 1, true) ~= nil)
+  check(
+    "...the outline is visible and unchanged",
+    vim.deep_equal(vim.api.nvim_buf_get_lines(ts_buf2, 0, -1, false), outline_before)
+      and not vim.api.nvim_win_get_config(ts_win).hide
+      and vim.api.nvim_win_get_config(ts_win).height >= math.min(5, #outline_before)
+  )
+  check(
+    "...the cursor stays on its outline row",
+    vim.api.nvim_get_current_win() == ts_win and vim.api.nvim_win_get_cursor(ts_win)[1] == timeout_row
+  )
+  check("...the loupe grows toward the docstring", vim.api.nvim_win_get_config(iwin2).height > loupe_h)
+  check("...scrolled to the hovered param's definition", loupe_top():find("timeout : float", 1, true) ~= nil)
+  check("...the footer is still `? help`", footer_text() == " ? help ─")
+
+  local config_row = row_of("config%s+ServerConfig")
+  vim.api.nvim_win_set_cursor(ts_win, { config_row, 0 })
+  vim.cmd("doautocmd CursorMoved")
+  check("moving to another param scrolls to its definition", loupe_top():find("config : ServerConfig", 1, true) ~= nil)
+
+  -- from the docstring's top: the grown loupe may already show its tail
+  vim.api.nvim_win_call(iwin2, function()
+    vim.fn.winrestview({ topline = 1, lnum = 1 })
+  end)
+  local top_before = vim.fn.getwininfo(iwin2)[1].topline
+  vim.api.nvim_feedkeys(vim.keycode("<C-d>"), "x", false)
+  local top_down = vim.fn.getwininfo(iwin2)[1].topline
+  check("<C-d> scrolls the docstring view down", top_down > top_before)
+  check(
+    "...with focus and cursor left in the outline",
+    vim.api.nvim_get_current_win() == ts_win and vim.api.nvim_win_get_cursor(ts_win)[1] == config_row
+  )
+  vim.api.nvim_feedkeys(vim.keycode("<C-u>"), "x", false)
+  check("<C-u> scrolls it back up", vim.fn.getwininfo(iwin2)[1].topline < top_down)
+
+  vim.api.nvim_win_set_cursor(ts_win, { timeout_row, 0 })
+  vim.cmd("doautocmd CursorMoved")
   vim.api.nvim_feedkeys("d", "x", false)
   local _, back = cursor_text()
-  check("d returns to the param row it left", back:find("timeout", 1, true) ~= nil)
-  check("the return trip leaves the docstring", not table.concat(float_lines(), "\n"):find("Seconds to wait"))
+  check("d again: the cursor is still on its row", back:find("timeout", 1, true) ~= nil)
+  check("...and the inspector is back, on that row", inspector_text():find("^timeout") ~= nil)
+  check("...not the docstring", not inspector_text():find("Seconds to wait"))
+  check("...and every pane back at its prior height", vim.deep_equal(pane_heights(), heights_before))
+
+  -- ?: the help view, an overlay over the frame. The panes under it keep
+  -- their sizes, row keys are inert, and ? again returns to what the loupe
+  -- showed; d from help goes to the docstring view
+  local function help_win()
+    for _, w in ipairs(vim.api.nvim_list_wins()) do
+      if vim.bo[vim.api.nvim_win_get_buf(w)].filetype == "typescope_help" then
+        local c = vim.api.nvim_win_get_config(w)
+        return not c.hide and w or nil
+      end
+    end
+  end
+  local function title_of(w)
+    local text = ""
+    for _, chunk in
+      ipairs(type(vim.api.nvim_win_get_config(w).title) == "table" and vim.api.nvim_win_get_config(w).title or {})
+    do
+      text = text .. chunk[1]
+    end
+    return text
+  end
+  local function shown(w)
+    return not vim.api.nvim_win_get_config(w).hide
+  end
+  vim.api.nvim_feedkeys("?", "x", false)
+  local hw = help_win()
+  check("?: the help view opens", hw ~= nil)
+  if hw then
+    local hc = vim.api.nvim_win_get_config(hw)
+    local htext = table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(hw), 0, -1, false), "\n")
+    check("...titled `typescope help`", title_of(hw):find("typescope help", 1, true) ~= nil)
+    check(
+      "...drawn over the panes",
+      hc.zindex > vim.api.nvim_win_get_config(ts_win).zindex and hc.zindex > vim.api.nvim_win_get_config(iwin2).zindex
+    )
+    check("...with the same `? help` footer", footer_of(hw) == " ? help ─")
+    check("...listing the keys", htext:find("expand / collapse", 1, true) ~= nil)
+    check("...but not the key that opened it", not htext:find("toggle this help", 1, true))
+    check("...including s for the whole signature", htext:find("s%s+the whole signature") ~= nil)
+    check(
+      "...the panes under it stay shown, at their sizes",
+      vim.deep_equal(pane_heights(), heights_before) and shown(hwin) and shown(ts_win) and shown(iwin2)
+    )
+    check("...the inspector still in the loupe", inspector_text():find("^timeout") ~= nil)
+    check("...focus stays in the outline", vim.api.nvim_get_current_win() == ts_win)
+    local outline_now = vim.api.nvim_buf_get_lines(ts_buf2, 0, -1, false)
+    for _, key in ipairs({ "j", "2j", "k", "<CR>", "l", "h", "H", "<C-d>" }) do
+      vim.api.nvim_feedkeys(vim.keycode(key), "x", false)
+    end
+    check(
+      "row keys don't move or change the outline under help",
+      vim.api.nvim_win_get_cursor(ts_win)[1] == timeout_row
+        and vim.deep_equal(vim.api.nvim_buf_get_lines(ts_buf2, 0, -1, false), outline_now)
+    )
+    -- nor does any other motion: the outline holds still under help
+    for _, key in ipairs({ "G", "gg" }) do
+      vim.api.nvim_feedkeys(key, "x", false)
+      vim.cmd("doautocmd CursorMoved") -- headless never fires it
+      check("...nor does " .. key, vim.api.nvim_win_get_cursor(ts_win)[1] == timeout_row)
+    end
+    vim.api.nvim_feedkeys("?", "x", false)
+    check("? again closes help", help_win() == nil)
+    check("...back to the inspector", inspector_text():find("^timeout") ~= nil)
+    check("...every pane at its prior height", vim.deep_equal(pane_heights(), heights_before))
+
+    -- from the docstring view, ? and ? again land back in it
+    vim.api.nvim_feedkeys("d", "x", false)
+    local doc_heights = pane_heights()
+    vim.api.nvim_feedkeys("?", "x", false)
+    check("help opens over the docstring view", help_win() ~= nil)
+    check("...which keeps its size under it", vim.deep_equal(pane_heights(), doc_heights))
+    vim.api.nvim_feedkeys("?", "x", false)
+    check(
+      "? from help returns to the docstring view",
+      help_win() == nil and inspector_text():find("Spin up", 1, true) ~= nil
+    )
+    vim.api.nvim_feedkeys("d", "x", false)
+
+    -- d from help: help closes onto the docstring view
+    vim.api.nvim_feedkeys("?", "x", false)
+    vim.api.nvim_feedkeys("d", "x", false)
+    check(
+      "d from help shows the docstring view",
+      help_win() == nil and inspector_text():find("Spin up", 1, true) ~= nil
+    )
+    vim.api.nvim_feedkeys("d", "x", false)
+    check("...and d again the inspector", inspector_text():find("^timeout") ~= nil)
+  end
 
   -- active param (mock always reports 0 → config) renders TypeScopeActive
   local ts_buf = vim.api.nvim_win_get_buf(ts_win)
@@ -411,6 +746,301 @@ if ulines then
 
   require("typescope").close()
   check("float closed", #all_floats() == 0)
+end
+
+-- a custom border array: the same whole boxes, drawn in the user's cells
+do
+  local custom = { "+", "-", "+", "|", "+", "-", "+", "|" }
+  require("typescope").setup({ ui = { border = custom } })
+  require("typescope").open()
+  vim.wait(2000, function()
+    return float_lines() ~= nil
+  end)
+  local _, ow = float_lines()
+  local _, hw = header()
+  local _, iw = inspector()
+  local function cells(w)
+    local out = {}
+    for i, cell in ipairs(vim.api.nvim_win_get_config(w).border or {}) do
+      out[i] = type(cell) == "table" and cell[1] or cell
+    end
+    return out
+  end
+  check(
+    "every pane is a whole box (custom array)",
+    ow
+      and hw
+      and iw
+      and vim.deep_equal(cells(hw), custom)
+      and vim.deep_equal(cells(ow), custom)
+      and vim.deep_equal(cells(iw), custom)
+  )
+  check("...and the footer ends on the array's own rule glyph", footer_text() == " ? help -")
+  require("typescope").close()
+  require("typescope").setup({})
+end
+
+-- ui.min_height: a pane under its minimum shrinks to fit, so a
+-- one-parameter function's outline is as tall as its rows, not padded to 5
+do
+  local shout_line
+  for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+    if l:find("shouted = shout") then
+      shout_line = i
+    end
+  end
+  vim.api.nvim_set_current_win(vim.fn.bufwinid(bufnr))
+  -- the fixture's end scrolls the window; later checks read winline()
+  local view = vim.fn.winsaveview()
+  vim.api.nvim_win_set_cursor(0, { shout_line, 12 })
+  require("typescope").open()
+  vim.wait(2000, function()
+    return float_lines() ~= nil
+  end)
+  local rows, ow = float_lines()
+  check(
+    "a one-parameter outline is as tall as its rows, not the minimum of 5",
+    rows ~= nil and #rows < 5 and vim.api.nvim_win_get_config(ow).height == #rows
+  )
+  require("typescope").close()
+
+  -- the header wraps instead of eliding at the float's width...
+  vim.api.nvim_win_set_cursor(0, { call_line, 12 })
+  require("typescope").setup({ ui = { max_width = 30 } })
+  require("typescope").open()
+  vim.wait(2000, function()
+    return float_lines() ~= nil
+  end)
+  local head, hw = header()
+  check(
+    "a header wider than the float wraps onto as many rows as it needs",
+    head ~= nil and #head > 1 and vim.api.nvim_win_get_config(hw).height == #head
+  )
+  check("...keeping every param", header_text():find("timeout", 1, true) ~= nil)
+  require("typescope").close()
+
+  -- ...and a budget too small for it cuts it in the middle
+  require("typescope").setup({ ui = { max_width = 30, max_height = 3 } })
+  require("typescope").open()
+  vim.wait(2000, function()
+    return float_lines() ~= nil
+  end)
+  head, hw = header()
+  check(
+    "a header that can't fit its rows is cut to them, start and end visible",
+    head ~= nil
+      and #head == 1
+      and vim.api.nvim_win_get_config(hw).height == 1
+      and head[1]:find("^create_server%(")
+      and head[1]:find("…", 1, true)
+      and head[1]:find("Response$")
+  )
+  require("typescope").close()
+
+  -- the docstring view grows the frame to max_height, then squashes the
+  -- outline and then the header to their minimums (the header cut in the
+  -- middle, not just its first rows), keeping the outline's cursor row in
+  -- view; d again puts every pane back
+  require("typescope").setup({
+    ui = { max_width = 30, max_height = 10, min_height = { header = 1, outline = 2, inspector = 1 } },
+  })
+  require("typescope").open()
+  vim.wait(2000, function()
+    return float_lines() ~= nil
+  end)
+  local orows
+  orows, ow = float_lines()
+  head, hw = header()
+  local _, iw = inspector()
+  local function heights()
+    return {
+      vim.api.nvim_win_get_config(hw).height,
+      vim.api.nvim_win_get_config(ow).height,
+      vim.api.nvim_win_get_config(iw).height,
+    }
+  end
+  vim.api.nvim_set_current_win(ow)
+  vim.api.nvim_win_set_cursor(ow, { #orows, 0 })
+  vim.cmd("doautocmd CursorMoved")
+  local before, head_before = heights(), header()
+  vim.api.nvim_feedkeys("d", "x", false)
+  local during = heights()
+  check(
+    "docstring view at max_height squashes the outline and the header to their minimums",
+    #head > 1 and during[1] == 1 and during[2] == 2 and during[1] + during[2] + during[3] == 10
+  )
+  local hcut = header() or {}
+  check(
+    "...the squashed header is cut in the middle, start and end visible",
+    #hcut == 1 and hcut[1]:find("^create_server%(") ~= nil and hcut[1]:find("Response$") ~= nil
+  )
+  local info = vim.fn.getwininfo(ow)[1]
+  local cur = vim.api.nvim_win_get_cursor(ow)[1]
+  check("...the outline keeps its cursor row in view", cur == #orows and cur >= info.topline and cur <= info.botline)
+  vim.api.nvim_feedkeys("d", "x", false)
+  check("d again: every pane is back at its prior height", vim.deep_equal(heights(), before))
+  check("...and the header is whole again", vim.deep_equal(header(), head_before))
+  require("typescope").close()
+  require("typescope").setup({})
+  vim.fn.winrestview(view)
+end
+
+-- ui.header_max_height: past the cap the header keeps the required params,
+-- marks the gap `…+N` in TypeScopeElided (lit instead when it hides the
+-- cursor row's param), and s shows the whole signature as an overlay
+do
+  local view = vim.fn.winsaveview()
+  local function overlay(ft)
+    for _, w in ipairs(vim.api.nvim_list_wins()) do
+      if vim.bo[vim.api.nvim_win_get_buf(w)].filetype == ft then
+        return not vim.api.nvim_win_get_config(w).hide and w or nil
+      end
+    end
+  end
+  local function title_of(w)
+    local text = ""
+    for _, chunk in ipairs(vim.api.nvim_win_get_config(w).title or {}) do
+      text = text .. chunk[1]
+    end
+    return text
+  end
+  local function marks_of(w, group)
+    local buf, out = vim.api.nvim_win_get_buf(w), {}
+    local text = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    for _, m in ipairs(vim.api.nvim_buf_get_extmarks(buf, -1, 0, -1, { details = true })) do
+      if m[4].hl_group == group then
+        table.insert(out, text[m[2] + 1]:sub(m[3] + 1, m[4].end_col))
+      end
+    end
+    return out
+  end
+  local function open_at_call()
+    vim.api.nvim_set_current_win(vim.fn.bufwinid(bufnr))
+    vim.api.nvim_win_set_cursor(0, { call_line, 12 })
+    require("typescope").open()
+    vim.wait(2000, function()
+      return float_lines() ~= nil
+    end)
+  end
+  require("typescope").setup({ ui = { max_width = 40, header_max_height = 1 } })
+  open_at_call()
+  local head, hw = header()
+  check(
+    "a header past ui.header_max_height keeps the required param, …+N at the gap",
+    head ~= nil
+      and vim.api.nvim_win_get_config(hw).height == 1
+      and vim.deep_equal(head, { "create_server(config, …+1) -> Response" })
+  )
+  check(
+    "...the gap mark in TypeScopeElided",
+    hw ~= nil and vim.deep_equal(marks_of(hw, "TypeScopeElided"), { "…+1" })
+  )
+  inspector_of("·%s+timeout%s")
+  check(
+    "the cursor on the hidden param lights its gap mark, the header unchanged",
+    vim.deep_equal(marks_of(hw, "TypeScopeActive"), { "…+1" }) and vim.deep_equal(header(), head)
+  )
+  local _, ow = float_lines()
+  local _, iw = inspector()
+  local function heights()
+    return {
+      vim.api.nvim_win_get_config(hw).height,
+      vim.api.nvim_win_get_config(ow).height,
+      vim.api.nvim_win_get_config(iw).height,
+    }
+  end
+  local before, row_before = heights(), vim.api.nvim_win_get_cursor(ow)[1]
+  local outline_before = float_lines()
+  vim.api.nvim_feedkeys("s", "x", false)
+  local sw = overlay("typescope_signature")
+  check("s: the full signature opens over the frame", sw ~= nil)
+  if sw then
+    local sc = vim.api.nvim_win_get_config(sw)
+    local text = table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(sw), 0, -1, false), "\n")
+    check("...titled `signature`", title_of(sw) == " signature ")
+    check("...drawn over the panes", sc.zindex > vim.api.nvim_win_get_config(ow).zindex)
+    check("...with the same `? help` footer", footer_of(sw) == " ? help ─")
+    check("...holding the whole header", text:find("config", 1, true) and text:find("timeout=…", 1, true))
+    check("...with no gap mark", #marks_of(sw, "TypeScopeElided") == 0)
+    check("...and the selected param lit", vim.deep_equal(marks_of(sw, "TypeScopeActive"), { "timeout" }))
+    check("...the panes under it at their sizes", vim.deep_equal(heights(), before))
+    check("...focus stays in the outline", vim.api.nvim_get_current_win() == ow)
+    for _, key in ipairs({ "j", "k", "<CR>", "l", "h", "H" }) do
+      vim.api.nvim_feedkeys(vim.keycode(key), "x", false)
+    end
+    check(
+      "row keys don't move or change the outline under it",
+      vim.api.nvim_win_get_cursor(ow)[1] == row_before and vim.deep_equal(float_lines(), outline_before)
+    )
+    for _, key in ipairs({ "G", "gg" }) do
+      vim.api.nvim_feedkeys(key, "x", false)
+      vim.cmd("doautocmd CursorMoved") -- headless never fires it
+      check("...nor does " .. key, vim.api.nvim_win_get_cursor(ow)[1] == row_before)
+    end
+    vim.api.nvim_feedkeys("s", "x", false)
+    check("s again closes it", overlay("typescope_signature") == nil and float_lines() ~= nil)
+    vim.api.nvim_feedkeys("s", "x", false)
+    vim.api.nvim_feedkeys("?", "x", false)
+    check("? swaps it for help", overlay("typescope_signature") == nil and overlay("typescope_help") ~= nil)
+    vim.api.nvim_feedkeys("s", "x", false)
+    check("...and s swaps help for it", overlay("typescope_signature") ~= nil and overlay("typescope_help") == nil)
+    for _, key in ipairs({ "q", "<Esc>" }) do
+      if not overlay("typescope_signature") then
+        open_at_call()
+        vim.api.nvim_set_current_win(select(2, float_lines()))
+        vim.api.nvim_feedkeys("s", "x", false)
+      end
+      vim.api.nvim_feedkeys(vim.keycode(key), "x", false)
+      check(key .. " closes the float from the signature overlay", float_lines() == nil and #all_floats() == 0)
+    end
+    open_at_call()
+    check("the overlay is closed again on every open", overlay("typescope_signature") == nil)
+  end
+  require("typescope").close()
+
+  -- taller than the room: <C-d>/<C-u> scroll it. A narrow frame wraps the
+  -- header to a row per param; a short screen leaves the overlay, which
+  -- may cover the whole frame, still fewer rows than that
+  local lines_before = vim.o.lines
+  require("typescope").setup({ ui = { max_width = 10, header_max_height = 1 } })
+  vim.o.lines = 10
+  vim.api.nvim_set_current_win(vim.fn.bufwinid(bufnr))
+  vim.api.nvim_win_set_cursor(0, { call_line, 12 })
+  vim.cmd("normal! zb")
+  require("typescope").open()
+  vim.wait(2000, function()
+    return float_lines() ~= nil
+  end)
+  vim.api.nvim_set_current_win(select(2, float_lines()))
+  vim.api.nvim_feedkeys("s", "x", false)
+  sw = overlay("typescope_signature")
+  local slines = sw and vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(sw), 0, -1, false) or {}
+  check("an overlay taller than the room is cut to it", sw ~= nil and vim.api.nvim_win_get_config(sw).height < #slines)
+  if sw then
+    -- a count scrolls that many lines, as <C-d> does anywhere (the default,
+    -- half the window, would be 2 here)
+    vim.api.nvim_feedkeys(vim.keycode("1<C-d>"), "x", false)
+    check("...1<C-d> scrolls it one line", vim.fn.getwininfo(sw)[1].topline == 2)
+    vim.api.nvim_feedkeys(vim.keycode("1<C-u>"), "x", false)
+    check("...1<C-u> one line back", vim.fn.getwininfo(sw)[1].topline == 1)
+    vim.api.nvim_feedkeys(vim.keycode("<C-d>"), "x", false)
+    local top = vim.fn.getwininfo(sw)[1].topline
+    check("...<C-d> scrolls it", top > 1)
+    vim.api.nvim_feedkeys(vim.keycode("<C-u>"), "x", false)
+    check("...and <C-u> back", vim.fn.getwininfo(sw)[1].topline < top)
+  end
+  require("typescope").close()
+  vim.o.lines = lines_before
+
+  -- a header under the cap: s does nothing
+  require("typescope").setup({})
+  open_at_call()
+  vim.api.nvim_set_current_win(select(2, float_lines()))
+  local insp = inspector_text()
+  vim.api.nvim_feedkeys("s", "x", false)
+  check("s does nothing when the header isn't cut", overlay("typescope_signature") == nil and inspector_text() == insp)
+  require("typescope").close()
+  vim.fn.winrestview(view)
 end
 
 -- resolve cache (U2): reopen reuses the tree — the lazily expanded `returns`
@@ -701,8 +1331,8 @@ do
   require("typescope").setup({}) -- back to defaults for the remaining tests
 end
 
--- K ledger layout (U6): one-line rows — name | type | short default — with a
--- docked panel under them that follows the cursor once the float is focused
+-- K outline layout (U6): one-line rows — name | type | short default — with a
+-- docked inspector under them that follows the cursor once the float is focused
 do
   vim.api.nvim_win_set_cursor(0, { call_line, 12 })
   require("typescope").open()
@@ -710,33 +1340,33 @@ do
     return float_lines() ~= nil
   end)
   local llines, lw = float_lines()
-  check("ledger float opened", llines ~= nil)
+  check("outline float opened", llines ~= nil)
   if llines then
     local all = table.concat(llines, "\n")
     local timeout_row
     for i, l in ipairs(llines) do
       if l:find("timeout") then
-        timeout_row = i -- last match: the header line also says "timeout"
+        timeout_row = i
       end
     end
     check(
-      "ledger rows are single lines (timeout: type + inline default)",
+      "outline rows are single lines (timeout: type + inline default)",
       timeout_row ~= nil and llines[timeout_row]:find("float") ~= nil and llines[timeout_row]:find("= 30%.0") ~= nil
     )
-    check("ledger rows carry no expand hints or examples", not all:find("<CR>") and not all:find("localhost"))
-    check("the panel opens with the float", panel() ~= nil)
-    check("...on the first row when no param is active", panel_text():find("^config") ~= nil)
-    check("the ledger carries no docstring section", not all:find("Spin up"))
-    check("the footer carries the docstring's first sentence", footer_text():find("Spin up") ~= nil)
+    check("outline rows carry no expand hints or examples", not all:find("<CR>") and not all:find("localhost"))
+    check("the inspector opens with the float", inspector() ~= nil)
+    check("...on the first row when no param is active", inspector_text():find("^config") ~= nil)
+    check("the outline carries no docstring section", not all:find("Spin up"))
+    check("the footer drops the docstring's first sentence", footer_text() == " ? help ─")
 
-    -- focus, rest on the timeout row: the panel shows it, the rows stay put
+    -- focus, rest on the timeout row: the inspector shows it, the rows stay put
     vim.api.nvim_set_current_win(lw)
     vim.api.nvim_win_set_cursor(lw, { timeout_row, 0 })
     vim.cmd("doautocmd CursorMoved")
     local followed = vim.wait(1000, function()
-      return panel_text():find("^timeout") ~= nil and panel_text():find("= 30%.0") ~= nil
+      return inspector_text():find("^timeout") ~= nil and inspector_text():find("= 30%.0") ~= nil
     end, 50)
-    check("the panel follows the cursor (timeout default)", followed)
+    check("the inspector follows the cursor (timeout default)", followed)
     check("moving the cursor leaves the rows alone", table.concat(float_lines(), "\n") == all)
 
     local function cursor_line()
@@ -766,23 +1396,40 @@ do
     check("2j comes back", row_after({ "2j" }, two) == timeout_row)
     vim.api.nvim_win_set_cursor(lw, { timeout_row, 0 })
 
-    -- d: the whole docstring where the rows were, the panel folded away; d
-    -- again brings the rows back with the cursor where it was
+    -- d: the docstring view in the loupe, the rows left as they were; d
+    -- again brings the inspector back on the cursor's row
     vim.api.nvim_feedkeys("d", "x", false)
-    local doc = table.concat(float_lines(), "\n")
-    check("d shows the docstring in place of the rows", doc:find("Spin up") ~= nil and not doc:find("= 30%.0"))
-    check("...with the panel hidden", panel_text() == "")
+    check("d keeps the rows", vim.deep_equal(float_lines(), llines))
+    check(
+      "...and puts the docstring in the loupe",
+      inspector_text():find("Spin up") ~= nil and not inspector_text():find("= 30%.0")
+    )
     vim.api.nvim_feedkeys("d", "x", false)
-    -- the rules may have stretched: the doc view grew the float, and it
-    -- never shrinks back
-    local function rows(lines)
-      return vim.tbl_filter(function(l)
-        return not vim.startswith(l, "─")
-      end, lines)
-    end
-    check("d again brings the rows back", vim.deep_equal(rows(float_lines()), rows(llines)))
+    check("d again leaves the rows alone", vim.deep_equal(float_lines(), llines))
     check("...on the row it left", cursor_line():find("timeout") ~= nil)
-    check("...with the panel back", panel_text():find("^timeout") ~= nil)
+    check("...with the inspector back", inspector_text():find("^timeout") ~= nil)
+
+    -- q and <Esc> close the float from the docstring view and from help
+    for i, key in ipairs({ "q", "<Esc>", "q", "<Esc>" }) do
+      local from = i <= 2 and "d" or "?"
+      vim.api.nvim_feedkeys(from, "x", false)
+      vim.api.nvim_feedkeys(vim.keycode(key), "x", false)
+      check(
+        ("%s closes the float from the %s view"):format(key, from == "d" and "docstring" or "help"),
+        #all_floats() == 0
+      )
+      if i < 4 then
+        vim.api.nvim_win_set_cursor(0, { call_line, 12 })
+        require("typescope").open()
+        vim.wait(3000, function()
+          return float_lines() ~= nil
+        end)
+        local _, w = float_lines()
+        if w then
+          vim.api.nvim_set_current_win(w)
+        end
+      end
+    end
     require("typescope").close()
   end
 end
@@ -863,12 +1510,12 @@ check("evaluated-leaf float opened", lines6 ~= nil)
 if lines6 then
   local all6 = table.concat(lines6, "\n")
   check("alias leaf keeps declared name", all6:find("LoopMode") ~= nil)
-  local mode_panel = panel_of("·%s+mode%s")
+  local mode_inspector = inspector_of("·%s+mode%s")
   check(
     "alias leaf decorated with evaluated type",
-    mode_panel:find("≈", 1, true) ~= nil and mode_panel:find("Literal") ~= nil
+    mode_inspector:find("≈", 1, true) ~= nil and mode_inspector:find("Literal") ~= nil
   )
-  -- the row shows the inference as the type itself; the panel has no ≈ to add
+  -- the row shows the inference as the type itself; the inspector has no ≈ to add
   local count_ok = false
   for _, l in ipairs(lines6) do
     if l:find("·%s+count%s") and l:find("int", 1, true) and not l:find("Any") then
@@ -901,7 +1548,7 @@ end
 require("typescope").close()
 
 -- overloads (U4): sibling @overload defs render as stacked groups — active
--- expanded, others collapsed, [n/m] in the header
+-- expanded, others collapsed, [n/m] on the header's border
 for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
   if l:find("fetched = fetch") then
     vim.api.nvim_win_set_cursor(0, { i, 11 })
@@ -915,7 +1562,7 @@ local lines9, ov_win = float_lines()
 check("overload float opened", lines9 ~= nil)
 if lines9 then
   local all9 = table.concat(lines9, "\n")
-  check("overload header carries [1/2]", lines9[1]:find("%[1/2%]") ~= nil)
+  check("overload header's border carries ✓ [1/2]", header_tag() == " ✓ [1/2] ─")
   check("both overload groups stacked", all9:find("%[1/2%]") ~= nil and all9:find("%[2/2%]") ~= nil)
   check("active overload expanded (key: int visible)", all9:find("int") ~= nil)
   check("inactive overload collapsed (its params hidden)", not all9:find("·%s+default%s"))
@@ -951,7 +1598,7 @@ if lines9 then
   -- resolution from the first paint: the oracle answers `resolved` inline,
   -- so there is no evaluation-only expansion to fold (that mechanic went
   -- with the treesitter resolver, design/oracle.md §7)
-  check("alias leaf shows its resolution ≈ from the first paint", panel_of("·%s+mode%s"):find("Literal") ~= nil)
+  check("alias leaf shows its resolution ≈ from the first paint", inspector_of("·%s+mode%s"):find("Literal") ~= nil)
 end
 require("typescope").close()
 
@@ -970,14 +1617,19 @@ local lines7 = float_lines()
 check("class-hover float opened", lines7 ~= nil)
 if lines7 then
   local all7 = table.concat(lines7, "\n")
-  -- the row may cut the category short at this width; the panel has it whole
+  -- the row may cut the category short at this width; the inspector has it whole
   check(
     "class root with category + ancestry header",
-    lines7[1]:find("ServerConfig") and panel_of("ServerConfig"):find("(dataclass ← BaseConfig)", 1, true)
+    lines7[1]:find("ServerConfig") and inspector_of("ServerConfig"):find("(dataclass ← BaseConfig)", 1, true)
   )
   check("class fields shown", all7:find("host") and all7:find("retry"))
-  check("class inheritance merged", all7:find("env") and panel_of("·%s+env%s"):find("↑BaseConfig", 1, true))
-  check("class docstring in the footer", footer_text():find("Connection settings") ~= nil)
+  check("class inheritance merged", all7:find("env") and inspector_of("·%s+env%s"):find("↑BaseConfig", 1, true))
+  check("a class hover has no header pane (its root row is the header)", header() == nil)
+  local _, cw = float_lines()
+  vim.api.nvim_set_current_win(cw)
+  vim.api.nvim_feedkeys("d", "x", false)
+  check("class docstring in the docstring view", inspector_text():find("Connection settings") ~= nil)
+  vim.api.nvim_feedkeys("d", "x", false)
 end
 require("typescope").close()
 
@@ -1045,7 +1697,7 @@ do
 end
 
 -- ui.max_width is a FRACTION of editor width, and a headless 80-column
--- editor caps the float at 40 — which is what the ledger already needs, so
+-- editor caps the float at 40 — which is what the outline already needs, so
 -- the float opens pinned at its ceiling and nothing can grow. Widen the
 -- editor so the landing frame has somewhere to go; restored below.
 local prev_columns = vim.o.columns
@@ -1067,7 +1719,7 @@ check("float for LLM test opened", llm_win ~= nil)
 if llm_win then
   vim.api.nvim_set_current_win(llm_win)
   -- e asks about the cursor's row and its siblings: park on config.host
-  panel_of("·%s+host%s")
+  inspector_of("·%s+host%s")
   vim.api.nvim_feedkeys("e", "x", false)
   -- wait for BOTH: values uncover progressively as the reveal's blocks fall
   -- (38c), so the first one on screen doesn't mean the row has settled
@@ -1079,7 +1731,7 @@ if llm_win then
   end
   vim.wait(4000, function()
     sample()
-    return panel_text():find("llm%-host") ~= nil
+    return inspector_text():find("llm%-host") ~= nil
   end, 20)
   -- values become legible partway through the grow, so keep sampling past the
   -- predicate or the tail of the ease is never seen
@@ -1087,9 +1739,9 @@ if llm_win then
     sample()
     return false
   end, 20)
-  check("LLM values rendered after e", panel_text():find("llm%-host") ~= nil)
+  check("LLM values rendered after e", inspector_text():find("llm%-host") ~= nil)
   -- one ask covers the row's siblings: port's value came back in the same batch
-  check("...and its siblings' with it", panel_of("·%s+port%s"):find("8443") ~= nil)
+  check("...and its siblings' with it", inspector_of("·%s+port%s"):find("8443") ~= nil)
   -- >2 distinct widths means it eased; exactly 2 (old width, new width) is the
   -- single-frame snap this replaced
   local lo, hi = math.huge, 0
@@ -1140,7 +1792,7 @@ if slow_win then
   end
   vim.api.nvim_set_current_win(slow_win)
   -- e asks about the cursor's row and its siblings: park on config.host
-  panel_of("·%s+host%s")
+  inspector_of("·%s+host%s")
   vim.api.nvim_feedkeys("e", "x", false)
   -- Generous on purpose: ~1s warmup probe, then 4.1s + 4.1s across the retry,
   -- and the whole thing shifts under load. A tight window here fails by
@@ -1172,13 +1824,13 @@ check("float for fallback test opened", dead_win ~= nil)
 if dead_win then
   vim.api.nvim_set_current_win(dead_win)
   -- e asks about the cursor's row and its siblings: park on config.host
-  panel_of("·%s+host%s")
+  inspector_of("·%s+host%s")
   vim.api.nvim_feedkeys("e", "x", false)
-  -- the panel is a bar while the ask is out; the failure takes it down
+  -- the inspector is a bar while the ask is out; the failure takes it down
   vim.wait(5000, function()
-    return panel_text():find("localhost") ~= nil
+    return inspector_text():find("localhost") ~= nil
   end)
-  check("heuristics survive unreachable ollama", panel_text():find("localhost") ~= nil)
+  check("heuristics survive unreachable ollama", inspector_text():find("localhost") ~= nil)
 end
 require("typescope").close()
 
@@ -1203,12 +1855,12 @@ require("typescope").open()
 vim.wait(2000, function()
   return float_lines() ~= nil
 end)
-panel_of("·%s+host%s")
+inspector_of("·%s+host%s")
 vim.wait(6000, function()
-  return panel_text():find("llm%-host") ~= nil
+  return inspector_text():find("llm%-host") ~= nil
 end)
 vim.notify = auto_orig_notify
-local auto = panel_text()
+local auto = inspector_text()
 check("auto LLM values render without pressing e", auto:find("llm%-host") ~= nil)
 if not auto:find("llm%-host") then
   print("  DEBUG float:\n" .. auto)
@@ -1216,8 +1868,8 @@ if not auto:find("llm%-host") then
 end
 require("typescope").close()
 
--- The ledger's first ask happens while the float is still being built: the
--- panel opens on greet's `label`, a leaf with no answer yet, and asks for it
+-- The outline's first ask happens while the float is still being built: the
+-- inspector opens on greet's `label`, a leaf with no answer yet, and asks for it
 -- from inside attach(). That ask once went through a session that did not
 -- exist yet, was dropped without a word, and left every later ask (e
 -- included) parked behind a batch that was never sent.
@@ -1236,11 +1888,11 @@ do
   vim.wait(2000, function()
     return float_lines() ~= nil
   end)
-  check("the ledger opens on greet's first row", panel_text():find("^label") ~= nil)
+  check("the outline opens on greet's first row", inspector_text():find("^label") ~= nil)
   local landed = vim.wait(5000, function()
-    return panel_text():find("fixture%-label") ~= nil
+    return inspector_text():find("fixture%-label") ~= nil
   end, 20)
-  check("the ask made while the float opens is sent, and lands in the panel", landed)
+  check("the ask made while the float opens is sent, and lands in the inspector", landed)
   require("typescope").close()
 end
 require("typescope").setup({})

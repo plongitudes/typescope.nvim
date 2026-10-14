@@ -10,5 +10,5 @@ The K float is three windows (header, outline, loupe) placed together by one rou
 
 ## Consequences
 
-- The help view is not a pane: it is an overlay drawn over the frame, so opening it never resizes the panes under it.
-- Frame growth (docstring view, help) always moves away from the line of code at the cursor, never over it.
+- The help view is not a pane: it is an overlay drawn over the frame, so opening it never resizes the panes under it. The signature view (`s`, added with the header cap) is drawn over the frame the same way.
+- Frame growth (docstring view, help, signature view) always moves away from the line of code at the cursor, never over it.

@@ -107,7 +107,7 @@ do
   print("---- rows ----")
   print(text)
   check("property row present", text:find("ok", 1, true) ~= nil and text:find("bool", 1, true) ~= nil)
-  -- ≈ is the panel's: the row shows the evaluation as its type, never Any
+  -- ≈ is the inspector's: the row shows the evaluation as its type, never Any
   check("inferred row shows the evaluation as its type", text:find("parsed   dict[str, int]", 1, true) ~= nil)
   check("no row says Any", not text:find("Any", 1, true))
   check(

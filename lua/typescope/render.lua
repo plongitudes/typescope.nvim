@@ -24,16 +24,17 @@
 ---@class typescope.RenderOpts
 ---@field style typescope.Charset
 ---@field max_width integer resolved columns (callers use config.resolved_max_width)
----@field window_width? integer inner width the float ALREADY has; content is laid out to at least it (rules stretch to it, pending bars reach it)
----@field view? "panel"|"doc" the float's other two surfaces: the docked panel for `panel_node`, or the full docstring alone
----@field panel_node? typescope.Node view = "panel": the node whose details the panel shows
+---@field window_width? integer inner width the float ALREADY has; pending bars reach it
+---@field view? "header"|"inspector"|"doc" the float's other surfaces: the header pane's signature, the inspector for `inspector_node`, or the full docstring alone
+---@field inspector_node? typescope.Node view = "inspector": the node whose details the inspector shows
 ---@field show_examples boolean
 ---@field example_kind "heuristic"|"llm"
 ---@field example_pending? fun(node: typescope.Node): boolean leaves whose LLM value is still coming (38c); injected so render stays pure
 ---@field example_reveal? fun(node: typescope.Node): number?, number?, integer? 0..1 through the fall, the wave phase it froze at, and the float width it froze at (38c)
 ---@field example_phase? number 0..1 position of the travelling wave through the pending bar (38c)
 ---@field lang? string treesitter language for injected snippet highlighting
----@field header? string one-line call shape shown above the tree
+---@field header? string call shape, drawn by view = "header", wrapped at whole params
+---@field header_rows? integer rows the header may take; past them it is cut in the middle (nil: as many as it wraps to)
 ---@field header_active? string param name lit as active in the header (matches insert's signature block)
 ---@field docstring? string full docstring text, shown by view = "doc"
 
@@ -195,7 +196,7 @@ local function fit_prefix(text, cells)
 end
 
 --- Byte index at which the last `cells` columns of `text` begin — fit_prefix
---- read from the other end. Needed by the ledger's middle-ellipsis, which has
+--- read from the other end. Needed by the outline's middle-ellipsis, which has
 --- to keep a tail as well as a head: identifiers discriminate at both ends,
 --- and counting the tail in bytes gives a short one on multibyte names and
 --- can start it inside a character.
@@ -280,7 +281,7 @@ local DEFAULT_RAMP = { "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█" }
 local CLIP = { clip = true }
 
 -- extract/python.lua normalises a stub's `= ...` to this. Not a value: it means
--- "has a default, unspecified", which is why the panel never repeats it.
+-- "has a default, unspecified", which is why the inspector never repeats it.
 local STUB_DEFAULT = "…"
 
 ---@param opts typescope.RenderOpts|typescope.TypingOpts
@@ -378,7 +379,7 @@ end
 --- the value's real end, so those cells rise a few rungs on the landing frame.
 --- That surge is the deliberate cost of keeping the wavelength — the
 --- alternative, pinning the taper to the window edge as it slides, tripled the
---- highlight runs per frame (817 -> 2767 on a 48-leaf ledger) for a subtler
+--- highlight runs per frame (817 -> 2767 on a 48-leaf outline) for a subtler
 --- join. It also lands where the window is about to open, which is the least
 --- conspicuous place on the row for it to happen.
 ---@param phase number
@@ -797,12 +798,7 @@ function M.render(roots, opts)
     emit(line, node_id)
   end
 
-  -- ── sections: the header over the rows, and the docstring view ─────────
-  local separators = {}
-  local function emit_separator()
-    table.insert(separators, #result.lines + 1)
-    emit(new_line(), nil)
-  end
+  -- ── sections: the header pane, and the docstring view ──────────────────
   -- greedy word-wrap for prose/header text, hanging indent 2 on continuations
   local function emit_prose(text, group)
     local remaining = text
@@ -839,7 +835,7 @@ function M.render(roots, opts)
 
   -- The type a row shows, and whether it is really the evaluation standing
   -- in for it: an unannotated param's declared type is only implicit Any, so
-  -- the inferred view is shown as the type itself (and the panel's ≈ line
+  -- the inferred view is shown as the type itself (and the inspector's ≈ line
   -- then has nothing to add).
   ---@return string text, boolean is_evaluation
   local function row_type(node)
@@ -852,7 +848,7 @@ function M.render(roots, opts)
   end
 
   -- The facts read one node at a time — ≈ evaluation, full default, example,
-  -- origin — under a line prefix (the panel's is empty). Nothing emitted
+  -- origin — under a line prefix (the inspector's is empty). Nothing emitted
   -- when there is nothing to say.
   ---@param node typescope.Node
   ---@param dprefix string chrome carried at the start of every line
@@ -898,11 +894,235 @@ function M.render(roots, opts)
     end
   end
 
-  -- The ledger's other two surfaces. Each is drawn into its own window (the
-  -- panel) or in place of the rows (the doc view), so neither carries the
-  -- header, the rows, or the other.
-  if opts.view == "panel" then
-    local node = opts.panel_node
+  -- The header's pieces, in units that stay on one row together: the name
+  -- with its paren, each param with its comma (the last with the closing
+  -- paren), the return type. `lead` joins a unit to the one before it on the
+  -- same row; a continuation row starts at the hanging indent instead.
+  ---@param params (string|{ mark: string, lit: boolean })[] param tokens, and a gap mark where the cut dropped some
+  local function header_units(fn_name, params, ret)
+    local units = { { lead = "", pieces = { { fn_name, "TypeScopeHeader" }, { "(", "TypeScopeHeader" } } } }
+    for i, tok in ipairs(params) do
+      local pieces = {}
+      if type(tok) == "table" then
+        -- warn-coloured against the param blue; the one hiding the lit
+        -- param is lit in its place, so the header holds still
+        pieces[1] = { tok.mark, tok.lit and "TypeScopeActive" or "TypeScopeElided" }
+      elseif tok == "*" or tok == "/" then
+        pieces[1] = { tok, "TypeScopeKeyword" }
+      else
+        local name, mark = tok:match("^(.-)(=…)$")
+        name = name or tok
+        pieces[1] = { name, name == opts.header_active and "TypeScopeActive" or "TypeScopeParam" }
+        if mark then
+          pieces[2] = { mark, "TypeScopeChrome" }
+        end
+      end
+      table.insert(pieces, i < #params and { ",", "TypeScopeChrome" } or { ")", "TypeScopeHeader" })
+      table.insert(units, { lead = i == 1 and "" or " ", pieces = pieces })
+    end
+    if #params == 0 then
+      table.insert(units[1].pieces, { ")", "TypeScopeHeader" })
+    end
+    if ret then
+      table.insert(
+        units,
+        { lead = " ", pieces = { { "-> ", "TypeScopeChrome" }, { ret, "TypeScopeType", "replace" } } }
+      )
+    end
+    return units
+  end
+
+  -- Greedy wrap of header units at max_width. A unit too wide for a fresh
+  -- row is split piece by piece at find_break_point (in practice: a long
+  -- return type, at its commas).
+  local function wrap_header(units)
+    local INDENT = "  "
+    local rows, line = {}, new_line()
+    local function fresh()
+      return line.text == "" or line.text == INDENT
+    end
+    local function next_row()
+      table.insert(rows, line)
+      line = new_line():add(INDENT)
+    end
+    for _, unit in ipairs(units) do
+      local width = 0
+      for _, piece in ipairs(unit.pieces) do
+        width = width + strwidth(piece[1])
+      end
+      local lead = fresh() and "" or unit.lead
+      if not fresh() and line.width + strwidth(lead) + width > opts.max_width then
+        next_row()
+        lead = ""
+      end
+      line:add(lead)
+      for _, piece in ipairs(unit.pieces) do
+        local text, from = piece[1], 0
+        while text ~= "" do
+          local avail = opts.max_width - line.width
+          -- an indent already past the edge has no room to split into
+          if strwidth(text) <= avail or fresh() and avail < 1 then
+            line:add(text, piece[2], piece[3], piece[1], from)
+            text = ""
+          else
+            local cut = math.max(1, find_break_point(text, math.max(1, avail)))
+            line:add(text:sub(1, cut), piece[2], piece[3], piece[1], from)
+            local rest = text:sub(cut + 1)
+            local kept = rest:gsub("^%s+", "")
+            from = from + cut + (#rest - #kept)
+            text = kept
+            if text ~= "" then
+              next_row()
+            end
+          end
+        end
+      end
+    end
+    table.insert(rows, line)
+    return rows
+  end
+
+  --- The params a cut header shows: the visible tokens in signature order,
+  --- each run of hidden ones a gap mark in its place. A `*` or `/` shows
+  --- only between visible params; otherwise it falls into the gap.
+  ---@param toks string[]
+  ---@param shown table<integer, boolean>
+  ---@param active? string the lit param: the gap hiding it is lit
+  local function header_gaps(toks, shown, active)
+    local vis = {}
+    for i, tok in ipairs(toks) do
+      if tok == "*" or tok == "/" then
+        local before, after = false, false
+        for j = 1, i - 1 do
+          before = before or shown[j] or false
+        end
+        for j = i + 1, #toks do
+          after = after or shown[j] or false
+        end
+        vis[i] = before and after
+      else
+        vis[i] = shown[i] or false
+      end
+    end
+    local out, hidden, gap = {}, 0, nil
+    for i, tok in ipairs(toks) do
+      if vis[i] then
+        gap = nil
+        table.insert(out, tok)
+      else
+        if not gap then
+          gap = { mark = "…", lit = false }
+          table.insert(out, gap)
+        end
+        if tok ~= "*" and tok ~= "/" then
+          hidden = hidden + 1
+          gap.lit = gap.lit or (active ~= nil and tok:gsub("=…$", "") == active)
+        end
+      end
+    end
+    for i = #out, 1, -1 do
+      if type(out[i]) == "table" then
+        out[i].mark = "…+" .. hidden
+        break
+      end
+    end
+    return out
+  end
+
+  local function emit_header()
+    if not opts.header then
+      return
+    end
+    -- colors align with the typing surface's signature block (Tony,
+    -- 2026-08-06): yellow reserved for the callable + parens, params in
+    -- param color with the active one lit, the return as a real type with
+    -- syntax injection. Elision marks (`=…`, `…`) render as chrome — same as
+    -- outline rows' default marks — superseding the 2026-08-01
+    -- dim-at-header-hue call, which assumed a single-hue header.
+    local header = opts.header
+    -- we authored the format in resolve (name(tok, tok) -> ret), so this
+    -- parse can't miss; the plain fallback is pure defense. An overload
+    -- group's [i/n] is the header pane's border tag, not part of the text.
+    -- Non-greedy params: the FIRST `) -> ` closes the call, so a callable
+    -- return like `(int) -> str` stays whole (tokens never contain parens)
+    local fn_name, params, ret = header:match("^([^(]+)%((.-)%) %-> (.*)$")
+    if not fn_name then
+      fn_name, params = header:match("^([^(]+)%((.-)%)$")
+    end
+    local limit = opts.header_rows or math.huge
+    local rows
+    if not fn_name then
+      rows = wrap_header({ { lead = "", pieces = { { header, "TypeScopeHeader" } } } })
+    else
+      -- Past its rows, the header keeps every required param, then the
+      -- optional ones in signature order while they fit; whatever it drops
+      -- leaves a gap in place, `…` inside and `…+N` at the last one, N every
+      -- param hidden. Required params that overrun alone are cut in the
+      -- middle, so the start and end of the call still read: f(a, …, z, …+N).
+      local toks = params ~= "" and vim.split(params, ", ", { plain = true }) or {}
+      rows = wrap_header(header_units(fn_name, toks, ret))
+      if #rows > limit then
+        local required, optional = {}, {}
+        for i, tok in ipairs(toks) do
+          if tok ~= "*" and tok ~= "/" then
+            table.insert((tok:find("=…$") or tok:find("^%*")) and optional or required, i)
+          end
+        end
+        ---@param shown table<integer, boolean> token index -> visible
+        local function attempt(shown)
+          return wrap_header(header_units(fn_name, header_gaps(toks, shown, opts.header_active), ret))
+        end
+        local shown = {}
+        for _, i in ipairs(required) do
+          shown[i] = true
+        end
+        rows = attempt(shown)
+        if #rows <= limit then
+          for _, i in ipairs(optional) do
+            shown[i] = true
+            local more = attempt(shown)
+            if #more > limit then
+              shown[i] = nil
+              break
+            end
+            rows = more
+          end
+        else
+          for n = 1, #required do
+            local head = math.ceil((#required - n) / 2)
+            shown = {}
+            for j, i in ipairs(required) do
+              shown[i] = j <= head or j > head + n or nil
+            end
+            rows = attempt(shown)
+            if #rows <= limit then
+              break
+            end
+          end
+        end
+      end
+    end
+    -- even `f(…) -> R` overruns (a return type longer than the rows): keep
+    -- the rows at both ends
+    if #rows > limit then
+      local head = math.ceil(limit / 2)
+      local kept = vim.list_slice(rows, 1, head)
+      vim.list_extend(kept, rows, #rows - (limit - head) + 1, #rows)
+      rows = kept
+    end
+    for _, row in ipairs(rows) do
+      emit(row, nil)
+    end
+  end
+
+  -- The outline's other surfaces. Each is drawn into its own pane (the
+  -- header, the inspector, the docstring view in the loupe), so none
+  -- carries the rows or another's content.
+  if opts.view == "header" then
+    emit_header()
+    return result
+  elseif opts.view == "inspector" then
+    local node = opts.inspector_node
     if node then
       -- the node's name and its WHOLE type, which the row may have cut short
       local line = new_line()
@@ -931,89 +1151,10 @@ function M.render(roots, opts)
     return result
   end
 
-  -- the docstring is a line in the float's footer and a view of its own
-  -- (opts.view = "doc"), never a section under the rows
-  if opts.header then
-    -- the header is a one-liner by contract: a 48-param call shape must not
-    -- eat the float, so the param list elides at width with the return type
-    -- kept visible — run(app, *, host=…, …) -> None
-    local header = opts.header
-    if strwidth(header) > opts.max_width then
-      local ret_part = header:match("%)(%s*->.*)$") or ""
-      local body = header:sub(1, #header - #ret_part)
-      local suffix = "…)" .. ret_part
-      local budget = math.max(8, opts.max_width - strwidth(", " .. suffix))
-      local cut = math.max(1, find_break_point(body, budget))
-      -- drop the final (possibly cut-in-half) token so only whole params show.
-      -- With no comma kept there is no whole param to show: back up to the
-      -- paren, or `run_main(comline_list)` drew as `run_main(com, …)`, a
-      -- half name and a comma promising a second param that doesn't exist
-      local kept, dropped = body:sub(1, cut):gsub(",%s*[^,]*$", "")
-      if dropped > 0 then
-        header = kept .. ", " .. suffix
-      else
-        header = body:sub(1, (body:find("(", 1, true) or cut)) .. suffix
-      end
-    end
-    -- colors align with the typing surface's signature block (Tony,
-    -- 2026-08-06): yellow reserved for the callable + parens, params in
-    -- param color with the active one lit, the return as a real type with
-    -- syntax injection. Elision marks (`=…`, trailing `…`) render as chrome
-    -- — same as ledger rows' default marks — superseding the 2026-08-01
-    -- dim-at-header-hue call, which assumed a single-hue header.
-    local hline = new_line()
-    -- we authored the format in resolve (name(tok, tok) -> ret [i/n]), so
-    -- this parse can't miss; the plain fallback is pure defense
-    local badge = header:match("%s(%[%d+/%d+%])$")
-    local sig = badge and header:sub(1, #header - #badge - 1) or header
-    -- non-greedy params: the FIRST `) -> ` closes the call, so a callable
-    -- return like `(int) -> str` stays whole (tokens never contain parens)
-    local fn_name, params, ret = sig:match("^([^(]+)%((.-)%) %-> (.*)$")
-    if not fn_name then
-      fn_name, params = sig:match("^([^(]+)%((.-)%)$")
-    end
-    if fn_name then
-      hline:add(fn_name, "TypeScopeHeader")
-      hline:add("(", "TypeScopeHeader")
-      local toks = params ~= "" and vim.split(params, ", ", { plain = true }) or {}
-      for i, tok in ipairs(toks) do
-        if tok == "*" or tok == "/" then
-          hline:add(tok, "TypeScopeKeyword")
-        elseif tok == "…" then
-          hline:add(tok, "TypeScopeChrome")
-        else
-          local name, mark = tok:match("^(.-)(=…)$")
-          name = name or tok
-          hline:add(name, name == opts.header_active and "TypeScopeActive" or "TypeScopeParam")
-          if mark then
-            hline:add(mark, "TypeScopeChrome")
-          end
-        end
-        if i < #toks then
-          hline:add(", ", "TypeScopeChrome")
-        end
-      end
-      hline:add(")", "TypeScopeHeader")
-      if ret then
-        hline:add(" -> ", "TypeScopeChrome")
-        hline:add(ret, "TypeScopeType", "replace")
-      end
-      if badge then
-        hline:add(" " .. badge, "TypeScopeBadge")
-      end
-    else
-      hline:add(header, "TypeScopeHeader")
-    end
-    emit(hline, nil)
-  end
-  if opts.header then
-    emit_separator()
-  end
-
-  -- ── the ledger (U6): one line per node, details in the docked panel ─────
+  -- ── the outline (U6): one line per node, details in the docked inspector ─────
   -- Rows carry identity + discriminators only (name, pass mode, type, short
   -- default); everything read one-at-a-time (full type, ≈ evaluation,
-  -- example, origin, long defaults) lives in the panel (opts.view = "panel").
+  -- example, origin, long defaults) lives in the inspector (opts.view = "inspector").
   -- Rows NEVER wrap — the single-line invariant is what keeps the float
   -- narrow and scanning cheap.
   local function render_rows()
@@ -1104,8 +1245,8 @@ function M.render(roots, opts)
       end
 
       -- Every row carries its default: long ones elide to `= …` rather than
-      -- widening every row, and the panel holds the full value. The rows
-      -- never change as the cursor moves — that is what the panel is for.
+      -- widening every row, and the inspector holds the full value. The rows
+      -- never change as the cursor moves — that is what the inspector is for.
       local default_inline = node.default ~= nil
       local default_text = nil
       if default_inline then
@@ -1140,19 +1281,6 @@ function M.render(roots, opts)
   end
 
   render_rows()
-
-  -- Separators stretch to the final content width, known only now — but never
-  -- back in from a width they have already reached. The window is monotonic
-  -- (interact keeps st.width at its high-water mark), and a rule that shrank
-  -- while the frame around it stayed put read as the whole float twitching:
-  -- landing a long value re-flowed its row onto two shorter ones, and both
-  -- rules snapped in by a dozen columns on that frame (Tony, reveal.mov).
-  local rule_width = math.max(4, result.width, opts.window_width or 0)
-  for _, lnum in ipairs(separators) do
-    local rule = string.rep(style.rule, rule_width)
-    result.lines[lnum] = rule
-    table.insert(result.highlights, { line = lnum - 1, col_start = 0, col_end = #rule, group = "TypeScopeChrome" })
-  end
 
   return result
 end

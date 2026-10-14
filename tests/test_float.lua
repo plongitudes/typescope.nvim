@@ -120,6 +120,701 @@ vim.api.nvim_win_close(dismissed.win, true)
 float.close(dismissed)
 check("a user-dismissed float is forgotten too", float._painted_count() == 0)
 
+-- ── frame layout ─────────────────────────────────────────────────────────────
+--
+-- The three-pane frame (ADR 0001): header, outline, loupe, each a whole box in
+-- the user's border style, so every seam is a bottom border then a top border.
+-- Screen is 40 rows by 100 columns unless a case says otherwise.
+local CUSTOM = { "+", "-", "+", "|", "+", "-", "+", "|" }
+local function spec(over)
+  return vim.tbl_extend("force", {
+    border = "rounded",
+    row = 5,
+    col = 10,
+    lines = 40,
+    columns = 100,
+    max_height = 20,
+    width = 30,
+    header = 1,
+    outline = 8,
+    inspector = 3,
+    min_height = { header = 1, outline = 5, inspector = 1 },
+  }, over or {})
+end
+
+-- rounded, all three panes: 2 rows of edge per pane
+local layout_cases = {
+  -- side of the cursor
+  { "room below for max_height + chrome: below", {}, { below = true, budget = 20, top = 6 } },
+  {
+    "short below but no shorter than above: below",
+    { row = 19, max_height = 30 },
+    { below = true, budget = 20 - 6 },
+  },
+  {
+    "...but one row less room below than above: above",
+    { row = 20, max_height = 30 },
+    { below = false, budget = 20 - 6 },
+  },
+  {
+    "more room above than below: above",
+    { row = 30 },
+    { below = false, budget = 20, top = 30 - (3 + 10 + 5) },
+  },
+  {
+    "a side fixed at open holds even where the other has more room",
+    { row = 30, below = true },
+    { below = true, budget = 3, top = 31 },
+  },
+  -- budget
+  { "budget is capped at max_height", { max_height = 10 }, { budget = 10 } },
+  { "budget is the room on the chosen side less chrome", { row = 30, max_height = 40 }, { budget = 30 - 6 } },
+  {
+    "budget never drops below 3",
+    { row = 2, lines = 6, below = true },
+    { budget = 3 },
+  },
+  -- seams: every pane is a whole box, so a seam is two rows
+  {
+    "named border: each pane's top edge sits under the last one's bottom edge",
+    {},
+    {
+      header_row = 0,
+      outline_row = 1 + 1 + 1,
+      inspector_row = 3 + 1 + 8 + 1,
+      header_border = "rounded",
+      outline_border = "rounded",
+      inspector_border = "rounded",
+    },
+  },
+  {
+    "named border above the cursor: frame ends on the row above it",
+    { row = 30 },
+    { top = 30 - (3 + 10 + 5) },
+  },
+  {
+    "custom border: the same stacked boxes, in the user's array",
+    { border = CUSTOM },
+    {
+      outline_row = 3,
+      inspector_row = 13,
+      header_border = CUSTOM,
+      outline_border = CUSTOM,
+      inspector_border = CUSTOM,
+    },
+  },
+  {
+    "custom border above the cursor counts every pane's edges",
+    { border = CUSTOM, row = 30 },
+    { top = 30 - (3 + 10 + 5) },
+  },
+  { "custom border chrome is 6 rows", { border = CUSTOM, row = 30, max_height = 40 }, { budget = 24 } },
+  {
+    "no border: panes abut, no chrome",
+    { border = "none", row = 30 },
+    { outline_row = 1, inspector_row = 9, top = 30 - 12, budget = 20, col = 10 },
+  },
+  -- the footer: on the bottom pane only, with the border's own rule glyph
+  {
+    "inspector shown: it carries the footer",
+    {},
+    { header_footer = false, outline_footer = false, inspector_footer = true },
+  },
+  {
+    "inspector hidden: the outline closes the frame and carries the footer",
+    { inspector = false },
+    { inspector = "none", outline_footer = true, header_footer = false },
+  },
+  {
+    "inspector hidden above the cursor: frame is header + outline",
+    { inspector = false, row = 30 },
+    { top = 30 - (3 + 10) },
+  },
+  { "the footer's rule is the bottom edge's glyph", {}, { rule = { "─", "FloatBorder" } } },
+  { "...double's is its own", { border = "double" }, { rule = { "═", "FloatBorder" } } },
+  { "...and a custom array's its sixth", { border = CUSTOM }, { rule = { "-", "FloatBorder" } } },
+  {
+    "...keeping a custom edge's highlight",
+    { border = { "+", { "=", "MyEdge" }, "+", "|" } },
+    { rule = { "=", "MyEdge" } },
+  },
+  { "no border, no rule", { border = "none" }, { rule = "none" } },
+  -- no header (a class hover: its root row is the header)
+  {
+    "no header: the outline opens the frame",
+    { header = false },
+    { header = "none", outline_row = 0, inspector_row = 10 },
+  },
+  { "no header above the cursor", { header = false, row = 30 }, { top = 30 - (10 + 5) } },
+  -- columns
+  { "left edge at the cursor column", {}, { col = 10 } },
+  { "slid left only as far as the screen edge needs", { col = 90 }, { col = 100 - 30 - 2 } },
+  { "never slid past column 0", { col = 5, width = 120 }, { col = 0 } },
+  -- heights
+  { "pane heights are the content rows asked for", {}, { header_h = 1, outline_h = 8, inspector_h = 3 } },
+  {
+    "an empty pane is still a row tall",
+    { header = 0, outline = 0, inspector = 0 },
+    { header_h = 1, outline_h = 1, inspector_h = 1 },
+  },
+  -- minimums and the leftover rows (ui.min_height, default 1 / 5 / 1)
+  {
+    "a pane with less content than its minimum shrinks to fit",
+    { outline = 2, inspector = 1 },
+    { outline_h = 2, inspector_h = 1, outline_row = 3, inspector_row = 3 + 1 + 2 + 1 },
+  },
+  {
+    "leftovers go to the header first, until it is fully wrapped",
+    { max_height = 10, header = 6, outline = 8, inspector = 4 },
+    { header_h = 1 + 3, inspector_h = 1, outline_h = 5 },
+  },
+  {
+    "...then to the inspector",
+    { max_height = 14, header = 6, outline = 8, inspector = 4 },
+    { header_h = 6, inspector_h = 1 + 2, outline_h = 5 },
+  },
+  {
+    "...up to its cap of 5, and the outline takes the rest",
+    { max_height = 20, header = 6, outline = 20, inspector = 8 },
+    { header_h = 6, inspector_h = 5, outline_h = 5 + 4 },
+  },
+  {
+    "the inspector's cap holds with rows to spare",
+    { max_height = 30, outline = 3, inspector = 8 },
+    { inspector_h = 5, outline_h = 3 },
+  },
+  {
+    "a minimum above the cap still holds",
+    { min_height = { header = 1, outline = 5, inspector = 7 }, inspector = 9 },
+    { inspector_h = 7 },
+  },
+  {
+    "the minimums are configurable",
+    {
+      max_height = 10,
+      header = 6,
+      outline = 8,
+      inspector = 1,
+      min_height = { header = 1, outline = 2, inspector = 1 },
+    },
+    { header_h = 6, inspector_h = 1, outline_h = 3 },
+  },
+  {
+    "minimums that overrun the budget squash the outline first",
+    { row = 30, lines = 42, below = true },
+    { budget = 5, header_h = 1, outline_h = 3, inspector_h = 1 },
+  },
+  {
+    "...and at the floor every pane is one row",
+    { row = 30, below = true, header = 4 },
+    { budget = 3, header_h = 1, outline_h = 1, inspector_h = 1 },
+  },
+  {
+    "max_height counts content rows only: borders are extra",
+    { max_height = 10, header = 6, outline = 8, inspector = 4 },
+    { content = 10, extent = 10 + 6 },
+  },
+  {
+    "...above the cursor too",
+    { max_height = 10, header = 6, outline = 8, inspector = 4, row = 30 },
+    { content = 10, top = 30 - 16 },
+  },
+  -- the docstring view grows the loupe toward max_height, away from the
+  -- cursor's code line; header and outline keep the sizes the inspector left
+  -- them until the budget runs out, then the outline and then the header are
+  -- squashed to their minimums
+  {
+    "docstring below the cursor: the loupe grows down, the top stays put",
+    { docstring = 6 },
+    { top = 6, header_row = 0, header_h = 1, outline_h = 8, inspector_h = 6 },
+  },
+  {
+    "...up to max_height",
+    { docstring = 6, max_height = 15 },
+    { top = 6, header_h = 1, outline_h = 8, inspector_h = 15 - 9 },
+  },
+  {
+    "...then squashes the outline, then the header",
+    { docstring = 30, header = 4 },
+    { top = 6, header_row = 0, header_h = 1, outline_h = 5, inspector_h = 20 - 6, outline_row = 3 },
+  },
+  {
+    "...stopping at the screen edge",
+    {
+      docstring = 30,
+      row = 25,
+      below = true,
+      max_height = 30,
+      min_height = { header = 1, outline = 2, inspector = 1 },
+    },
+    { top = 26, budget = 8, header_h = 1, outline_h = 2, inspector_h = 5 },
+  },
+  {
+    "...never below a pane's minimum",
+    { docstring = 30, header = 4, min_height = { header = 2, outline = 6, inspector = 1 } },
+    { header_h = 2, outline_h = 6, inspector_h = 20 - 8 },
+  },
+  {
+    "...nor below a pane's content when that is less",
+    { docstring = 30, outline = 3 },
+    { outline_h = 3, inspector_h = 20 - 4 },
+  },
+  {
+    "a docstring shorter than the loupe leaves it its size",
+    { docstring = 1 },
+    { header_h = 1, outline_h = 8, inspector_h = 3 },
+  },
+  {
+    "docstring above the cursor: the panes above are pushed up unresized",
+    { docstring = 6, row = 30 },
+    { below = false, header_h = 1, outline_h = 8, inspector_h = 6, top = 30 - (3 + 10 + 8) },
+  },
+  {
+    "...until max_height, then the outline and the header are squashed",
+    { docstring = 30, header = 4, row = 30 },
+    { below = false, header_h = 1, outline_h = 5, inspector_h = 14, top = 30 - (3 + 7 + 16) },
+  },
+  {
+    "...and the frame still ends on the row above the cursor",
+    { docstring = 30, row = 30 },
+    { content = 20, extent = 26, top = 30 - 26 },
+  },
+  -- the help view is drawn over the frame: the panes under it keep their
+  -- sizes, and it grows from the frame's bottom edge away from the cursor's
+  -- code line. The frame here is 3 + 10 + 5 = 18 rows; help's own box adds 2.
+  { "no help, no overlay", {}, { help = "none" } },
+  {
+    "help leaves every pane its size and place",
+    { help = 6 },
+    { header_h = 1, outline_h = 8, inspector_h = 3, header_row = 0, outline_row = 3, inspector_row = 13, top = 6 },
+  },
+  {
+    "help below the cursor: it grows up from the frame's bottom edge",
+    { help = 6 },
+    { help_row = 18 - 8, help_h = 6, help_footer = true, help_border = "rounded" },
+  },
+  { "...up to the frame's top", { help = 16 }, { help_row = 0, help_h = 16 } },
+  { "...then down past the frame's bottom", { help = 25 }, { help_row = 0, help_h = 25 } },
+  { "...stopping at the screen edge", { help = 40 }, { help_row = 0, help_h = 40 - 6 - 2 } },
+  {
+    "help above the cursor: it grows up from the frame's bottom edge",
+    { help = 6, row = 30 },
+    { below = false, top = 30 - 18, help_row = 18 - 8, help_h = 6 },
+  },
+  { "...and on up past the frame's top", { help = 25, row = 30 }, { help_row = 18 - 27, help_h = 25 } },
+  { "...stopping at the screen's top", { help = 40, row = 30 }, { help_row = 18 - 30, help_h = 30 - 2 } },
+  {
+    "help over the docstring view sits on its grown bottom edge",
+    { help = 4, docstring = 6 },
+    { inspector_h = 6, help_row = 21 - 6, help_h = 4 },
+  },
+  {
+    "help with the loupe hidden sits on the outline's bottom edge",
+    { help = 4, inspector = false },
+    { help_row = 13 - 6, help_h = 4 },
+  },
+  { "help without a border: no box to add", { help = 4, border = "none" }, { help_row = 12 - 4, help_h = 4 } },
+  -- ui.header_max_height caps the header's rows; a short signature stays short
+  { "the header is capped", { header = 6, header_cap = 4 }, { header_h = 4, outline_h = 8, inspector_h = 3 } },
+  { "...a header under the cap keeps its rows", { header = 2, header_cap = 4 }, { header_h = 2 } },
+  { "...a cap under 1 is no cap", { header = 6, header_cap = 0 }, { header_h = 6 } },
+  {
+    "...and the rows it frees go on down the leftover order",
+    { max_height = 10, header = 6, outline = 8, inspector = 1, header_cap = 2 },
+    { header_h = 2, inspector_h = 1, outline_h = 7 },
+  },
+  {
+    "...the docstring view squashes a capped header no further than its floor",
+    { docstring = 30, header = 6, header_cap = 3 },
+    { header_h = 1, outline_h = 5, inspector_h = 14 },
+  },
+  -- the full signature (s): an overlay anchored on the header pane, growing
+  -- away from the code line; the panes under it keep their sizes. The frame
+  -- is 3 + 10 + 5 = 18 rows; the overlay's box adds 2.
+  { "no signature, no overlay", {}, { signature = "none" } },
+  { "no header, no signature overlay", { signature = 6, header = false }, { signature = "none" } },
+  {
+    "the signature leaves every pane its size and place",
+    { signature = 6 },
+    { header_h = 1, outline_h = 8, inspector_h = 3, header_row = 0, outline_row = 3, inspector_row = 13, top = 6 },
+  },
+  {
+    "signature below the cursor: it hangs from the header's top and grows down",
+    { signature = 6 },
+    { signature_row = 0, signature_h = 6, signature_footer = true, signature_border = "rounded" },
+  },
+  { "...stopping at the screen edge", { signature = 40 }, { signature_row = 0, signature_h = 40 - 6 - 2 } },
+  {
+    "signature above the cursor: it hangs from the header's top too, over the panes",
+    { signature = 6, row = 30 },
+    { below = false, top = 30 - 18, signature_row = 0, signature_h = 6 },
+  },
+  { "...down to the frame's bottom edge", { signature = 16, row = 30 }, { signature_row = 0, signature_h = 16 } },
+  { "...then on up past the frame's top", { signature = 25, row = 30 }, { signature_row = 18 - 27, signature_h = 25 } },
+  {
+    "...stopping at the screen's top",
+    { signature = 40, row = 30 },
+    { signature_row = -(30 - 18), signature_h = 30 - 2 },
+  },
+}
+
+for _, case in ipairs(layout_cases) do
+  local name, over, want = case[1], case[2], case[3]
+  local s = spec(over)
+  for _, pane in ipairs({ "header", "inspector" }) do
+    if over[pane] == false then
+      s[pane] = nil
+    end
+  end
+  local got = float.frame_layout(s)
+  local view = {
+    below = got.below,
+    budget = got.budget,
+    top = got.top,
+    col = got.col,
+    rule = got.rule or "none",
+    content = 0,
+  }
+  for _, pane in ipairs({ "header", "outline", "inspector", "help", "signature" }) do
+    local p = got[pane]
+    if p and pane ~= "help" and pane ~= "signature" then
+      view.content = view.content + p.height
+      -- the frame's outer rows: down to the last pane's bottom edge
+      view.extent = p.row + p.height + (got.rule and 2 or 0)
+    end
+    view[pane] = p and "some" or "none"
+    view[pane .. "_row"] = p and p.row
+    view[pane .. "_h"] = p and p.height
+    view[pane .. "_footer"] = p and p.footer
+    view[pane .. "_border"] = p and p.border
+  end
+  local bad = {}
+  for k, v in pairs(want) do
+    if not vim.deep_equal(view[k], v) then
+      table.insert(bad, ("%s=%s (want %s)"):format(k, vim.inspect(view[k]), vim.inspect(v)))
+    end
+  end
+  check("layout: " .. name .. (#bad > 0 and (" — " .. table.concat(bad, ", ")) or ""), #bad == 0)
+end
+
+-- the window code only applies the layout: a frame puts its three panes
+-- exactly where frame_layout says, findable by filetype
+do
+  local h = float.open({
+    lines = { "a", "b", "c" },
+    highlights = {},
+    width = 20,
+    height = 3,
+    relative = "editor",
+    row = 0,
+    col = 0,
+    border = "rounded",
+    frame = { row = 2, col = 4, max_height = 10 },
+    headers = { { lines = { "f(a, b, c)" }, highlights = {} } },
+  })
+  local help = { { " ? help ", "TypeScopeHint" } }
+  float.update(h, {
+    highlights = {},
+    width = 20,
+    height = 3,
+    inspector = { lines = { "x", "y" }, highlights = {}, height = 2 },
+    footer = help,
+  })
+  local want = float.frame_layout({
+    border = "rounded",
+    row = 2,
+    col = 4,
+    lines = vim.o.lines - vim.o.cmdheight,
+    columns = vim.o.columns,
+    max_height = 10,
+    width = 20,
+    header = 1,
+    outline = 3,
+    inspector = 2,
+  })
+  local hdr = vim.api.nvim_win_get_config(h.header.win)
+  local main = vim.api.nvim_win_get_config(h.win)
+  local insp = vim.api.nvim_win_get_config(h.inspector.win)
+  check("the header is its own window", vim.bo[h.header.buf].filetype == "typescope_header")
+  check(
+    "...holding the signature",
+    vim.deep_equal(vim.api.nvim_buf_get_lines(h.header.buf, 0, -1, false), { "f(a, b, c)" })
+  )
+  check(
+    "open/update place all three panes from frame_layout",
+    hdr.height == want.header.height
+      and main.height == want.outline.height
+      and insp.height == want.inspector.height
+      and hdr.row == want.top + want.header.row
+      and main.row == want.top + want.outline.row
+      and insp.row == want.top + want.inspector.row
+      and main.width == want.width
+      and insp.hide == false
+      and h.budget == want.budget
+  )
+  local function footer_of(cfg)
+    local text = ""
+    for _, chunk in ipairs(type(cfg.footer) == "table" and cfg.footer or {}) do
+      text = text .. chunk[1]
+    end
+    return text
+  end
+  check(
+    "the footer is `? help` and one rule glyph, right-justified, on the loupe only",
+    footer_of(insp) == " ? help ─" and insp.footer_pos == "right" and footer_of(main) == "" and footer_of(hdr) == ""
+  )
+  float.update(h, { highlights = {}, width = 20, height = 3, footer = help })
+  check(
+    "...and hiding the inspector moves the footer onto the outline",
+    vim.api.nvim_win_get_config(h.inspector.win).hide == true
+      and footer_of(vim.api.nvim_win_get_config(h.win)) == " ? help ─"
+  )
+  float.close(h)
+  check("closing the frame closes the header too", not vim.api.nvim_win_is_valid(h.header.win))
+end
+
+-- the header follows an overload group: one header per group, the pane as
+-- tall as the tallest for the life of the float, each group's tag on the
+-- header's bottom border
+do
+  local tag2 = { { " ✓", "TypeScopeActive" }, { " [2/2] ", "TypeScopeBadge" } }
+  local h = float.open({
+    lines = { "a", "b", "c" },
+    highlights = {},
+    width = 20,
+    height = 3,
+    relative = "editor",
+    row = 0,
+    col = 0,
+    border = "rounded",
+    frame = { row = 2, col = 4, max_height = 20 },
+    headers = {
+      { lines = { "f(a)" }, highlights = {}, tag = { { " [1/2] ", "TypeScopeBadge" } } },
+      { lines = { "f(a,", "  b,", "  c)" }, highlights = {}, tag = tag2 },
+    },
+    header_shown = 2,
+  })
+  local help = { { " ? help ", "TypeScopeHint" } }
+  local function footer_of(w)
+    local text = ""
+    for _, chunk in ipairs(vim.api.nvim_win_get_config(w).footer or {}) do
+      text = text .. chunk[1]
+    end
+    return text
+  end
+  float.update(h, { highlights = {}, width = 20, height = 3, footer = help })
+  local hcfg = vim.api.nvim_win_get_config(h.header.win)
+  check(
+    "the header opens on the group asked for",
+    vim.deep_equal(vim.api.nvim_buf_get_lines(h.header.buf, 0, -1, false), { "f(a,", "  b,", "  c)" })
+  )
+  check("...its tag on the header's bottom border, ending on a rule glyph", footer_of(h.header.win) == " ✓ [2/2] ─")
+  check("...right-aligned", hcfg.footer_pos == "right")
+  check("the header is as tall as the tallest group", hcfg.height == 3)
+  float.update(h, { highlights = {}, width = 20, height = 3, footer = help, header = 1 })
+  check(
+    "update(header = i) shows group i",
+    vim.deep_equal(vim.api.nvim_buf_get_lines(h.header.buf, 0, -1, false), { "f(a)" })
+  )
+  check("...with its own tag", footer_of(h.header.win) == " [1/2] ─")
+  check("...and the header keeps its height", vim.api.nvim_win_get_config(h.header.win).height == 3)
+  float.update(h, { highlights = {}, width = 20, height = 3, footer = help })
+  check(
+    "an update that names no group leaves the header alone",
+    vim.deep_equal(vim.api.nvim_buf_get_lines(h.header.buf, 0, -1, false), { "f(a)" })
+  )
+  float.close(h)
+end
+
+-- a header taller than its allotment: every group past it is fit to the rows
+do
+  local fitted = {}
+  local function group(name, n)
+    local lines = {}
+    for i = 1, n do
+      lines[i] = name .. i
+    end
+    return {
+      lines = lines,
+      highlights = {},
+      fit = function(rows)
+        fitted[name] = rows
+        return { lines = vim.list_slice(lines, 1, rows), highlights = {} }
+      end,
+    }
+  end
+  local h = float.open({
+    lines = { "a", "b", "c" },
+    highlights = {},
+    width = 20,
+    height = 3,
+    relative = "editor",
+    row = 0,
+    col = 0,
+    border = "rounded",
+    frame = { row = 2, col = 4, max_height = 9, min_height = { header = 1, outline = 5, inspector = 1 } },
+    headers = { group("a", 2), group("b", 8) },
+  })
+  check("a tall header gets what the budget allots", h.header.height == 9 - 3 - 1)
+  check("...only the groups past it are fit", fitted.a == nil and fitted.b == 5)
+  float.close(h)
+end
+
+-- ui.header_max_height: the header is capped at open, and every group past
+-- the cap is fit to it; the full signature shows over the frame on demand
+do
+  local fitted = {}
+  local function group(name, n)
+    local lines = {}
+    for i = 1, n do
+      lines[i] = name .. i
+    end
+    return {
+      lines = lines,
+      highlights = {},
+      fit = function(rows, lit)
+        fitted[name] = rows
+        local out = vim.list_slice(lines, 1, rows)
+        return {
+          lines = out,
+          highlights = lit and { { line = 0, col_start = 0, col_end = 1, group = "TypeScopeActive" } } or {},
+        }
+      end,
+      tag = { { (" [%s] "):format(name), "TypeScopeBadge" } },
+    }
+  end
+  local function open(groups, cap)
+    return float.open({
+      lines = { "a", "b", "c" },
+      highlights = {},
+      width = 20,
+      height = 3,
+      relative = "editor",
+      row = 0,
+      col = 0,
+      border = "rounded",
+      frame = { row = 2, col = 4, max_height = 20, header_max_height = cap },
+      headers = groups,
+    })
+  end
+  local base = { highlights = {}, width = 20, height = 3, footer = { { " ? help ", "TypeScopeHint" } } }
+  local h = open({ group("a", 2), group("b", 8) }, 3)
+  float.update(h, base)
+  check("the header is capped at header_max_height", h.header.height == 3)
+  check("...only the groups past it are fit", fitted.a == nil and fitted.b == 3)
+  check("...and the shown group under the cap is not cut", float.header_cut(h) == false)
+  float.update(h, vim.tbl_extend("force", base, { header = 2 }))
+  check("a group past the cap is cut", float.header_cut(h) == true)
+  local panes = {}
+  for _, w in ipairs({ h.win, h.header.win, h.inspector.win }) do
+    panes[w] = vim.api.nvim_win_get_config(w)
+  end
+  float.update(h, vim.tbl_extend("force", base, { header = 2, signature = true, header_lit = "b" }))
+  local sig = h.signature
+  local cfg = sig and vim.api.nvim_win_get_config(sig.win)
+  check("signature = true opens the overlay", cfg ~= nil and cfg.hide == false)
+  check("...findable by filetype", sig ~= nil and vim.bo[sig.buf].filetype == "typescope_signature")
+  check(
+    "...holding the group's whole header",
+    sig ~= nil
+      and vim.deep_equal(
+        vim.api.nvim_buf_get_lines(sig.buf, 0, -1, false),
+        { "b1", "b2", "b3", "b4", "b5", "b6", "b7", "b8" }
+      )
+  )
+  local lit = 0
+  for _, m in ipairs(sig and vim.api.nvim_buf_get_extmarks(sig.buf, -1, 0, -1, { details = true }) or {}) do
+    lit = lit + (m[4].hl_group == "TypeScopeActive" and 1 or 0)
+  end
+  check("...with the selected param lit", lit == 1)
+  check("...over the panes", cfg ~= nil and cfg.zindex > vim.api.nvim_win_get_config(h.win).zindex)
+  local title = ""
+  for _, chunk in ipairs(cfg and type(cfg.title) == "table" and cfg.title or {}) do
+    title = title .. chunk[1]
+  end
+  check("...titled with its overload group", title == " signature [2/2] ")
+  local footer = ""
+  for _, chunk in ipairs(cfg and type(cfg.footer) == "table" and cfg.footer or {}) do
+    footer = footer .. chunk[1]
+  end
+  check("...and the same ? help footer", footer == " ? help ─")
+  local still = true
+  for w, before in pairs(panes) do
+    local now = vim.api.nvim_win_get_config(w)
+    still = still and now.height == before.height and now.row == before.row
+  end
+  check("...the panes under it unmoved", still)
+  float.update(h, vim.tbl_extend("force", base, { header = 2 }))
+  check("signature = nil hides it", vim.api.nvim_win_get_config(sig.win).hide == true)
+  float.close(h)
+  check("closing the frame closes it too", not vim.api.nvim_win_is_valid(sig.win))
+
+  h = open({ group("c", 8) }, 3)
+  float.update(h, vim.tbl_extend("force", base, { signature = true }))
+  title = ""
+  for _, chunk in ipairs(vim.api.nvim_win_get_config(h.signature.win).title or {}) do
+    title = title .. chunk[1]
+  end
+  check("a plain callable's overlay is titled signature", title == " signature ")
+  float.close(h)
+
+  h = open({ group("d", 8) }, 0)
+  check("a cap under 1 leaves the header whole", h.header.height == 8 and float.header_cut(h) == false)
+  float.close(h)
+end
+
+-- the header lights the param it's handed: a group is redrawn once per
+-- param it lights, and not at all while the lit param holds
+do
+  local drawn = {}
+  local function lighting(name)
+    return { { line = 0, col_start = 2, col_end = 2 + #name, group = "TypeScopeActive" } }
+  end
+  local h = float.open({
+    lines = { "a", "b", "c" },
+    highlights = {},
+    width = 20,
+    height = 3,
+    relative = "editor",
+    row = 0,
+    col = 0,
+    border = "rounded",
+    frame = { row = 2, col = 4, max_height = 9, min_height = { header = 1, outline = 5, inspector = 1 } },
+    headers = {
+      {
+        lines = { "f(x, yy)" },
+        highlights = {},
+        fit = function(_, lit)
+          table.insert(drawn, lit or "-")
+          return { lines = { "f(x, yy)" }, highlights = lit and lighting(lit) or {} }
+        end,
+      },
+    },
+  })
+  local function lit_marks()
+    local out = {}
+    for _, m in ipairs(vim.api.nvim_buf_get_extmarks(h.header.buf, -1, 0, -1, { details = true })) do
+      if m[4].hl_group == "TypeScopeActive" then
+        table.insert(out, m[4].end_col - m[3])
+      end
+    end
+    return out
+  end
+  local base = { highlights = {}, width = 20, height = 3 }
+  check("a header opens unlit", #drawn == 0 and #lit_marks() == 0)
+  float.update(h, vim.tbl_extend("force", base, { header_lit = "x" }))
+  check("header_lit lights that param", vim.deep_equal(drawn, { "x" }) and vim.deep_equal(lit_marks(), { 1 }))
+  float.update(h, vim.tbl_extend("force", base, { header_lit = "x" }))
+  check("...and the same param again redraws nothing", #drawn == 1)
+  float.update(h, vim.tbl_extend("force", base, { header_lit = "yy" }))
+  check("another param moves the light", vim.deep_equal(lit_marks(), { 2 }))
+  float.update(h, base)
+  check("no header_lit lights nothing", #lit_marks() == 0)
+  float.update(h, vim.tbl_extend("force", base, { header_lit = "x" }))
+  check("...and a param lit before is drawn from what was kept", vim.deep_equal(drawn, { "x", "yy" }))
+  float.close(h)
+end
+
 if fail_count == 0 then
   print("FLOAT ALL PASS")
 else
