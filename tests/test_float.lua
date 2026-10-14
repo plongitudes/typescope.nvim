@@ -784,7 +784,7 @@ do
       {
         lines = { "f(x, yy)" },
         highlights = {},
-        fit = function(rows, lit)
+        fit = function(_, lit)
           table.insert(drawn, lit or "-")
           return { lines = { "f(x, yy)" }, highlights = lit and lighting(lit) or {} }
         end,
