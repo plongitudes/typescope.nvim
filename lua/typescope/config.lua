@@ -17,7 +17,7 @@
 ---@field animations boolean
 ---@field max_width number >1: absolute columns; <=1: fraction of editor width
 ---@field max_height integer content rows the frame's panes share; borders are extra
----@field min_height { header: integer, outline: integer, inspector: integer } rows each pane keeps before leftovers are shared out (a pane with less content shrinks to fit)
+---@field min_height { header: integer, outline: integer, loupe: integer } rows each pane keeps before leftovers are shared out (a pane with less content shrinks to fit)
 ---@field header_max_height integer content rows the header may take; a longer signature is cut (`s` shows it whole). < 1: no cap
 ---@field border string|string[] any nvim float border value
 ---@field docstring boolean d shows the docstring view in the loupe
@@ -118,9 +118,9 @@ local defaults = {
     max_width = 0.5, -- fraction of editor width; values > 1 are absolute columns
     max_height = 20, -- content rows; borders are extra
     -- what each pane of the K float keeps before the rest is shared out
-    -- (header first, then the inspector up to 5, then the outline); a pane
+    -- (header first, then the loupe up to 5, then the outline); a pane
     -- with less content than its minimum shrinks to fit
-    min_height = { header = 1, outline = 5, inspector = 1 },
+    min_height = { header = 1, outline = 5, loupe = 1 },
     -- the header's rows at most; past them it keeps the required params,
     -- then the optional ones in order, and `s` shows it whole. < 1: no cap
     header_max_height = 4,
@@ -234,9 +234,9 @@ local function validate(cfg)
   end
   check("ui.min_height", cfg.ui.min_height, "table")
   for pane, rows in pairs(cfg.ui.min_height) do
-    if pane ~= "header" and pane ~= "outline" and pane ~= "inspector" then
+    if pane ~= "header" and pane ~= "outline" and pane ~= "loupe" then
       error(
-        ("typescope.setup: `ui.min_height.%s` is not a pane; the panes are header, outline, inspector"):format(
+        ("typescope.setup: `ui.min_height.%s` is not a pane; the panes are header, outline, loupe"):format(
           tostring(pane)
         ),
         0

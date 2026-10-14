@@ -2,30 +2,30 @@
 
 Notable changes to TypeScope, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [Semantic Versioning](https://semver.org/), with the usual 0.x caveat that a minor bump may break something. Each release is an annotated git tag carrying the same notes.
 
-## [Unreleased]
+## [0.5.0] — 2026-10-14
 
 The float becomes a frame of three panes, the header, the outline and the loupe, so the signature stays put while you scroll and the docstring sits beside the rows instead of replacing them. This reverses 0.3.0's two-window frame joined by `├─┤` and its docstring footer: those saved rows, but the signature scrolled away with the rows and the outline and docstring could never be read together.
 
 ### Upgrading
 
-With the same `ui.max_height` the float is taller on screen: `ui.max_height` still counts content rows only, but each seam between panes is now two border rows. The new `ui.min_height` (default `{ header = 1, outline = 5, inspector = 1 }`) sets what each pane keeps before leftover rows are shared out.
+With the same `ui.max_height` the float is taller on screen: `ui.max_height` still counts content rows only, but each seam between panes is now two border rows. The new `ui.min_height` (default `{ header = 1, outline = 5, loupe = 1 }`) sets what each pane keeps before leftover rows are shared out.
 
 ### Added
 
-- **`ui.min_height`.** The rows each pane keeps before the rest of `ui.max_height` is shared out: to the header until the signature is fully wrapped, then the inspector up to five rows, then the outline. A pane with less content shrinks to fit it.
+- **`ui.min_height`.** The rows each pane keeps before the rest of `ui.max_height` is shared out: to the header until the signature is fully wrapped, then the loupe up to five rows, then the outline. A pane with less content shrinks to fit it.
 - **`<C-d>` / `<C-u>` scroll the docstring view** from the outline.
 - **`ui.header_max_height` caps the header** (default 4 rows; below 1 turns it off), so a callable with dozens of parameters no longer takes the outline's rows. Past the cap the header keeps the required parameters, then the optional ones in order, and marks each gap `…`, the last `…+N` with N the hidden count, in the new `TypeScopeElided` group (linked to `DiagnosticWarn`). If the outline cursor's parameter is hidden, its gap mark lights up instead.
 - **`s` shows the whole signature** (`keymaps.signature`) over the frame when the header is elided, hung from the header and growing down over the other panes, titled `signature` or `signature [i/n]`. Row keys rest while it shows; `s`, `q` and `<Esc>` close it, `<C-d>` / `<C-u>` scroll it, `?` swaps it for help.
 
 ### Changed
 
+- **The ledger is now the outline, and its panel the inspector**, in the docs, the help tags (`:help typescope-outline`) and the code. The inspector's buffer filetype is `typescope_inspector`; anything that looked for `typescope_panel` needs the new name. `ui.layout` now warns whatever it is set to, since `"ledger"` is no longer the name of the only layout.
 - **The float is three panes with visible seams.** Header, outline and loupe are stacked on one side of the cursor, chosen when the float opens, and each seam is a full bottom border then a full top border in your `ui.border` style. The `├─┤` join is gone, and so is the float's ` typescope ` title.
 - **The header is its own pane, pinned above the outline.** It wraps the whole signature (cut, as above, only when it can't fit), stays put as the outline scrolls, and follows the overload group the cursor is in. Its bottom border carries the group's `[i/n]`, with a green `✓` beside it on the matched overload (`TypeScopeMatched`, linked to `DiagnosticOk`). Its height is fixed at the tallest group's, so the outline never shifts. Its filetype is `typescope_header`.
 - **The header lights the parameter your outline cursor is on**, with `TypeScopeActive` as the typing surface does. A field or member nested in a parameter's type lights that parameter; the return row lights nothing. It used to light signatureHelp's active parameter, which in practice never fired in the K float: with the cursor on an argument, hover resolves the argument, not the call.
 - **`d` shows the docstring in the loupe, in place of the inspector.** The outline stays visible and keeps the cursor, and the docstring view scrolls to the hovered parameter's `:param` section. It grows the frame away from your code line, squashing the outline and header to their minimums if it must, and `d` again restores every pane's size.
 - **`?` opens the help view over the frame.** It's titled `typescope help`, grows away from your code line, and leaves the panes under it their sizes. Row keys do nothing while it shows; `?` again returns to the inspector or docstring view underneath, and `d` goes to the docstring view. Its `? toggle this help` row is gone.
 - **The footer is just `? help`**, right-aligned on the frame's bottom border, in every view. The docstring's first sentence is no longer in it; `ui.docstring = false` now only turns off `d`.
-- **The ledger is now the outline, and its panel the inspector**, in the docs, the help tags (`:help typescope-outline`) and the code. The inspector's buffer filetype is `typescope_inspector`; anything that looked for `typescope_panel` needs the new name. `ui.layout` now warns whatever it is set to, since `"ledger"` is no longer the name of the only layout.
 
 ## [0.4.0] — 2026-10-03
 
@@ -160,6 +160,7 @@ First public release. Type structure for the Python function under your cursor: 
 - Four charsets, all plain Unicode/ASCII; no Nerd Font required.
 - Requires Neovim 0.10+, basedpyright, and the TreeSitter python parser.
 
+[0.5.0]: https://github.com/plongitudes/typescope.nvim/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/plongitudes/typescope.nvim/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/plongitudes/typescope.nvim/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/plongitudes/typescope.nvim/compare/v0.2.0...v0.2.1

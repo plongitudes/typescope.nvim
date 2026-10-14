@@ -204,8 +204,9 @@ the line of code at the cursor: when the frame sits below the cursor it grows
 up to the frame's top and then down past its bottom; when the frame sits
 above, it grows up past the frame's top. While it shows, the row keys
 (<CR>, l, h, H, e, j, k, <C-d>, <C-u>) do nothing, and any other motion (G,
-gg, a search) is put back, so the outline cannot move under it. `?` again returns to whatever the loupe showed before; `d` goes
-straight to the docstring view.
+gg, a search) is put back, so the outline cannot move under it. `?` again
+returns to whatever the loupe showed before; `d` goes straight to the
+docstring view.
 
                                                   *typescope-signature-view*
 When the header is elided (past `ui.header_max_height`, or squashed by the
@@ -256,7 +257,7 @@ Defaults in full: >lua
         animations = true,
         max_width = 0.5,
         max_height = 20,
-        min_height = { header = 1, outline = 5, inspector = 1 },
+        min_height = { header = 1, outline = 5, loupe = 1 },
         header_max_height = 4,
         border = "rounded",
         docstring = true,
@@ -316,13 +317,13 @@ ui.max_height ~
 
                                                    *typescope-ui-min-height*
 ui.min_height ~
-    Default `{ header = 1, outline = 5, inspector = 1 }`. The rows each pane
+    Default `{ header = 1, outline = 5, loupe = 1 }`. The rows each pane
     of the frame keeps before the rest of `ui.max_height` is shared out. A
     pane with less content than its minimum shrinks to fit it, so a
     one-parameter function does not get five outline rows. Leftover rows go
     to the header until its signature is fully wrapped, then to the
-    inspector up to five rows, then to the outline. On a screen too short for
-    the minimums, the outline, then the header, then the inspector give way,
+    loupe up to five rows, then to the outline. On a screen too short for
+    the minimums, the outline, then the header, then the loupe give way,
     down to a row each; the float still opens with as few as three rows.
 
                                            *typescope-ui-header-max-height*
@@ -363,12 +364,12 @@ The header's height is fixed at the tallest group's wrapped signature, up to
 `ui.header_max_height`, so the outline never shifts as you cross groups. A
 signature that cannot fit keeps its required parameters, then its optional
 ones in order while they fit, in their places: `f(a, b=1, *, c, d=2)` can
-keep `a` and `c`, showing `f(a, …, *, c, …+2)`. Each gap is marked `…`, the last `…+N`, N
-counting every hidden parameter, in `TypeScopeElided`. Required parameters
-that overrun alone are cut from the middle, keeping the start and the return
-type. When the outline cursor's parameter is hidden, the gap mark hiding it is
-lit instead, so the header holds still. `s` shows the whole signature
-(|typescope-signature-view|).
+keep `a` and `c`, showing `f(a, …, *, c, …+2)`. Each gap is marked `…`, the
+last `…+N`, N counting every hidden parameter, in `TypeScopeElided`. Required
+parameters that overrun alone are cut from the middle, keeping the start and
+the return type. When the outline cursor's parameter is hidden, the gap mark
+hiding it is lit instead, so the header holds still. `s` shows the whole
+signature (|typescope-signature-view|).
 
                                                       *typescope-outline-rows*
 The outline is one compact row per parameter (name, type, short default),

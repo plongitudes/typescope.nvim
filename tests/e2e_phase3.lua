@@ -842,7 +842,7 @@ do
   -- middle, not just its first rows), keeping the outline's cursor row in
   -- view; d again puts every pane back
   require("typescope").setup({
-    ui = { max_width = 30, max_height = 10, min_height = { header = 1, outline = 2, inspector = 1 } },
+    ui = { max_width = 30, max_height = 10, min_height = { header = 1, outline = 2, loupe = 1 } },
   })
   require("typescope").open()
   vim.wait(2000, function()
