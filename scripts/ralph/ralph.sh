@@ -94,7 +94,7 @@ if [ "$probe" -eq 1 ]; then
 4. touch ~/ralph-sandbox-probe   (EXPECTED to fail)
 5. curl -sS --max-time 5 https://example.com -o /dev/null   (EXPECTED to fail)
 6. ./tests/run.sh   (report every line that contains FAIL, SKIP or SUITE)
-7. stylua --check lua tests
+7. stylua --check lua tests && luacheck -q .
 8. git status --short && git commit --allow-empty -m 'RALPH probe' && git reset --soft HEAD~1
 Then summarise which of 1-3, 6-8 failed and why." | jq --unbuffered -rj "$stream_text"
   exit 0
@@ -149,6 +149,7 @@ Bead for this iteration: $id" | tee "$log" | jq --unbuffered -rj "$stream_text"
     exit 1
   fi
   (cd "$wt" && stylua --check lua tests) || { echo "=== stylua diff after $id; stopping"; exit 1; }
+  (cd "$wt" && luacheck -q .) || { echo "=== luacheck warnings after $id; stopping"; exit 1; }
 
   git -C "$wt" push -u origin "$branch"
   rm -f "$log"

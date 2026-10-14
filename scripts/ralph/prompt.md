@@ -20,7 +20,7 @@ Your Bash runs in a sandbox: you can write only inside this worktree (plus the s
 ## 3. Verify and commit
 
 - `./tests/run.sh` must end with `=== ALL SUITES PASS`, and no suite may print a `SKIP` line (a skipped oracle suite means the e2e seam didn't run, which is not a pass).
-- `stylua lua tests` must leave no diff.
+- `stylua lua tests` must leave no diff, and `luacheck .` must report no warnings (CI runs both; `tests/run.sh` runs neither).
 - Stage explicit paths only (never `git add -A` / `commit -a`). Commit on the current branch. Message:
 
   ```
