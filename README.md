@@ -6,7 +6,7 @@ See the *shape* of the types in a Python call, without leaving the call.
 
 <details>
 <summary>Full-resolution video</summary>
-
+  
 https://github.com/user-attachments/assets/b6391f46-8bc7-4573-b6ac-5e97d5044f92
 
 </details>
