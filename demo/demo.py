@@ -2,6 +2,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import NamedTuple, TypedDict, overload
 
+from sqlalchemy import ForeignKey
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
 
 class LogLevel(Enum):
     DEBUG = "debug"
@@ -70,6 +73,31 @@ def lookup(key: int | str, *, active: bool = True) -> User:
 
 def start(config: ServerConfig, owner: User) -> None:
     """Bring the service up with an owner on record."""
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class MealPlan(Base):
+    """One week of meals, and the grocery lists it generates."""
+
+    __tablename__ = "meal_plans"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    grocery_lists = relationship(
+        "GroceryList",
+        back_populates="meal_plan",
+        cascade="all, delete-orphan",
+    )
+
+
+class GroceryList(Base):
+    __tablename__ = "grocery_lists"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    meal_plan_id: Mapped[int] = mapped_column(ForeignKey("meal_plans.id"))
+    meal_plan = relationship("MealPlan", back_populates="grocery_lists")
 
 
 cfg = ServerConfig("0.0.0.0")

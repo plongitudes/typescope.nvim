@@ -46,26 +46,6 @@ if vim.uv.fs_stat(gruvbox) then
   vim.cmd.colorscheme("gruvbox-baby")
 end
 
--- keypresses in a corner float, so viewers can follow along. Installed by the
--- maintainer's lazy config; skipped when absent, and in stills.
-local screenkey = data .. "/lazy/screenkey.nvim"
-if not shot and vim.uv.fs_stat(screenkey) then
-  vim.opt.rtp:prepend(screenkey)
-  require("screenkey").setup({
-    -- no border: an idle screenkey would otherwise leave an empty box
-    win_opts = { width = 30, height = 1, border = "none", title = "" },
-    group_mappings = true,
-    -- typed text is already on screen, and arrives letter by letter
-    disable = { modes = { "i" } },
-    clear_after = 2,
-  })
-  vim.api.nvim_create_autocmd("VimEnter", {
-    callback = function()
-      require("screenkey").toggle()
-    end,
-  })
-end
-
 -- animated scrolling, as in the maintainer's config: the jump to the calls
 -- scrolls past the classes the floats will show instead of cutting to them
 local snacks = data .. "/lazy/snacks.nvim"
@@ -92,7 +72,11 @@ vim.lsp.config("basedpyright", {
   cmd = { vim.fn.executable(mason) == 1 and mason or "basedpyright-langserver", "--stdio" },
   filetypes = { "python" },
   root_markers = { "pyrefly.toml" },
-  settings = { basedpyright = { analysis = { typeCheckingMode = "off" } } },
+  settings = {
+    basedpyright = { analysis = { typeCheckingMode = "off" } },
+    -- SQLAlchemy for the relationship() beat, as demo/pyrefly.toml points the oracle
+    python = { pythonPath = demo .. "/.venv/bin/python" },
+  },
 })
 vim.lsp.enable("basedpyright")
 

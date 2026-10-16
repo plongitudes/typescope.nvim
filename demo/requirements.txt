@@ -1,0 +1,3 @@
+# The demo's one third-party import, for the relationship() beat. demo/record.sh
+# builds demo/.venv from this; demo/pyrefly.toml and demo/init.lua point at it.
+sqlalchemy==2.0.36
