@@ -7,10 +7,11 @@
 #   demo/record.sh && demo/encode.sh && demo/publish.sh
 #
 # Before running: KeyCastr open, Do Not Disturb on, and `ollama serve` up. Once
-# the window opens, it waits while you drag KeyCastr over the window's
-# bottom-right corner (only what's inside the window is captured). Hands off
-# the keyboard and mouse once it plays: play.js stops if anything other than
-# the demo window takes focus.
+# the window opens in front, a dialog waits while you drag KeyCastr over the
+# window's bottom-right corner, a little in from the edges (the capture is cut
+# 11pt inside them, past the rounded corners). Hands off the keyboard and mouse
+# once it plays: play.js stops if anything other than the demo window takes
+# focus.
 #
 # The terminal this runs from needs Accessibility (keystrokes), Automation for
 # System Events, and Screen Recording (ffmpeg); macOS asks on the first run.
@@ -45,7 +46,8 @@ done
 # the demo's Ghostty is whichever instance this open starts
 before=$(pgrep -x ghostty || true)
 
-# FontSize 28 and Padding 32 are VHS pixels: points on a 2x screen. The window
+# FontSize 28 and Padding 32 are VHS pixels: points on a 2x screen, and the
+# padding has play.js's 11pt corner inset on top. The window
 # opens at the top-left of the screen, under the menu bar, every run.
 open -na /Applications/Ghostty.app --args \
   --config-default-files=false \
@@ -53,7 +55,7 @@ open -na /Applications/Ghostty.app --args \
   --font-family="FantasqueSansM Nerd Font" --font-size=14 \
   --window-width=100 --window-height=28 \
   --window-position-x=0 --window-position-y=0 \
-  --window-padding-x=16 --window-padding-y=16 --window-padding-balance=true \
+  --window-padding-x=27 --window-padding-y=27 --window-padding-balance=true \
   --macos-titlebar-style=hidden \
   --window-save-state=never --confirm-close-surface=false \
   --background=#282828 --foreground=#ebdbb2 --cursor-color=#ebdbb2 --selection-background=#665c54 \
@@ -79,6 +81,9 @@ for _ in $(seq 50); do
 done
 sleep 1
 
-read -rp "Place KeyCastr over the demo window's bottom-right corner, then press Enter to record. "
+# in front of every other window, and kept there: the dialog takes the
+# click, so the terminal this runs from never comes back over it
+osascript -l JavaScript -e "Application('System Events').processes.whose({unixId: $pid})[0].frontmost = true" >/dev/null
+osascript -e 'display dialog "Place KeyCastr over the demo window'\''s bottom-right corner, a little in from the edges." with title "typescope demo" buttons {"Cancel", "Record"} default button "Record"' >/dev/null
 
 osascript -l JavaScript play.js typescope.tape "$demo/capture.mkv" "$pid"

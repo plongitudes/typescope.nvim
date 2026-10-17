@@ -19,6 +19,10 @@ const KEYCODES = { Enter: 36, Escape: 53, Left: 123, Right: 124, Up: 126, Down: 
 // capture settings: hardware encoding leaves the CPU to nvim and ollama
 const FFMPEG = "/opt/homebrew/bin/ffmpeg";
 const ENCODE = "-c:v h264_videotoolbox -b:v 50M";
+// The capture is of the screen, so the window's rounded corners and outline
+// would show what's behind it: crop inside them. record.sh adds as much to
+// Ghostty's padding, so the margin around the text stays the tape's Padding.
+const INSET = 11; // points
 
 const app = Application.currentApplication();
 app.includeStandardAdditions = true;
@@ -93,7 +97,7 @@ function startCapture(win, out) {
   const scale = $.NSScreen.mainScreen.backingScaleFactor;
   // yuv420 needs even sizes
   const even = (n) => Math.floor((n * scale) / 2) * 2;
-  const crop = `crop=${even(w)}:${even(h)}:${even(x)}:${even(y)}`;
+  const crop = `crop=${even(w - 2 * INSET)}:${even(h - 2 * INSET)}:${even(x + INSET)}:${even(y + INSET)}`;
   const log = out.replace(/\.\w+$/, ".log");
   const pid = sh(
     `${FFMPEG} -y -f avfoundation -capture_cursor 0 -framerate 30 -i 'Capture screen 0:none' ` +
