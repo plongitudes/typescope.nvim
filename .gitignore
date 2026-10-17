@@ -13,8 +13,9 @@ doc/tags
 # pyrefly at the commit in oracle/pyrefly.rev, fetched by scripts/build-oracle.sh
 /oracle/vendor/pyrefly/
 
-# the demo's capture, its mp4 (a GitHub upload), and its gif and stills (on the assets branch)
+# the demo's capture, its VHS preview frames, its mp4 (a GitHub upload), and its stills (on the assets branch)
 /demo/capture.*
+/demo/frames/
 /demo/*.mp4
 /demo/*.gif
 /demo/shots/
