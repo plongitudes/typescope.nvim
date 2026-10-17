@@ -42,12 +42,14 @@ for c in 282828 cc241d 98971a d79921 458588 b16286 689d6a a89984 928374 fb4934 b
   i=$((i + 1))
 done
 
-# FontSize 28 and Padding 32 are VHS pixels: points on a 2x screen
+# FontSize 28 and Padding 32 are VHS pixels: points on a 2x screen. The window
+# opens at the top-left of the screen, under the menu bar, every run.
 open -na /Applications/Ghostty.app --args \
   --config-default-files=false \
   --title=typescope-demo \
   --font-family="FantasqueSansM Nerd Font" --font-size=14 \
   --window-width=100 --window-height=28 \
+  --window-position-x=0 --window-position-y=0 \
   --window-padding-x=16 --window-padding-y=16 --window-padding-balance=true \
   --macos-titlebar-style=hidden \
   --window-save-state=never --confirm-close-surface=false \
