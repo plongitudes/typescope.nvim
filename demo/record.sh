@@ -42,6 +42,9 @@ for c in 282828 cc241d 98971a d79921 458588 b16286 689d6a a89984 928374 fb4934 b
   i=$((i + 1))
 done
 
+# the demo's Ghostty is whichever instance this open starts
+before=$(pgrep -x ghostty || true)
+
 # FontSize 28 and Padding 32 are VHS pixels: points on a 2x screen. The window
 # opens at the top-left of the screen, under the menu bar, every run.
 open -na /Applications/Ghostty.app --args \
@@ -59,18 +62,23 @@ open -na /Applications/Ghostty.app --args \
   --working-directory="$repo" \
   --command="/bin/zsh -f -c 'source $env; exec /bin/zsh -f -i'"
 
-# wait for the window; the shell inside it reads $env once, on start
+pid=
 for _ in $(seq 50); do
   sleep 0.2
-  osascript -l JavaScript -e 'Application("System Events").processes.whose({name: "ghostty"})().some(p => p.windows().some(w => w.name() === "typescope-demo"))' | grep -q true && break
+  pid=$(pgrep -x ghostty | grep -vxF "${before:-none}" | head -1 || true)
+  [ -n "$pid" ] && break
+done
+[ -n "$pid" ] || { echo "the demo's Ghostty didn't start" >&2; exit 1; }
+# close it on the way out, however play.js ends; never another instance
+trap 'rm -f "$env"; kill "$pid" 2>/dev/null || true' EXIT
+
+# by pid, not name: JXA resolves a listed process by its name (see play.js)
+for _ in $(seq 50); do
+  sleep 0.2
+  [ "$(osascript -l JavaScript -e "Application('System Events').processes.whose({unixId: $pid})[0].windows.length" 2>/dev/null)" -gt 0 ] 2>/dev/null && break
 done
 sleep 1
 
 read -rp "Place KeyCastr over the demo window's bottom-right corner, then press Enter to record. "
 
-status=0
-osascript -l JavaScript play.js typescope.tape "$demo/capture.mkv" || status=$?
-
-# close the demo's Ghostty instance, not the others
-osascript -l JavaScript -e 'Application("System Events").processes.whose({name: "ghostty"})().filter(p => p.windows().some(w => w.name() === "typescope-demo")).map(p => p.unixId()).join(" ")' | xargs -r kill
-exit $status
+osascript -l JavaScript play.js typescope.tape "$demo/capture.mkv" "$pid"

@@ -2,7 +2,8 @@
 // captures that window with ffmpeg from the tape's Show to its end. Real
 // keystrokes, unlike VHS's, so KeyCastr sees them and lands in the capture.
 //
-//   osascript -l JavaScript demo/play.js <tape> <capture.mkv> [--dry-run]
+//   osascript -l JavaScript demo/play.js <tape> <capture.mkv> <ghostty pid>
+//   osascript -l JavaScript demo/play.js <tape> --dry-run
 //
 // --dry-run prints the parsed commands and the total scripted time instead.
 //
@@ -13,7 +14,6 @@
 ObjC.import("AppKit");
 ObjC.import("Foundation");
 
-const TITLE = "typescope-demo"; // record.sh's --title
 const DEFAULT_SPEED = 0.07; // the tape's Set TypingSpeed
 const KEYCODES = { Enter: 36, Escape: 53, Left: 123, Right: 124, Up: 126, Down: 125, Backspace: 51, Tab: 48, Space: 49 };
 // capture settings: hardware encoding leaves the CPU to nvim and ollama
@@ -71,29 +71,16 @@ function scripted(cmds) {
   }, 0);
 }
 
-// the demo window, from any Ghostty process: `open -na` starts a new one
-function demoWindow() {
-  for (const p of se.processes.whose({ name: "ghostty" })()) {
-    for (const w of p.windows()) {
-      if (w.name() === TITLE) return { proc: p, win: w };
-    }
-  }
-  return null;
-}
-
-function frontTitle() {
-  const p = se.processes.whose({ frontmost: true })[0];
-  try {
-    return p.windows[0].name();
-  } catch (e) {
-    return "";
-  }
+// Processes go by pid only: JXA resolves a process taken from a list by its
+// name, so every Ghostty instance would come back as the first one.
+function demoProcess(pid) {
+  return se.processes.whose({ unixId: pid })[0];
 }
 
 // keys only ever go to the demo window: if anything else took focus, stop
-function guard() {
-  const t = frontTitle();
-  if (t !== TITLE) throw new Error(`focus left the demo window (now on "${t}"); stopped`);
+function guard(pid) {
+  const front = se.processes.whose({ frontmost: true }).unixId()[0];
+  if (front !== pid) throw new Error(`focus left the demo window (now on pid ${front}); stopped`);
 }
 
 function sh(cmd) {
@@ -125,12 +112,12 @@ function stopCapture(pid) {
   sh(`kill -INT ${pid} 2>/dev/null; while kill -0 ${pid} 2>/dev/null; do sleep 0.1; done`);
 }
 
-function play(cmds, out) {
-  const found = demoWindow();
-  if (!found) throw new Error(`no Ghostty window titled ${TITLE}; run demo/record.sh`);
-  found.proc.frontmost = true;
+function play(cmds, out, pid) {
+  const proc = demoProcess(pid);
+  if (proc.windows.length === 0) throw new Error(`Ghostty pid ${pid} has no window; run demo/record.sh`);
+  proc.frontmost = true;
   delay(0.5);
-  let pid = null;
+  let ffmpeg = null;
   try {
     for (const c of cmds) {
       if (c.op === "sleep") {
@@ -139,10 +126,10 @@ function play(cmds, out) {
       }
       if (c.op === "hide") continue;
       if (c.op === "show") {
-        if (!pid) pid = startCapture(found.win, out);
+        if (!ffmpeg) ffmpeg = startCapture(proc.windows[0], out);
         continue;
       }
-      guard();
+      guard(pid);
       if (c.op === "type") {
         for (const ch of c.text) {
           se.keystroke(ch);
@@ -159,19 +146,20 @@ function play(cmds, out) {
       }
     }
   } finally {
-    if (pid) stopCapture(pid);
+    if (ffmpeg) stopCapture(ffmpeg);
   }
 }
 
 function run(argv) {
-  const [tape, out, flag] = argv;
-  if (!tape || !out) throw new Error("usage: play.js <tape> <capture.mkv> [--dry-run]");
+  const [tape, out, pid] = argv;
+  if (!tape || !out) throw new Error("usage: play.js <tape> <capture.mkv> <ghostty pid> | <tape> --dry-run");
   const text = $.NSString.stringWithContentsOfFileEncodingError(tape, $.NSUTF8StringEncoding, null).js;
   const cmds = parse(text);
-  if (flag === "--dry-run") {
+  if (out === "--dry-run") {
     const shown = cmds.slice(cmds.findIndex((c) => c.op === "show"));
     return cmds.map((c) => JSON.stringify(c)).join("\n") + `\n\nscripted time from Show: ${scripted(shown).toFixed(1)}s`;
   }
-  play(cmds, out);
+  if (!/^\d+$/.test(pid || "")) throw new Error(`not a pid: ${pid}`);
+  play(cmds, out, Number(pid));
   return `captured ${out}`;
 }
