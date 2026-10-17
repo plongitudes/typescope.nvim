@@ -6,10 +6,11 @@
 #
 #   demo/record.sh && demo/encode.sh && demo/publish.sh
 #
-# Before running: KeyCastr open and placed over where the window's bottom-right
-# corner will be (it's captured only inside the window), Do Not Disturb on, and
-# `ollama serve` up. Hands off the keyboard and mouse while it plays: play.js
-# stops if anything other than the demo window takes focus.
+# Before running: KeyCastr open, Do Not Disturb on, and `ollama serve` up. Once
+# the window opens, it waits while you drag KeyCastr over the window's
+# bottom-right corner (only what's inside the window is captured). Hands off
+# the keyboard and mouse once it plays: play.js stops if anything other than
+# the demo window takes focus.
 #
 # The terminal this runs from needs Accessibility (keystrokes), Automation for
 # System Events, and Screen Recording (ffmpeg); macOS asks on the first run.
@@ -62,6 +63,8 @@ for _ in $(seq 50); do
   osascript -l JavaScript -e 'Application("System Events").processes.whose({name: "ghostty"})().some(p => p.windows().some(w => w.name() === "typescope-demo"))' | grep -q true && break
 done
 sleep 1
+
+read -rp "Place KeyCastr over the demo window's bottom-right corner, then press Enter to record. "
 
 status=0
 osascript -l JavaScript play.js typescope.tape "$demo/capture.mkv" || status=$?
