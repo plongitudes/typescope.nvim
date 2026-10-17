@@ -2,14 +2,7 @@
 
 See the *shape* of the types in a Python call, without leaving the call.
 
-![TypeScope demo: the insert surface following the active parameter and the overload, then K on two classes](https://raw.githubusercontent.com/plongitudes/typescope.nvim/assets/typescope.gif)
-
-<details>
-<summary>Full-resolution video</summary>
-
-https://github.com/user-attachments/assets/afdacd9f-901c-4971-a015-4c39c6c2a1a4
-
-</details>
+https://github.com/user-attachments/assets/61992f3c-88bb-4a30-b382-8f20cdb5501e
 
 TypeScope _(like 'periscope'! Get it? ... wow, tough crowd.)_ asks a type checker what the symbol under your cursor *is* — a function's parameters and return, the structure of a class, a variable's type and innards — and shows the result in a floating pane, structured hierarchically so that you can dive further in when needed. Where a parameter is a dataclass, a Pydantic model, a TypedDict, a NamedTuple, an Enum, a Protocol or a plain class with annotated attributes, you get its fields — not just its name. Generics arrive specialized (`Box[ServerConfig]` shows `item ServerConfig`), an unannotated local shows the type the checker inferred (drawn `≈`), and a narrowed variable shows its narrowed type.
 
